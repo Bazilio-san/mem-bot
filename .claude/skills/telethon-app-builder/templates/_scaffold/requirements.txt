@@ -1,0 +1,3 @@
+# Pin the major to avoid surprise API changes. v1 stable line.
+telethon==1.43.*
+python-dotenv>=1.0

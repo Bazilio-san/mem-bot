@@ -1,0 +1,2 @@
+Потом скаячай в .claude скилл building-pydantic-ai-agents отсюда: https://github.com/pydantic/skills/tree/main/skills/building-pydantic-ai-agents (скилл и папку references                                                                          
+  https://github.com/pydantic/skills/tree/main/skills/building-pydantic-ai-agents/references)  

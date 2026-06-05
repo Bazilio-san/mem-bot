@@ -1,0 +1,15 @@
+{
+  "_comment": "Fli MCP server registration. For Claude Code use .mcp.json; for Claude Desktop use claude_desktop_config.json (macOS: ~/Library/Application Support/Claude/, Windows: %APPDATA%\\Claude\\, Linux: ~/.config/Claude/). Install first with: pipx install \"flights[mcp]\". If the client cannot find the command, replace \"fli-mcp\" with the absolute path from `which fli-mcp`. The env block is optional — it overrides server defaults.",
+  "mcpServers": {
+    "fli": {
+      "command": "fli-mcp",
+      "args": [],
+      "env": {
+        "FLI_MCP_DEFAULT_CURRENCY": "USD",
+        "FLI_MCP_DEFAULT_CABIN_CLASS": "ECONOMY",
+        "FLI_MCP_DEFAULT_SORT_BY": "CHEAPEST",
+        "FLI_MCP_MAX_RESULTS": "10"
+      }
+    }
+  }
+}

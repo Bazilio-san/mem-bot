@@ -5,6 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "agents:link": "node scripts/claude-2-agents-symlink.js setup",
+    "agents:link:status": "node scripts/claude-2-agents-symlink.js status",
+    "agents:link:remove": "node scripts/claude-2-agents-symlink.js remove"
   },
   "private": true,
   "dependencies": {},
