@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "env": {
+    "DISABLE_CLAUDE_NOTIFIER": 0,
+    "CLAUDE_NOTIFY_TELEGRAM": 1,
+    "CLAUDE_NOTIFY_WINDOWS": 1,
+    "CLAUDE_NOTIFY_SOUND": 0,
+    "CLAUDE_NOTIFY_VOICE": 0,
+    "CLAUDE_NOTIFY_WAITING": 0,
+    "CLAUDE_NOTIFY_DEBUG": 0
+  }
+}
