@@ -15,7 +15,7 @@
 
 ---
 
-## Расширения, схема и ENUM-типы
+## [DATA-1] Расширения, схема и ENUM-типы
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -36,7 +36,7 @@ CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed
 
 ---
 
-## Пользователи и домены
+## [DATA-2] Пользователи и домены
 
 `mem.users` хранит пользователей; `external_id` связывает запись с внешней системой (Telegram ID, CRM ID, идентификатор
 авторизации); `timezone` нужен планировщику и темпоральному контексту. `mem.agent_domains` описывает специализации
@@ -79,7 +79,7 @@ ON CONFLICT (domain_key) DO NOTHING;
 
 ---
 
-## Диалоги, сообщения и сводки
+## [DATA-3] Диалоги, сообщения и сводки
 
 `mem.conversations` — отдельные диалоги; `current_state` хранит оперативное состояние задачи. `mem.conversation_messages`
 — сырые сообщения; в промпт идут только последние несколько. `mem.conversation_summaries` хранит сжатую краткосрочную
@@ -135,7 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversatio
 
 ---
 
-## Главная таблица памяти `memory_items`
+## [DATA-4] Главная таблица памяти `memory_items`
 
 Одна универсальная таблица закрывает и профильную, и предметную память. Различие задаёт поле `scope`: `profile`, `domain`,
 `dialog`, `system`. Человекочитаемый текст факта — в `memory_text` (он попадает в промпт), структурированные данные домена
@@ -184,12 +184,12 @@ CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw     ON mem.memory_items USI
                                                           WHERE embedding IS NOT NULL;
 ```
 
-Размерность `vector(1536)` соответствует модели `text-embedding-3-small`. Если векторный поиск не нужен, поле `embedding`
+Размерность `vector(1536)` соответствует модели `<EMBED_MODEL>`. Если векторный поиск не нужен, поле `embedding`
 и HNSW-индекс можно убрать — система корректно откатывается на полнотекстовый и структурный поиск.
 
 ---
 
-## Защищённая память
+## [DATA-5] Защищённая память
 
 Секретные данные хранятся в `mem.secure_records` в зашифрованном виде (`encrypted_payload bytea`), а в обычную память и
 в промпт идёт только безопасное описание `redacted_summary`. Таблица `memory_secure_links` связывает безопасный факт с
@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS mem.memory_secure_links (
 
 ---
 
-## Планировщик: задачи, запуски, исходящие уведомления
+## [DATA-6] Планировщик: задачи, запуски, исходящие уведомления
 
 `scheduled_tasks` хранит напоминания и фоновые проверки; главное поле — `next_run_at`. Поля `locked_by` и `locked_until`
 обеспечивают безопасный захват задачи одним воркером. `scheduled_task_runs` хранит историю запусков,
@@ -303,12 +303,11 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_a
 
 ---
 
-## Журнал инструментов и очередь записи памяти
+## [DATA-7] Журнал инструментов и очередь записи памяти
 
 `tool_calls` — журнал всех вызовов инструментов (вход, выход, статус, задержка, ошибка) для отладки, аудита и
-безопасности. `memory_jobs` — таблица для будущей очереди асинхронной записи памяти отдельным воркером. Сейчас запись
-памяти запускается после ответа неблокирующим промисом внутри процесса ответа, поэтому `memory_jobs` пока не
-задействована.
+безопасности. Таблица `memory_jobs` предназначена для будущей очереди асинхронной записи памяти отдельным воркером; в
+базовом контуре запись запускается после ответа неблокирующим промисом внутри процесса ответа.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.tool_calls (
@@ -351,7 +350,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_a
 
 ---
 
-## Три таблицы проактивности (миграция `002_proactive.sql`)
+## [DATA-8] Три таблицы проактивности (миграция `002_proactive.sql`)
 
 Аддитивная идемпотентная миграция добавляет три таблицы, не меняя базовые. Назначение и поведение — в
 [09-proactivity.md](09-proactivity.md).
