@@ -1,0 +1,120 @@
+# 03. Быстрый старт и структура проекта
+
+## Вкратце
+
+Нужны Node.js 22+ и PostgreSQL 16 с расширениями `pgvector` и `pgcrypto`. После заполнения `.env` и запуска миграции
+бот готов: интерактивный чат `npm run chat`, воркер напоминаний и проактивности `npm run scheduler`, проверки `npm test`.
+Проактивность включается флагами окружения и по умолчанию выключена.
+
+## Зачем порядок важен
+
+Сначала фундамент и проверка структуры, потом поведение. База памяти должна существовать и проходить проверку структуры
+до того, как писать логику пайплайна.
+
+---
+
+## Требования окружения
+
+- Node.js 22 и новее, тип модулей ESM (`"type": "module"` в `package.json`).
+- PostgreSQL 16 с расширениями `pgvector` (смысловой поиск по эмбеддингам) и `pgcrypto` (генерация UUID и хеши).
+- Заполненный `.env`: строка подключения к базе (`DATABASE_URL`), ключ и адрес LLM-прокси (`OPENAI_API_KEY`,
+  `OPENAI_BASE_URL`), секрет шифрования `AUTH_SECRET`. Опционально — переопределение моделей и базы.
+
+---
+
+## Команды
+
+```bash
+npm install            # установка зависимостей: openai, pg, dotenv
+npm run migrate        # создаёт базу agent_mem, схему mem, все таблицы и индексы (идемпотентно)
+npm run chat           # интерактивный чат в терминале
+npm run scheduler      # воркер планировщика напоминаний и проактивности
+npm test               # полный прогон проверок
+npm run check:llm      # проверка моделей через LiteLLM-прокси
+```
+
+В интерактивном чате доступны команды: `/domain <ключ>` — сменить специализацию (`general`, `travel`, `landing_sales`,
+`math_tutor`); `/tick` — прогнать планировщик вручную; `/proactive <тип>` — запустить проактивный триггер вручную
+(например, `/proactive welcome_back`); `/exit` — выход.
+
+---
+
+## Флаги проактивности (по умолчанию всё выключено)
+
+| Переменная | Назначение | По умолчанию |
+|------------|------------|--------------|
+| `COMPANION_MODE` | темпоральный и тематический контекст в ответах плюс извлечение тем | выключено |
+| `PROACTIVE_ENABLED` | проактивный контур (триггеры, анти-спам, авто-создание триггеров, доставка) | выключено |
+| `PROACTIVE_EVENTS_ENABLED` | контур внешних событий (требует `PROACTIVE_ENABLED`) | выключено |
+| `PROACTIVE_INTERVAL_MS` | как часто воркер проверяет триггеры | 300000 (5 минут) |
+| `PROACTIVE_INACTIVITY_MIN` | порог молчания для триггера `inactivity` | 1440 |
+| `PROACTIVE_CHECKIN_HOUR` | час ежедневного приветствия | 10 |
+| `PROACTIVE_GOAL_INTERVAL_MIN` | интервал напоминания о целях | 2880 |
+| `PROACTIVE_WELCOME_GAP_MIN` | пауза, после которой пользователь считается вернувшимся | 60 |
+| `NEWS_RELEVANCE_THRESHOLD` | порог релевантности внешнего события | 0.6 |
+
+Пример включения всего набора собеседника:
+
+```bash
+COMPANION_MODE=on PROACTIVE_ENABLED=on PROACTIVE_EVENTS_ENABLED=on npm run scheduler
+```
+
+---
+
+## Структура каталогов
+
+```text
+migrations/001_init.sql      схема памяти: 13 базовых таблиц, типы, индексы, базовые домены
+migrations/002_proactive.sql три таблицы проактивности (темы, триггеры, доставленные события)
+src/config.js                конфигурация, выбор моделей и флаги проактивности (из .env)
+src/db.js                    пул подключений PostgreSQL плюс помощник vectorToSql
+src/llm.js                   клиент LLM: чат, строгий JSON (chatJSON), эмбеддинги
+src/migrate.js               бутстрап базы и применение миграций
+src/repo.js                  пользователи, домены, диалоги, сообщения, журнал инструментов, помощники проактивности
+src/agent.js                 главный пайплайн ответа (handleMessage) с ветками собеседника под флагами
+src/cli.js                   интерактивный чат в терминале
+src/scheduler-run.js         воркер планировщика и проактивности
+src/utils/temporal.js        темпоральный контекст (критерий 14)
+src/pipeline/classify.js     этап 1: классификация запроса
+src/pipeline/retrieve.js     выборка памяти, ранжирование, минимизация, сборка MEMORY_CONTEXT
+src/pipeline/extract.js      извлечение кандидатов в память и тем после ответа
+src/pipeline/merge.js        фильтр приватности, поиск похожих, дедупликация, запись
+src/pipeline/secure.js       защищённая память: шифрование, согласие, маскирование
+src/pipeline/scheduler.js    извлечение задач, создание, воркер, повторы, перепланирование
+src/pipeline/tools.js        описания и исполнители инструментов агента
+src/pipeline/admin.js        просмотр и удаление памяти пользователем
+src/pipeline/topics.js       тематический трекинг (критерий 13)
+src/pipeline/proactive.js    триггеры проактивности и анти-спам (критерии 15, 16)
+src/pipeline/proactiveMessage.js  генератор проактивного сообщения
+src/pipeline/events.js       внешние события и фильтр релевантности (критерий 17)
+tests/run.js                 комплексная проверка по слоям (36 базовых плюс слой 6)
+tests/memory_cases.json      набор кейсов извлечения фактов
+tests/check-llm.js           проверка доступности и возможностей моделей через прокси
+```
+
+---
+
+## Сборка с нуля (порядок)
+
+1. **Фундамент.** Поднять Node.js 22 и PostgreSQL 16 с расширениями. Завести `package.json` (ESM, зависимости `openai`,
+   `pg`, `dotenv`) и `.env`.
+2. **Схема памяти.** Написать `migrations/001_init.sql` (см. [05-data-schema.md](05-data-schema.md)), сделать миграцию
+   идемпотентной, реализовать `src/migrate.js`. Проверить структуру до написания логики.
+3. **Инфраструктура.** `src/db.js`, `src/config.js`, `src/llm.js`, `src/repo.js`.
+4. **Выборка памяти.** `src/pipeline/retrieve.js` — см. [06-memory.md](06-memory.md).
+5. **Контур записи.** `src/pipeline/extract.js` и `src/pipeline/merge.js` — см. [06-memory.md](06-memory.md).
+6. **Приватность.** `src/pipeline/secure.js` — см. [07-secure-privacy.md](07-secure-privacy.md).
+7. **Планировщик.** `src/pipeline/scheduler.js` и воркер — см. [10-operations.md](10-operations.md).
+8. **Инструменты и агент.** `src/pipeline/tools.js` и `src/agent.js` — см. [04-architecture.md](04-architecture.md).
+9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
+10. **Проактивность.** Миграция `002`, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под
+    флагами — см. [09-proactivity.md](09-proactivity.md). Полный код шаг за шагом — в
+    `ai-bot-proactivity-implementation-plan.md` в корне проекта.
+
+---
+
+## Связанные документы
+
+- Полный DDL — [05-data-schema.md](05-data-schema.md)
+- Конфигурация и выбор моделей — [08-prompts-and-models.md](08-prompts-and-models.md)
+- Проактивность — [09-proactivity.md](09-proactivity.md)
