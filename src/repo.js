@@ -1,5 +1,6 @@
 // Слой доступа к данным: пользователи, домены, диалоги, сообщения.
 import { query } from './db.js';
+import { estimateTokens } from './pipeline/token-counter.js';
 
 // Найти или создать пользователя по внешнему идентификатору (например, Telegram ID).
 export async function ensureUser(externalId, { displayName = null, locale = 'ru', timezone = 'Europe/Moscow' } = {}) {
@@ -39,15 +40,81 @@ export async function ensureConversation(userId, domainKey = 'general') {
   return rows[0];
 }
 
-// Сохранить одно сообщение диалога.
+// Сохранить одно сообщение диалога. Дополнительно проставляет token_count (оценка размера сообщения),
+// который нужен для подсчёта размера холодной зоны при поджатии истории. Поля tool_name и tool_call_id
+// (журнал вызовов инструментов) и обновление updated_at диалога сохраняются без изменений.
 export async function saveMessage(conversationId, userId, role, content, extra = {}) {
+  const tokenCount = estimateTokens(content);
   const { rows } = await query(
-    `INSERT INTO mem.conversation_messages (conversation_id, user_id, role, content, tool_name, tool_call_id, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO mem.conversation_messages
+       (conversation_id, user_id, role, content, tool_name, tool_call_id, token_count, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
-    [conversationId, userId, role, content, extra.toolName ?? null, extra.toolCallId ?? null, extra.metadata ?? {}],
+    [conversationId, userId, role, content,
+      extra.toolName ?? null, extra.toolCallId ?? null, tokenCount, extra.metadata ?? {}],
   );
   await query('UPDATE mem.conversations SET updated_at = now() WHERE id = $1', [conversationId]);
+  return rows[0];
+}
+
+// Получить активную сводку холодной зоны диалога (последнюю помеченную is_active).
+export async function getActiveConversationSummary(conversationId) {
+  const { rows } = await query(
+    `SELECT * FROM mem.conversation_summaries
+     WHERE conversation_id = $1 AND is_active = true
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [conversationId],
+  );
+  return rows[0] || null;
+}
+
+// Деактивировать все активные сводки диалога (перед вставкой новой активной).
+export async function markOldSummariesInactive(conversationId) {
+  await query(
+    `UPDATE mem.conversation_summaries
+     SET is_active = false
+     WHERE conversation_id = $1 AND is_active = true`,
+    [conversationId],
+  );
+}
+
+// Сообщения холодной зоны, ещё не покрытые активной сводкой: старше границы горячего окна
+// (beforeCreatedAt) и новее последнего покрытого сообщения (afterMessageId). По возрастанию времени.
+export async function getColdPendingMessages({ conversationId, beforeCreatedAt, afterMessageId = null }) {
+  const { rows } = await query(
+    `SELECT id, role, content, tool_name, token_count, created_at
+     FROM mem.conversation_messages
+     WHERE conversation_id = $1
+       AND created_at < $2
+       AND ($3::uuid IS NULL OR created_at > (
+             SELECT created_at FROM mem.conversation_messages WHERE id = $3))
+     ORDER BY created_at ASC`,
+    [conversationId, beforeCreatedAt, afterMessageId],
+  );
+  return rows;
+}
+
+// Сохранить новую активную сводку холодной зоны. Предыдущие активные сводки деактивируются.
+// Размеры в токенах (source_token_count, summary_token_count) приходят посчитанными нашим кодом.
+export async function saveConversationSummary({
+  conversationId, userId, summaryText, stateJson = {}, importance = 0.5,
+  layer = 'full', coveredFromMessageId = null, coveredToMessageId = null, coveredUntil = null,
+  sourceMessageCount = 0, sourceTokenCount = 0, summaryTokenCount = 0, memoryDedupe = {},
+}) {
+  await markOldSummariesInactive(conversationId);
+  const { rows } = await query(
+    `INSERT INTO mem.conversation_summaries (
+       conversation_id, user_id, summary_text, state_json, importance,
+       layer, covered_from_message_id, covered_to_message_id, covered_until,
+       source_message_count, source_token_count, summary_token_count, memory_dedupe,
+       summary_version, is_active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,true)
+     RETURNING *`,
+    [conversationId, userId, summaryText, stateJson, importance,
+      layer, coveredFromMessageId, coveredToMessageId, coveredUntil,
+      sourceMessageCount, sourceTokenCount, summaryTokenCount, memoryDedupe],
+  );
   return rows[0];
 }
 

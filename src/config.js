@@ -71,7 +71,25 @@ export const config = {
       relevanceThreshold: Number(env.NEWS_RELEVANCE_THRESHOLD || 0.6),
     },
   },
+
+  // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.
+  // Последние hotWindow сообщений всегда передаются дословно; всё, что старше, сжимается в дайджест.
+  historyCompression: {
+    enabled: flag(env.HISTORY_COMPRESSION_ENABLED, false),
+    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8),       // сколько последних сообщений не сжимать вообще
+    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000),    // порог запуска сжатия холодной зоны
+    shrinkTokens: Number(env.HISTORY_SHRINK_TOKENS || 800), // целевой максимум размера дайджеста
+    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15').split(',').map(Number), // ближняя/средняя/дальняя
+    model: env.HISTORY_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
+    minCompressGain: Number(env.HISTORY_MIN_COMPRESS_GAIN || 0.35), // минимальный выигрыш сжатия, иначе не перезаписываем
+  },
 };
+
+// Гистерезис: целевой размер дайджеста должен быть строго меньше порога запуска,
+// иначе сжатие будет срабатывать сразу после самого себя и зациклится.
+if (config.historyCompression.shrinkTokens >= config.historyCompression.maxTokens) {
+  throw new Error('HISTORY_SHRINK_TOKENS должен быть меньше HISTORY_MAX_TOKENS');
+}
 
 export function debugEnabled(category) {
   return config.debug.includes('*') || config.debug.includes(category);

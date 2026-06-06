@@ -14,6 +14,7 @@ import { persistCandidates } from './pipeline/merge.js';
 import { toolDefs, executeTool } from './pipeline/tools.js';
 import { buildTemporalContext, formatTemporalContext } from './utils/temporal.js';
 import { getTopicContext, formatTopicContext, upsertTopicMentions } from './pipeline/topics.js';
+import { buildHistoryContext } from './pipeline/history-context.js';
 
 const MAIN_SYSTEM = `Ты агентское приложение с инструментами и долговременной памятью.
 Правила:
@@ -91,11 +92,19 @@ ${topicsBlock}
     });
   }
 
+  // Сжатая история диалога. При выключенном HISTORY_COMPRESSION_ENABLED возвращает '' — поведение прежнее.
+  // Внутри при превышении порога холодная зона пересжимается, поэтому блок к моменту ответа уже готов.
+  const historyContext = await buildHistoryContext({
+    userId: user.id, conversationId: conversation.id, domainKey: effectiveDomain, memory,
+  });
+
   // Этап 3: ответ модели с циклом инструментов.
-  const history = await getRecentMessages(conversation.id, 8);
+  // Горячее окно: последние N сообщений передаются дословно (по умолчанию 8 — как было раньше).
+  const history = await getRecentMessages(conversation.id, config.historyCompression.hotWindow);
   const messages = [
     { role: 'system', content: MAIN_SYSTEM },
     { role: 'system', content: memoryContext },
+    ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
     ...extraSystem,
     ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
     { role: 'user', content: userMessage },
