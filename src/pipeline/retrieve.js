@@ -5,9 +5,11 @@ import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 import { getDomainId } from '../repo.js';
 import { listSecureSummaries } from './secure.js';
+import { config } from '../config.js';
 
 // Жёсткие лимиты минимизации (из раздела 10.7 архитектуры).
-const LIMITS = { profile: 7, dialog: 5, domain: 12, reminder: 3, secure: 3, total: 30 };
+// Значения берутся из конфигурации (переменные окружения MEMORY_LIMIT_*), по умолчанию — прежние константы.
+const LIMITS = config.memoryLimits;
 
 // Веса итогового ранжирования (раздел 10.6).
 function scoreItem(it, relevance) {

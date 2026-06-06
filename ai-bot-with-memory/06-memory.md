@@ -19,7 +19,8 @@
 1. **Краткосрочная память диалога.** Последние восемь сообщений (через `getRecentMessages`) плюс факты со
    `scope = 'dialog'`. Сжатые резюме длинной истории хранятся в `conversation_summaries`.
 2. **Профильная память.** Устойчивые факты о человеке и стиле общения (`scope = 'profile'`). Нужна почти при каждом
-   ответе, но строго ограничена — не более семи фактов в промпте.
+   ответе, но строго ограничена — по умолчанию не более семи фактов в промпте (настраивается переменной окружения
+   `MEMORY_LIMIT_PROFILE`).
 3. **Универсальная предметная память.** Зависит от специализации, но с общей структурой. Всё лежит в одной таблице
    `memory_items` со `scope = 'domain'` и привязкой к домену через `domain_id`; специфику задают `entity_type`,
    `entity_key` и `data jsonb`. Выборка всегда фильтруется по текущему домену.
@@ -30,10 +31,10 @@
 Примеры записей предметной памяти для разных доменов:
 
 ```json
-{ "domain_key": "travel", "entity_type": "flight_preference", "memory_kind": "preference",
+{ "domain_key": "flight_search", "entity_type": "flight_preference", "memory_kind": "preference",
   "data": { "avoid": ["night_flights", "long_layovers"], "preferred_departure_city": "Moscow" } }
-{ "domain_key": "landing_sales", "entity_type": "lead", "memory_kind": "state",
-  "data": { "business_niche": "beauty_salon", "budget_range": "50k-80k RUB", "objections": ["price"] } }
+{ "domain_key": "joke_teller", "entity_type": "joke_preference", "memory_kind": "preference",
+  "data": { "liked_categories": ["programmers", "everyday_life"], "disliked_topics": ["politics"], "told_joke_ids": ["j-101", "j-204"] } }
 { "domain_key": "math_tutor", "entity_type": "student_skill", "memory_kind": "progress",
   "data": { "topic": "quadratic_equations", "level": "weak", "last_errors": ["confuses discriminant"] } }
 ```
@@ -48,8 +49,9 @@
 считается взвешенной формулой, после чего применяются жёсткие лимиты.
 
 ```js
-// Жёсткие лимиты минимизации.
-const LIMITS = { profile: 7, dialog: 5, domain: 12, reminder: 3, secure: 3, total: 30 };
+// Жёсткие лимиты минимизации. Значения берутся из конфигурации (config.memoryLimits),
+// которая читает переменные окружения MEMORY_LIMIT_* и по умолчанию даёт прежние числа.
+const LIMITS = config.memoryLimits; // { profile: 7, dialog: 5, domain: 12, reminder: 3, secure: 3, total: 30 }
 
 function scoreItem(it, relevance) {
   const recency = it.updated_at ? recencyScore(it.updated_at) : 0.5;
