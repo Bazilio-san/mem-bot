@@ -62,8 +62,8 @@
 - **Реализовать или воспроизвести.** [03-quickstart](03-quickstart.md) → [05-data-schema](05-data-schema.md) →
   [04-architecture](04-architecture.md) → [06-memory](06-memory.md) → [07-secure-privacy](07-secure-privacy.md) →
   [08-prompts-and-models](08-prompts-and-models.md) → [10-operations](10-operations.md). Код реализации — каталог `src/`.
-- **Добавить проактивность.** [09-proactivity.md](09-proactivity.md) → [05-data-schema](05-data-schema.md) (три новые
-  таблицы) → [10-operations](10-operations.md) (тесты слоя 6).
+- **Добавить проактивность.** [09-proactivity.md](09-proactivity.md) → [05-data-schema](05-data-schema.md) (три таблицы
+  проактивности) → [10-operations](10-operations.md) (тесты слоя 6).
 - **Добавить поджатие истории.** [13-history-compression.md](13-history-compression.md) → [05-data-schema](05-data-schema.md)
   (миграция `003`) → [08-prompts-and-models](08-prompts-and-models.md) (промпт суммаризатора) → [10-operations](10-operations.md)
   (слой `layerHistory`).

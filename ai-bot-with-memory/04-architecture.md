@@ -70,7 +70,7 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
   // [companion] При COMPANION_MODE собирается дополнительный справочный блок: время + темы (см. 09-proactivity).
 
   // Этап 3: ответ модели с циклом инструментов (до 5 шагов).
-  // Горячее окно: при выключенном флаге это прежние последние 8 сообщений; при включённом — config.historyCompression.hotWindow.
+  // Горячее окно: при выключенном флаге это последние 8 сообщений; при включённом — config.historyCompression.hotWindow.
   const history = await getRecentMessages(conversation.id, 8);
   const messages = [
     { role: 'system', content: MAIN_SYSTEM },

@@ -2,8 +2,8 @@
 
 ## Вкратце
 
-Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem`. Базовая миграция `001_init.sql` создаёт тринадцать
-таблиц, типы и индексы; миграция `002_proactive.sql` добавляет три таблицы проактивности — итого шестнадцать. Обе
+Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего шестнадцать таблиц. Их определяют миграции:
+`001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности. Все
 миграции идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и
 `pgvector`.
 
@@ -126,11 +126,11 @@ CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
 CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversation_summaries (conversation_id, created_at DESC);
 ```
 
-Слой поджатия истории диалога наполняет именно `conversation_summaries`. Для него аддитивная миграция
-`003_history_summaries.sql` добавляет к таблице служебные колонки через `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`:
+Слой поджатия истории диалога наполняет именно `conversation_summaries`. Её служебные колонки определяет идемпотентная
+миграция `003_history_summaries.sql` через `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`:
 `layer` (`near` / `middle` / `far` / `full`), `covered_from_message_id`, `covered_to_message_id`, `covered_until`,
 `source_message_count`, `source_token_count`, `summary_token_count`, `memory_dedupe`, `summary_version` и `is_active`
-(в каждом диалоге активна ровно одна сводка). Базовых таблиц это не меняет, итог остаётся прежним — шестнадцать таблиц.
+(в каждом диалоге активна ровно одна сводка). Число таблиц при этом остаётся шестнадцать.
 Полный DDL миграции и смысл колонок — в [13-history-compression.md](13-history-compression.md).
 
 ---
@@ -306,7 +306,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_a
 ## [DATA-7] Журнал инструментов и очередь записи памяти
 
 `tool_calls` — журнал всех вызовов инструментов (вход, выход, статус, задержка, ошибка) для отладки, аудита и
-безопасности. Таблица `memory_jobs` предназначена для будущей очереди асинхронной записи памяти отдельным воркером; в
+безопасности. Таблица `memory_jobs` обслуживает очередь асинхронной записи памяти отдельным воркером; в
 базовом контуре запись запускается после ответа неблокирующим промисом внутри процесса ответа.
 
 ```sql
@@ -352,7 +352,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_a
 
 ## [DATA-8] Три таблицы проактивности (миграция `002_proactive.sql`)
 
-Аддитивная идемпотентная миграция добавляет три таблицы, не меняя базовые. Назначение и поведение — в
+Идемпотентная миграция `002_proactive.sql` определяет три таблицы проактивности. Назначение и поведение — в
 [09-proactivity.md](09-proactivity.md).
 
 ```sql

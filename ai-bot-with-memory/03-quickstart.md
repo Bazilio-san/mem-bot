@@ -84,7 +84,7 @@ COMPANION_MODE=on PROACTIVE_ENABLED=on PROACTIVE_EVENTS_ENABLED=on npm run sched
 ```text
 migrations/001_init.sql      схема памяти: базовые таблицы, типы, индексы, базовые домены
 migrations/002_proactive.sql три таблицы проактивности (темы, триггеры, доставленные события)
-migrations/003_history_summaries.sql  новые колонки conversation_summaries для сжатой истории
+migrations/003_history_summaries.sql  служебные колонки conversation_summaries для сжатой истории
 src/config.js                конфигурация, выбор моделей и флаги проактивности (из .env)
 src/db.js                    пул подключений PostgreSQL плюс помощник vectorToSql
 src/llm.js                   клиент LLM: чат, строгий JSON (chatJSON), эмбеддинги

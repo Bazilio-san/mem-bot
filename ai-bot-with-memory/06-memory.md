@@ -50,7 +50,7 @@
 
 ```js
 // Жёсткие лимиты минимизации. Значения берутся из конфигурации (config.memoryLimits),
-// которая читает переменные окружения MEMORY_LIMIT_* и по умолчанию даёт прежние числа.
+// которая читает переменные окружения MEMORY_LIMIT_* и по умолчанию даёт значения 7/5/12/3/3/30.
 const LIMITS = config.memoryLimits; // { profile: 7, dialog: 5, domain: 12, reminder: 3, secure: 3, total: 30 }
 
 function scoreItem(it, relevance) {
