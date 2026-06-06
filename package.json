@@ -10,6 +10,7 @@
     "agents:link:remove": "node scripts/claude-2-agents-symlink.js remove",
     "migrate": "node src/migrate.js",
     "chat": "node src/cli.js",
+    "telegram": "node src/telegram.js",
     "scheduler": "node src/scheduler-run.js",
     "test": "node tests/run.js",
     "check:llm": "node tests/check-llm.js"
