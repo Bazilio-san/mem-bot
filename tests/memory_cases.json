@@ -1,0 +1,13 @@
+[
+  { "input": "Я не люблю длинные ответы, пиши коротко.", "expect_save": true, "expect_scope": "profile", "expect_sensitivity_max": "normal", "note": "устойчивое предпочтение стиля" },
+  { "input": "Объясняй без сложных терминов.", "expect_save": true, "expect_scope": "profile", "expect_sensitivity_max": "normal", "note": "предпочтение стиля" },
+  { "input": "Я изучаю математику для ЕГЭ.", "expect_save": true, "expect_scope": "domain", "expect_sensitivity_max": "normal", "note": "цель/предметный факт" },
+  { "input": "Я плохо понимаю квадратные уравнения.", "expect_save": true, "expect_scope": "domain", "expect_sensitivity_max": "normal", "note": "прогресс/слабая тема" },
+  { "input": "Не люблю ночные рейсы.", "expect_save": true, "expect_scope": "domain", "expect_sensitivity_max": "normal", "note": "предпочтение по перелётам" },
+  { "input": "Ок", "expect_save": false, "note": "мусор" },
+  { "input": "Хаха", "expect_save": false, "note": "мусор" },
+  { "input": "Сегодня плохая погода", "expect_save": false, "note": "одноразовая фраза без будущей пользы" },
+  { "input": "Мне кажется, это прикольно", "expect_save": false, "note": "эмоция без устойчивого смысла" },
+  { "input": "Мой паспорт 1234 567890.", "expect_save": false, "expect_requires_confirmation": true, "expect_sensitivity_min": "high", "note": "чувствительные данные — не сохранять как обычный факт" },
+  { "input": "Мой телефон +7 916 123-45-67.", "expect_save": false, "expect_requires_confirmation": true, "expect_sensitivity_min": "high", "note": "телефон — чувствительные данные" }
+]

@@ -40,7 +40,6 @@
       "WebSearch"
     ],
     "deny": [
-      "Read(./.env)",
       "Read(./.idea/**)",
       "Read(./.run/**)",
       "Read(./_misc/**)",

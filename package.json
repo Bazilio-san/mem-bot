@@ -7,9 +7,17 @@
   "scripts": {
     "agents:link": "node scripts/claude-2-agents-symlink.js setup",
     "agents:link:status": "node scripts/claude-2-agents-symlink.js status",
-    "agents:link:remove": "node scripts/claude-2-agents-symlink.js remove"
+    "agents:link:remove": "node scripts/claude-2-agents-symlink.js remove",
+    "migrate": "node src/migrate.js",
+    "chat": "node src/cli.js",
+    "scheduler": "node src/scheduler-run.js",
+    "test": "node tests/run.js",
+    "check:llm": "node tests/check-llm.js"
   },
   "private": true,
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "openai": "^4.77.0",
+    "pg": "^8.13.1"
+  }
 }
