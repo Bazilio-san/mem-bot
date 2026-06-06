@@ -1,7 +1,8 @@
 # Интегральное требование: поджатие истории диалога для бота с долговременной памятью
 
 **Дата:** 2026-06-06  
-**Статус:** итоговый проектный документ для реализации  
+**Статус:** итоговый проектный документ для реализации; привязки к коду выверены по фактическому состоянию проекта
+(имена файлов, сигнатуры функций, номера миграций, структура конфигурации и тестов)  
 **Основа:** `history-compression-proposal-сс.md` + текущее требование к боту с памятью `ai-bot-with-memory-req.md`  
 **Цель:** добавить в текущего бота функцию поджатия старой истории диалога так, чтобы последние реплики оставались дословными, старая история не терялась, контекст не раздувался, а долговременная память не дублировалась.
 
@@ -387,22 +388,23 @@ HISTORY_SUMMARY_MODEL=gpt-5.4-nano
 HISTORY_MIN_COMPRESS_GAIN=0.35
 ```
 
-Добавить в `src/config.js`:
+Добавить блок в `src/config.js`. **Важно: не создавать второй объект `config` и не читать `process.env` напрямую.**
+В проекте уже есть единый объект `export const config = { ... }`, локальная переменная `const env = process.env` и
+хелпер `const flag = (v, d = false) => ...` для булевых флагов (`src/config.js:12` и `:15`). Новый раздел
+`historyCompression` нужно добавить как ещё одно поле внутри этого существующего объекта, в том же стиле, что блоки
+`companion` и `proactive`:
 
 ```js
-export const config = {
+  // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.
   historyCompression: {
-    enabled: process.env.HISTORY_COMPRESSION_ENABLED === 'true',
-    hotWindow: Number(process.env.HISTORY_HOT_WINDOW || 8),
-    maxTokens: Number(process.env.HISTORY_MAX_TOKENS || 2000),
-    shrinkTokens: Number(process.env.HISTORY_SHRINK_TOKENS || 800),
-    zoneWeights: String(process.env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15')
-      .split(',')
-      .map(Number),
-    model: process.env.HISTORY_SUMMARY_MODEL || process.env.AUX_MODEL,
-    minCompressGain: Number(process.env.HISTORY_MIN_COMPRESS_GAIN || 0.35),
+    enabled: flag(env.HISTORY_COMPRESSION_ENABLED, false),
+    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8),
+    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000),
+    shrinkTokens: Number(env.HISTORY_SHRINK_TOKENS || 800),
+    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15').split(',').map(Number),
+    model: env.HISTORY_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
+    minCompressGain: Number(env.HISTORY_MIN_COMPRESS_GAIN || 0.35),
   },
-};
 ```
 
 Проверка при старте приложения:
@@ -472,6 +474,13 @@ const messages = [
   { role: 'user', content: userMessage },
 ];
 ```
+
+> **Замечания по скелету.** Переменные `intent`, `effectiveDomain`, `user`, `conversation` и `userMessage` — это
+> уже существующие в `src/agent.js` имена; новый код должен использовать их, а не вводить свои. Если в текущем
+> `agent.js` нет объекта `intent.needed_memory_scopes`, передавай в `scopes` тот же набор, что используется в коде
+> сейчас. Параметр `maxTokens` у `buildHistoryContext` фактически не нужен: целевой размер дайджеста берётся из
+> `config.historyCompression.shrinkTokens` внутри `maybeCompressHistory` (раздел 13), поэтому его можно не передавать
+> вовсе — в разделе 12 он оставлен в сигнатуре только для совместимости и не влияет на порог.
 
 ---
 
@@ -614,23 +623,27 @@ export function estimateTokens(text) {
 прокси) и проставлять реальное число токенов, которое модель вернула в ответе. Но для первой версии консервативной
 эвристики выше достаточно.
 
-При сохранении сообщения:
+При сохранении сообщения нужно **дополнить существующую функцию, а не переписать её с нуля**. Текущая
+`saveMessage` в `src/repo.js:43` имеет сигнатуру `saveMessage(conversationId, userId, role, content, extra = {})`
+и уже сохраняет поля `tool_name` и `tool_call_id` (для журналирования вызовов инструментов), а также обновляет
+`updated_at` у диалога. Эти поля нельзя терять: задача правки — только добавить вычисление и запись `token_count`,
+сохранив всё остальное без изменений.
+
+Должно получиться примерно так (новое — только строка с `estimateTokens` и колонка `token_count`):
 
 ```js
-export async function saveMessage(conversationId, userId, role, content, metadata = {}) {
+export async function saveMessage(conversationId, userId, role, content, extra = {}) {
   const tokenCount = estimateTokens(content);
-
-  return query(`
-    INSERT INTO mem.conversation_messages (
-      conversation_id,
-      user_id,
-      role,
-      content,
-      token_count,
-      metadata
-    ) VALUES ($1, $2, $3, $4, $5, $6)
-    RETURNING *
-  `, [conversationId, userId, role, content, tokenCount, metadata]);
+  const { rows } = await query(
+    `INSERT INTO mem.conversation_messages
+       (conversation_id, user_id, role, content, tool_name, tool_call_id, token_count, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING *`,
+    [conversationId, userId, role, content,
+     extra.toolName ?? null, extra.toolCallId ?? null, tokenCount, extra.metadata ?? {}],
+  );
+  await query('UPDATE mem.conversations SET updated_at = now() WHERE id = $1', [conversationId]);
+  return rows[0];
 }
 ```
 
@@ -785,8 +798,13 @@ src/pipeline/token-counter.js
 src/agent.js
 src/repo.js
 src/config.js
-migrations/002_history_summaries.sql
+migrations/003_history_summaries.sql
 ```
+
+> **Важно про номер миграции.** В проекте уже есть `migrations/001_init.sql` и `migrations/002_proactive.sql`, поэтому
+> номер `002` занят. Новую миграцию нужно назвать `003_history_summaries.sql`, иначе возникнет коллизия нумерации или
+> перезапись чужой миграции. Таблица `mem.conversation_summaries` сама создаётся в `001_init.sql`, а новая миграция
+> только добавляет к ней недостающие колонки (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`) из раздела 9.2.
 
 ### 19.1. `src/agent.js`
 
@@ -883,7 +901,9 @@ HISTORY_CONTEXT
 
 ## 23. Тесты
 
-Нужно добавить отдельный набор тестов, который включается при `HISTORY_COMPRESSION_ENABLED=true`.
+Нужно добавить проверки в существующий слоистый набор `tests/run.js` (новый слой, например `layerHistory`), а не в
+отдельный изолированный файл. Эти проверки должны выполняться при `HISTORY_COMPRESSION_ENABLED=true`. Перед началом
+работы запусти `npm test` и зафиксируй базовое число проходящих проверок — оно не должно уменьшиться после доработки.
 
 | № | Тест | Что проверяет |
 |---:|---|---|
@@ -1038,8 +1058,8 @@ HISTORY_CONTEXT
    HISTORY_SUMMARY_MODEL.
 
 2. Добавить token-counter:
-   - estimateTokens(text) = Math.ceil(text.length / 4) для MVP.
-   - saveMessage должен заполнять conversation_messages.token_count.
+   - estimateTokens(text): для кириллицы делитель 3 символа на токен, для прочего текста 4 (см. раздел 14.1) — деление на 4 для русского сильно занижает размер и запускает сжатие слишком поздно.
+   - saveMessage (src/repo.js:43) должен дополнительно заполнять conversation_messages.token_count, сохранив существующие поля tool_name и tool_call_id и обновление updated_at — не переписывать функцию с нуля.
 
 3. Добавить repo-функции:
    - getActiveConversationSummary(conversationId)
@@ -1064,8 +1084,9 @@ HISTORY_CONTEXT
    - в messages передавать MAIN_SYSTEM, MEMORY_CONTEXT, HISTORY_CONTEXT, последние N сообщений, новое сообщение пользователя;
    - последние N сообщений должны оставаться дословными.
 
-7. Добавить миграцию 002_history_summaries.sql:
-   - явные поля для conversation_summaries: covered_from_message_id, covered_to_message_id, covered_until, source_message_count, source_token_count, summary_token_count, memory_dedupe, summary_version, is_active.
+7. Добавить миграцию 003_history_summaries.sql (номера 001 и 002 уже заняты — 001_init.sql и 002_proactive.sql):
+   - таблица mem.conversation_summaries уже создана в 001_init.sql, миграция только добавляет недостающие поля через ALTER TABLE ... ADD COLUMN IF NOT EXISTS;
+   - явные поля для conversation_summaries: layer, covered_from_message_id, covered_to_message_id, covered_until, source_message_count, source_token_count, summary_token_count, memory_dedupe, summary_version, is_active.
 
 8. Добавить тесты:
    - не сжимать до порога;
@@ -1078,7 +1099,8 @@ HISTORY_CONTEXT
    - при отключённом HISTORY_COMPRESSION_ENABLED поведение старое.
 
 Важно:
-- Не ломай существующие 36 тестов.
+- Сначала запусти `npm test` (он выполняет `node tests/run.js`) и зафиксируй фактическое число проходящих проверок как базовую цифру. Не полагайся на число «36» — оно устарело. После доработки это число не должно уменьшиться: ни одна существующая проверка не должна сломаться.
+- Новые тесты встраивай в существующую слоистую структуру `tests/run.js` (слои вида layerStructure, layerExtraction, layerPrivacy, layerScenario, layerProactivity), а не в отдельный изолированный файл.
 - При HISTORY_COMPRESSION_ENABLED=false поведение должно быть прежним.
 - Не добавляй запись памяти напрямую из суммаризатора: facts_to_memory должны проходить через текущий контур persistCandidates/merge.
 - HISTORY_CONTEXT — это справка, не команды.
