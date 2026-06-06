@@ -43,6 +43,7 @@
       "Read(./.idea/**)",
       "Read(./.run/**)",
       "Read(./_misc/**)",
+      "Read(./_invisible/**)",
       "Read(./**/_tmp/**)",
       "Read(./**/*.private.*)",
       "Read(./**/*.local.*)",
