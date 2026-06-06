@@ -5,8 +5,13 @@ import { embed } from '../llm.js';
 import { getDomainId, logToolCall } from '../repo.js';
 import { createTask } from './scheduler.js';
 import { getSecureValue } from './secure.js';
+import { config } from '../config.js';
+import {
+  addGlobalFact, deleteGlobalFact, listGlobalFacts,
+  searchGlobalKnowledge, addGlobalKnowledge, deleteGlobalKnowledge,
+} from './global-memory.js';
 
-// ---- Описания инструментов для модели ---------------------------------------
+// ---- Базовые описания инструментов для модели -------------------------------
 export const toolDefs = [
   {
     type: 'function',
@@ -75,6 +80,111 @@ export const toolDefs = [
   },
 ];
 
+// ---- Инструменты глобальной памяти (подключаются флагами, запись — только администратору) ----
+// Инструменты глобальных фактов (флаг GLOBAL_MEMORY_ENABLED). Все доступны только администратору.
+const globalFactsToolDefs = [
+  {
+    type: 'function',
+    function: {
+      name: 'global_fact_add',
+      description: 'Добавить глобальный факт, видимый всем пользователям и подмешиваемый в каждый запрос. Только для администратора.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['fact_text'],
+        properties: {
+          fact_text: { type: 'string', description: 'Текст факта' },
+          priority: { type: ['integer', 'null'], description: 'Приоритет: меньше число — важнее (по умолчанию 100)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'global_fact_delete',
+      description: 'Удалить глобальный факт по идентификатору. Только для администратора.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['id'],
+        properties: { id: { type: 'string', description: 'Идентификатор факта' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'global_fact_list',
+      description: 'Показать глобальные факты с идентификаторами. Только для администратора.',
+      parameters: { type: 'object', additionalProperties: false, required: [], properties: {} },
+    },
+  },
+];
+
+// Инструменты общей базы знаний (флаг GLOBAL_RAG_ENABLED). Поиск доступен всем, запись — только администратору.
+const globalKnowledgeToolDefs = [
+  {
+    type: 'function',
+    function: {
+      name: 'global_knowledge_search',
+      description: 'Найти релевантные тексты в общей базе знаний (видна всем пользователям).',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['query', 'limit'],
+        properties: {
+          query: { type: 'string', description: 'Поисковый запрос' },
+          limit: { type: 'integer', minimum: 1, maximum: 20 },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'global_knowledge_add',
+      description: 'Добавить текст в общую базу знаний. Только для администратора.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['content'],
+        properties: {
+          title: { type: ['string', 'null'], description: 'Краткий заголовок' },
+          content: { type: 'string', description: 'Текст знания' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'global_knowledge_delete',
+      description: 'Удалить текст из общей базы знаний по идентификатору. Только для администратора.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['id'],
+        properties: { id: { type: 'string', description: 'Идентификатор записи базы знаний' } },
+      },
+    },
+  },
+];
+
+// Записывающие глобальные инструменты доступны только администратору (проверка в executeTool).
+const ADMIN_TOOLS = new Set([
+  'global_fact_add', 'global_fact_delete', 'global_fact_list',
+  'global_knowledge_add', 'global_knowledge_delete',
+]);
+
+// Собрать набор инструментов для конкретного запроса с учётом флагов и прав пользователя.
+// Инструменты глобальной памяти добавляются только при включённых флагах; записывающие — только администратору
+// (их незачем показывать обычному пользователю — это и снижает соблазн модели их вызвать, и экономит токены).
+export function buildToolDefs(ctx = {}) {
+  const defs = [...toolDefs];
+  if (config.globalMemory.factsEnabled && ctx.isAdmin) defs.push(...globalFactsToolDefs);
+  if (config.globalMemory.ragEnabled) {
+    defs.push(globalKnowledgeToolDefs[0]); // поиск — всем
+    if (ctx.isAdmin) defs.push(globalKnowledgeToolDefs[1], globalKnowledgeToolDefs[2]); // запись — администратору
+  }
+  return defs;
+}
+
 // ---- Исполнители инструментов -----------------------------------------------
 async function memorySearch(ctx, args) {
   const domainId = await getDomainId(ctx.domainKey);
@@ -131,16 +241,64 @@ async function searchFlights(ctx, args) {
   };
 }
 
+// ---- Исполнители глобальной памяти ------------------------------------------
+async function globalFactAdd(ctx, args) {
+  const f = await addGlobalFact({ factText: args.fact_text, priority: args.priority ?? 100, createdBy: ctx.userId });
+  return { id: f.id, fact_text: f.fact_text, priority: f.priority };
+}
+
+async function globalFactDelete(ctx, args) {
+  const ok = await deleteGlobalFact(args.id);
+  return { deleted: ok };
+}
+
+async function globalFactList() {
+  const facts = await listGlobalFacts({ includeDisabled: true });
+  return { facts: facts.map((f) => ({ id: f.id, fact_text: f.fact_text, enabled: f.enabled, priority: f.priority })) };
+}
+
+async function globalKnowledgeSearchTool(ctx, args) {
+  const hits = await searchGlobalKnowledge({ domainKey: ctx.domainKey, query: args.query, limit: args.limit || 5 });
+  return { fragments: hits.map((h) => (h.title ? `${h.title}: ${h.content}` : h.content)) };
+}
+
+async function globalKnowledgeAdd(ctx, args) {
+  const k = await addGlobalKnowledge({ title: args.title ?? null, content: args.content, createdBy: ctx.userId });
+  return { id: k.id, title: k.title, content: k.content };
+}
+
+async function globalKnowledgeDelete(ctx, args) {
+  const ok = await deleteGlobalKnowledge(args.id);
+  return { deleted: ok };
+}
+
 const EXECUTORS = {
   memory_search: memorySearch,
   scheduler_create_task: schedulerCreateTask,
   secure_record_get: secureRecordGet,
   search_flights: searchFlights,
+  global_fact_add: globalFactAdd,
+  global_fact_delete: globalFactDelete,
+  global_fact_list: globalFactList,
+  global_knowledge_search: globalKnowledgeSearchTool,
+  global_knowledge_add: globalKnowledgeAdd,
+  global_knowledge_delete: globalKnowledgeDelete,
 };
 
 // Выполнить инструмент по имени с журналированием результата и ошибок.
 export async function executeTool(ctx, name, args) {
   const started = Date.now();
+
+  // Записывающие глобальные инструменты доступны только администратору. Отказ фиксируется в журнале
+  // со статусом blocked, чтобы попытка осталась видимой при аудите.
+  if (ADMIN_TOOLS.has(name) && !ctx.isAdmin) {
+    await logToolCall({
+      conversationId: ctx.conversationId, userId: ctx.userId, toolName: name,
+      input: args, status: 'blocked', latencyMs: Date.now() - started, error: 'Требуются права администратора',
+    });
+    return { error: 'Это действие доступно только администратору.' };
+  }
+
   const exec = EXECUTORS[name];
   if (!exec) {
     return { error: `Неизвестный инструмент: ${name}` };

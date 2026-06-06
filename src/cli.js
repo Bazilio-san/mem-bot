@@ -5,6 +5,12 @@ import { handleMessage } from './agent.js';
 import { tick } from './pipeline/scheduler.js';
 import { fireProactiveNow } from './pipeline/proactive.js';
 import { closePool } from './db.js';
+import { ensureUser } from './repo.js';
+import { isAdmin } from './pipeline/admin.js';
+import {
+  addGlobalFact, deleteGlobalFact, listGlobalFacts,
+  searchGlobalKnowledge, addGlobalKnowledge, deleteGlobalKnowledge,
+} from './pipeline/global-memory.js';
 
 const externalId = process.argv[2] || 'cli-user';
 let domainKey = process.argv[3] || 'general';
@@ -14,7 +20,19 @@ const ask = (q) => new Promise((res) => rl.question(q, res));
 
 console.log(`Чат-бот с памятью. Пользователь: ${externalId}, домен: ${domainKey}.`);
 console.log('Команды: /domain <key> — сменить домен, /tick — прогнать планировщик, '
-  + '/proactive <тип> — запустить проактивный триггер вручную (например, /proactive welcome_back), /exit — выход.\n');
+  + '/proactive <тип> — запустить проактивный триггер вручную (например, /proactive welcome_back), /exit — выход.');
+console.log('Глобальная память (запись — только администратору): /fact-add <текст>, /fact-list, /fact-del <id>, '
+  + '/kb-add <текст>, /kb-find <запрос>, /kb-del <id>.\n');
+
+// Проверить, что текущий пользователь — администратор. Возвращает идентификатор пользователя или null.
+async function requireAdmin() {
+  const user = await ensureUser(externalId);
+  if (!(await isAdmin(user.id))) {
+    console.log('Команда доступна только администратору. Поставьте пользователю пометку is_admin в базе.');
+    return null;
+  }
+  return user.id;
+}
 
 // Фоновый проход планировщика раз в 10 секунд, чтобы напоминания реально срабатывали.
 const schedulerTimer = setInterval(async () => {
@@ -36,6 +54,60 @@ async function main() {
       const r = await fireProactiveNow(externalId, type);
       if (r.ok) console.log(`Проактивный триггер «${type}» сработал — сообщение появилось в истории диалога.`);
       else console.log(`Проактивный триггер «${type}» не сработал: ${r.reason || 'сообщение не сформировано'}.`);
+      continue;
+    }
+
+    // --- Глобальные факты (всегда-включённые, общие для всех; запись только администратору) ---
+    if (input.startsWith('/fact-add ')) {
+      const adminId = await requireAdmin();
+      if (!adminId) continue;
+      const text = input.slice(10).trim();
+      if (!text) { console.log('Укажите текст факта: /fact-add <текст>'); continue; }
+      const f = await addGlobalFact({ factText: text, createdBy: adminId });
+      console.log(`Глобальный факт добавлен. Идентификатор: ${f.id}`);
+      continue;
+    }
+    if (input === '/fact-list') {
+      const adminId = await requireAdmin();
+      if (!adminId) continue;
+      const facts = await listGlobalFacts({ includeDisabled: true });
+      if (!facts.length) console.log('Глобальных фактов пока нет.');
+      else for (const f of facts) console.log(`  ${f.enabled ? '●' : '○'} ${f.id} (приоритет ${f.priority}): ${f.fact_text}`);
+      continue;
+    }
+    if (input.startsWith('/fact-del ')) {
+      const adminId = await requireAdmin();
+      if (!adminId) continue;
+      const id = input.slice(10).trim();
+      const ok = await deleteGlobalFact(id);
+      console.log(ok ? 'Глобальный факт удалён.' : 'Факт с таким идентификатором не найден.');
+      continue;
+    }
+
+    // --- Общая база знаний (RAG): поиск доступен всем, запись только администратору ---
+    if (input.startsWith('/kb-add ')) {
+      const adminId = await requireAdmin();
+      if (!adminId) continue;
+      const text = input.slice(8).trim();
+      if (!text) { console.log('Укажите текст: /kb-add <текст>'); continue; }
+      const k = await addGlobalKnowledge({ content: text, createdBy: adminId });
+      console.log(`Текст добавлен в базу знаний. Идентификатор: ${k.id}`);
+      continue;
+    }
+    if (input.startsWith('/kb-find ')) {
+      const q = input.slice(9).trim();
+      if (!q) { console.log('Укажите запрос: /kb-find <запрос>'); continue; }
+      const hits = await searchGlobalKnowledge({ domainKey, query: q });
+      if (!hits.length) console.log('Релевантных фрагментов не найдено.');
+      else for (const h of hits) console.log(`  ${h.id}: ${h.title ? h.title + ' — ' : ''}${h.content}`);
+      continue;
+    }
+    if (input.startsWith('/kb-del ')) {
+      const adminId = await requireAdmin();
+      if (!adminId) continue;
+      const id = input.slice(8).trim();
+      const ok = await deleteGlobalKnowledge(id);
+      console.log(ok ? 'Запись базы знаний удалена.' : 'Запись с таким идентификатором не найдена.');
       continue;
     }
 

@@ -187,6 +187,13 @@ export const config = {
   timezone: env.TZ_DEFAULT || 'Europe/Moscow',
   debug: (env.DEBUG || '').split(',').map((s) => s.trim()).filter(Boolean),
   companion: { enabled: flag(env.COMPANION_MODE, false) },
+  globalMemory: {
+    factsEnabled: flag(env.GLOBAL_MEMORY_ENABLED, false), // глобальные факты (always-on)
+    factsLimit: Number(env.GLOBAL_FACTS_LIMIT || 5),
+    ragEnabled: flag(env.GLOBAL_RAG_ENABLED, false),       // общая база знаний (RAG)
+    ragLimit: Number(env.GLOBAL_RAG_LIMIT || 5),
+    ragMinRelevance: Number(env.GLOBAL_RAG_MIN_RELEVANCE || 0.3),
+  },
   proactive: {
     enabled: flag(env.PROACTIVE_ENABLED, false),
     intervalMs: Number(env.PROACTIVE_INTERVAL_MS || 300000),

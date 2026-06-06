@@ -43,7 +43,8 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
   const user = await ensureUser(externalId);
   const conversation = await ensureConversation(user.id, domainKey);
   const ctx = { userId: user.id, conversationId: conversation.id, domainKey,
-                timezone: user.timezone || config.timezone };
+                timezone: user.timezone || config.timezone,
+                isAdmin: user.is_admin === true }; // права на запись в глобальную память (см. 14-global-memory)
 
   // [proactive] Авто-создание триггеров пользователю (идемпотентно, только при PROACTIVE_ENABLED).
 
@@ -66,6 +67,9 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
   }
   const memoryContext = buildMemoryContext(memory, effectiveDomain);
 
+  // [global] Глобальная память (общая для всех). При GLOBAL_MEMORY_ENABLED собирается блок GLOBAL_FACTS — всегда-
+  //          включённые факты; при GLOBAL_RAG_ENABLED собирается блок GLOBAL_KNOWLEDGE — релевантные запросу фрагменты
+  //          общей базы знаний (см. 14-global-memory). Каждый блок сам проверяет свой флаг и возвращает '' при выключении.
   // [always] Блок CURRENT_DATETIME — текущая дата, время, день недели и часовой пояс. Передаётся модели
   //          при ЛЮБОМ запросе, независимо от режимов (см. 09-proactivity, формирование в src/utils/temporal.js).
   //          Стоит в динамической зоне (меняется каждую минуту), чтобы не ломать кэш стабильного префикса.
@@ -77,17 +81,22 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
   const history = await getRecentMessages(conversation.id, 8);
   const messages = [
     { role: 'system', content: MAIN_SYSTEM },
+    // ...globalFactsBlock (GLOBAL_FACTS) — сразу после MAIN_SYSTEM, одинаков для всех, держит кэш-префикс
     { role: 'system', content: memoryContext },
+    // ...globalKnowledgeBlock (GLOBAL_KNOWLEDGE, если включён RAG) — рядом с памятью, зависит от запроса
     // ...historyContext (HISTORY_CONTEXT, если включён флаг),
     // ...extraSystem (companion-блок, если включён),
     dateTimeSystem, // CURRENT_DATETIME — всегда (дата, время, часовой пояс), последним system-блоком
     ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
     { role: 'user', content: userMessage },
   ];
+  // Набор инструментов зависит от флагов глобальной памяти и прав пользователя: записывающие инструменты
+  // глобальной памяти получает только администратор (ctx.isAdmin), см. 14-global-memory и buildToolDefs.
+  const tools = buildToolDefs(ctx);
   const toolsUsed = [];
   let answer = '';
   for (let step = 0; step < 5; step++) {
-    const msg = await chat({ model: config.llm.mainModel, messages, tools: toolDefs });
+    const msg = await chat({ model: config.llm.mainModel, messages, tools });
     if (msg.tool_calls && msg.tool_calls.length) {
       messages.push(msg);
       for (const tc of msg.tool_calls) {
@@ -157,6 +166,19 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
 
 ---
 
+## [ARCH-6] Где живёт глобальная память
+
+Контур ответа расширяется двумя аддитивными блоками общей для всех пользователей памяти, каждый под своим флагом. Блок
+`GLOBAL_FACTS` (флаг `GLOBAL_MEMORY_ENABLED`) собирается всегда, независимо от `needs_memory`, и ставится сразу после
+стабильного `MAIN_SYSTEM`: факты одинаковы для всех и меняются редко, поэтому держатся в кэшируемом префиксе. Блок
+`GLOBAL_KNOWLEDGE` (флаг `GLOBAL_RAG_ENABLED`) зависит от запроса, поэтому собирается рядом с `MEMORY_CONTEXT`. Признак
+`ctx.isAdmin` (из колонки `mem.users.is_admin`) определяет, какие инструменты глобальной памяти доступны: записывающие
+инструменты получает только администратор, а проверка прав дублируется в обёртке `executeTool`. При выключенных флагах
+обе сборки возвращают пустую строку, и поведение совпадает с базовым. Подробный разбор приведён в
+[14-global-memory.md](14-global-memory.md).
+
+---
+
 ## Связанные документы
 
 - Память: выборка и запись — [06-memory.md](06-memory.md)
@@ -165,3 +187,4 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
 - Инструменты, планировщик, тесты — [10-operations.md](10-operations.md)
 - Проактивность — [09-proactivity.md](09-proactivity.md)
 - Поджатие истории диалога — [13-history-compression.md](13-history-compression.md)
+- Глобальная память — [14-global-memory.md](14-global-memory.md)

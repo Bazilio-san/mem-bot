@@ -26,6 +26,9 @@
   реализовано; слой проверок проактивности подключается отдельным флагом.
 - **Поджатие истории диалога** (`HISTORY_COMPRESSION_ENABLED`) — реализовано; слой проверок `layerHistory` подключается
   отдельным флагом.
+- **Глобальная память** (`GLOBAL_MEMORY_ENABLED`, `GLOBAL_RAG_ENABLED`) — реализовано: глобальные факты (always-on) и
+  общая база знаний (RAG), запись только администратору; слой проверок `layerGlobalMemory` подключается флагами и при
+  включении обоих проходит полностью (16 из 16 проверок слоя, суммарно `npm test` — 78 из 78).
 - **Внешняя доставка уведомлений** — частично: добавлен канал Telegram (`src/telegram.js`); каналы электронной почты и
   push-уведомлений не реализованы.
 - **Слой per-domain-схем** (`DOMAIN-1`…`DOMAIN-3`) — не реализован; описан в спецификации как опциональное расширение.
@@ -64,6 +67,9 @@
 | `CRIT-16` | Тёплая встреча возврата и единый стиль | частично | `src/pipeline/proactiveMessage.js`; возврат определяется по паузе, сигнала web-клиента нет |
 | `CRIT-17` | Внешние события как персональные поводы | частично | `src/pipeline/events.js`; источник событий — встроенная заглушка новостей |
 | `CRIT-18` | Сжатая история: горячее окно, дайджест, дедупликация | готово | `src/pipeline/history-context.js`, `history-compress.js` (`HISTORY_COMPRESSION_ENABLED`) |
+| `CRIT-19` | Глобальные факты подмешиваются всегда, ограничены по числу | готово | `mem.global_facts`, `buildGlobalFactsBlock` в `src/pipeline/global-memory.js` (`GLOBAL_MEMORY_ENABLED`) |
+| `CRIT-20` | Общая база знаний (RAG): поиск по релевантности, удаление по id | готово | `mem.global_knowledge`, `src/pipeline/global-memory.js` (`GLOBAL_RAG_ENABLED`) |
+| `CRIT-21` | Запись в глобальную память — только администратору | готово | `isAdmin` в `src/pipeline/admin.js`, проверка в `executeTool` (`src/pipeline/tools.js`) |
 
 ### Быстрый старт и структура — `QS`
 
@@ -73,6 +79,7 @@
 | `QS-2` | Команды (`migrate`, `chat`, `scheduler`, `test`, `check:llm`) | готово | `package.json`, `src/cli.js`, `src/scheduler-run.js` |
 | `QS-3` | Флаги проактивности | готово | `src/config.js`, блок `proactive` |
 | `QS-4` | Флаги поджатия истории | готово | `src/config.js`, блок `historyCompression` |
+| `QS-4a` | Флаги глобальной памяти | готово | `src/config.js`, блок `globalMemory` |
 | `QS-5` | Структура каталогов | готово | каталоги `src/`, `migrations/`, `tests/` соответствуют спецификации |
 | `QS-6` | Порядок сборки с нуля | готово | подтверждается составом репозитория |
 
@@ -85,6 +92,7 @@
 | `ARCH-3` | Пять этапов (классификация, выборка, ответ, сохранение, запись) | готово | `src/agent.js` плюс модули `src/pipeline/*` |
 | `ARCH-4` | Аддитивные ветки проактивности под флагами | готово | ветки `COMPANION_MODE` и `PROACTIVE_ENABLED` в `src/agent.js` |
 | `ARCH-5` | Аддитивная ветка поджатия истории под флагом | готово | ветка `HISTORY_COMPRESSION_ENABLED` в `src/agent.js` |
+| `ARCH-6` | Аддитивные блоки глобальной памяти под флагами | готово | блоки `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` плюс `buildToolDefs(ctx)` в `src/agent.js` |
 
 ### Схема данных — `DATA`
 
@@ -98,6 +106,7 @@
 | `DATA-6` | Планировщик: задачи, запуски, исходящие уведомления | частично | таблицы есть; поля `cron_expr` / `rrule` сведены к суточному шагу |
 | `DATA-7` | Журнал инструментов и очередь записи памяти | частично | `tool_calls` работает; `memory_jobs` создана, но запись идёт промисом в процессе ответа |
 | `DATA-8` | Три таблицы проактивности | готово | `migrations/002_proactive.sql` |
+| `DATA-9` | Две таблицы глобальной памяти и колонка `is_admin` | готово | `migrations/005_global_memory.sql` (`global_facts`, `global_knowledge`) |
 
 ### Память: виды, выборка, запись — `MEM`
 
@@ -157,7 +166,7 @@
 | `OPS-4` | Инструменты агента и журнал | готово | `src/pipeline/tools.js` (`executeTool`), таблица `tool_calls` |
 | `OPS-5` | Логирование | частично | `DEBUG`-трассировка и журналы таблиц есть; единого JSON-логгера нет |
 | `OPS-6` | Тесты на реальной базе и моделях | готово | `tests/run.js`, `npm test` — 36 из 36 |
-| `OPS-7` | Слои проверки | готово | `tests/run.js` (структура, извлечение, обязательные тесты, приватность, сценарий) |
+| `OPS-7` | Слои проверки | готово | `tests/run.js` (структура, извлечение, обязательные тесты, приватность, сценарий, слои 6/7/8) |
 | `OPS-8` | Двенадцать обязательных тестов | готово | `tests/run.js` |
 | `OPS-9` | Правила тестирования (без моков, реальная база) | готово | `tests/run.js`, `tests/memory_cases.json` |
 
@@ -189,6 +198,23 @@
 | `HIST-14` | Слой проверок `layerHistory` | готово | `tests/run.js` (12 проверок при `HISTORY_COMPRESSION_ENABLED`) |
 | `HIST-15` | Критерии приёмки | готово | подтверждаются слоем `layerHistory` |
 | `HIST-16` | План внедрения и метрики | частично | поэтапная сборка выполнена; послойное досжатие не реализовано |
+
+### Глобальная память — `GLOB`
+
+| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
+|---------------|----------------------|--------|--------------------------|
+| `GLOB-1` | Граница со всегда-включённым блоком даты и времени | готово | `CURRENT_DATETIME` остаётся в динамической зоне `src/agent.js` |
+| `GLOB-2` | Критерий качества слоя | готово | подтверждается слоем `layerGlobalMemory` |
+| `GLOB-3` | Две таблицы и пометка `is_admin` (миграция `005`) | готово | `migrations/005_global_memory.sql`, засев базовых фактов |
+| `GLOB-4` | Модуль `src/pipeline/global-memory.js` | готово | факты и база знаний: выборка, поиск, запись, удаление |
+| `GLOB-5` | Проверка прав администратора | готово | `isAdmin` в `src/pipeline/admin.js`, `ctx.isAdmin` в `src/agent.js` |
+| `GLOB-6` | Подмешивание блоков `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` | готово | сборка `messages` в `src/agent.js` |
+| `GLOB-7` | Инструменты: чтение базы знаний всем, запись администратору | готово | `buildToolDefs` и `executeTool` в `src/pipeline/tools.js` |
+| `GLOB-8` | Минимизация: лимиты `GLOBAL_FACTS_LIMIT` / `GLOBAL_RAG_LIMIT` | готово | `src/config.js`, блок `globalMemory` |
+| `GLOB-9` | Конфигурация, флаги и команды CLI | готово | `src/config.js`, команды `/fact-*` и `/kb-*` в `src/cli.js` |
+| `GLOB-10` | Критерии `CRIT-19`…`CRIT-21` | готово | см. раздел критериев выше |
+| `GLOB-11` | Слой проверок `layerGlobalMemory` | готово | `tests/run.js` (16 проверок при включённых флагах) |
+| `GLOB-12` | Порядок реализации | готово | подтверждается составом репозитория |
 
 ---
 
@@ -247,3 +273,4 @@
 - Критерии готовности — [`ai-bot-with-memory/02-criteria.md`](../ai-bot-with-memory/02-criteria.md)
 - Тесты и слои проверки — [`ai-bot-with-memory/10-operations.md`](../ai-bot-with-memory/10-operations.md)
 - Поджатие истории диалога — [`ai-bot-with-memory/13-history-compression.md`](../ai-bot-with-memory/13-history-compression.md)
+- Глобальная память — [`ai-bot-with-memory/14-global-memory.md`](../ai-bot-with-memory/14-global-memory.md)

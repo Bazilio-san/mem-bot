@@ -36,10 +36,10 @@
 |----------|---------|-------|
 | [README.md](README.md) | 0 — вход | Суть, принцип, критерий, карта, маршруты |
 | [01-overview.md](01-overview.md) | 1 — обзор | Общая картина, три контура обработки, жанр, поведение при флагах |
-| [02-criteria.md](02-criteria.md) | 1 — обзор | Все критерии готовности: 12 базовых плюс 5 новых (13–17) |
+| [02-criteria.md](02-criteria.md) | 1 — обзор | Все критерии готовности: 12 базовых, 5 проактивных (13–17), поджатие (18), глобальная память (19–21) |
 | [03-quickstart.md](03-quickstart.md) | 1 — обзор | Установка, окружение, флаги, команды, структура, сборка с нуля |
 | [04-architecture.md](04-architecture.md) | 2 — глубоко | Пайплайн `handleMessage` пошагово и оба контура обработки |
-| [05-data-schema.md](05-data-schema.md) | 2 — глубоко | Полный DDL: шестнадцать таблиц, типы, индексы |
+| [05-data-schema.md](05-data-schema.md) | 2 — глубоко | Полный DDL: восемнадцать таблиц, типы, индексы |
 | [06-memory.md](06-memory.md) | 2 — глубоко | Пять видов памяти плюс темы, выборка, запись, дедупликация |
 | [07-secure-privacy.md](07-secure-privacy.md) | 2 — глубоко | Защищённая память: шифрование, согласие, маскирование |
 | [08-prompts-and-models.md](08-prompts-and-models.md) | 2 — глубоко | Промпты всех этапов, LLM-прокси, строгий JSON, выбор моделей |
@@ -48,6 +48,7 @@
 | [11-per-domain-schema.md](11-per-domain-schema.md) | 2 — глубоко | Слой схем `data` под домен |
 | [12-appendix.md](12-appendix.md) | 2 — глубоко | Внешние источники и рекомендованная раскладка кода |
 | [13-history-compression.md](13-history-compression.md) | 2 — глубоко | Поджатие истории: горячее окно, дайджест, градиент |
+| [14-global-memory.md](14-global-memory.md) | 2 — глубоко | Глобальная память: глобальные факты и общая база знаний (RAG), права администратора |
 
 Спецификация остаётся переносимой и не содержит сведений о каком-либо конкретном проекте: она описывает, как система
 должна быть устроена, а не то, что уже сделано в одной конкретной реализации.
@@ -82,4 +83,7 @@
 - **Добавить поджатие истории.** [13-history-compression.md](13-history-compression.md) → [05-data-schema](05-data-schema.md)
   (миграция `003`) → [08-prompts-and-models](08-prompts-and-models.md) (промпт суммаризатора) → [10-operations](10-operations.md)
   (слой `layerHistory`).
+- **Подключить глобальную память.** [14-global-memory.md](14-global-memory.md) → [05-data-schema](05-data-schema.md)
+  (миграция `005`, две таблицы и пометка `is_admin`) → [04-architecture](04-architecture.md) (блоки `GLOBAL_FACTS` и
+  `GLOBAL_KNOWLEDGE`) → [10-operations](10-operations.md) (инструменты и слой `layerGlobalMemory`).
 - **Проверить готовность.** [02-criteria](02-criteria.md) → [10-operations](10-operations.md) (раздел тестов).

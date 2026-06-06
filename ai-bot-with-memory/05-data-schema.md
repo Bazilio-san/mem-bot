@@ -2,10 +2,10 @@
 
 ## Вкратце
 
-Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего шестнадцать таблиц. Их определяют миграции:
-`001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности. Все
-миграции идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и
-`pgvector`.
+Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего восемнадцать таблиц. Их определяют миграции:
+`001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
+`005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`. Все миграции идемпотентны
+(`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
 
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS mem.users (
     display_name text,
     locale       text NOT NULL DEFAULT 'ru',
     timezone     text NOT NULL DEFAULT 'Europe/Moscow',
+    is_admin     boolean NOT NULL DEFAULT false,    -- ручная пометка администратора (управление глобальной памятью)
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
@@ -406,6 +407,59 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 
 ---
 
+## [DATA-9] Две таблицы глобальной памяти (миграция `005_global_memory.sql`)
+
+Идемпотентная миграция `005_global_memory.sql` добавляет колонку `is_admin` в `mem.users`, определяет две таблицы
+глобальной памяти, общей для всех пользователей, и засевает базовый набор глобальных фактов. Назначение и поведение — в
+[14-global-memory.md](14-global-memory.md).
+
+```sql
+-- Глобальные факты (критерий 19): always-on записи, видимые всем и подмешиваемые в каждый запрос.
+CREATE TABLE IF NOT EXISTS mem.global_facts (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = факт действует во всех доменах
+    fact_text   text NOT NULL,
+    priority    integer NOT NULL DEFAULT 100,             -- меньше число — выше при отборе под лимит
+    enabled     boolean NOT NULL DEFAULT true,
+    created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
+    metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_global_facts_enabled ON mem.global_facts (enabled, priority) WHERE enabled = true;
+
+-- Общая база знаний (критерий 20): корпус текстов, видимый всем, поиск по релевантности (вектор + полнотекст).
+CREATE TABLE IF NOT EXISTS mem.global_knowledge (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = знание общее для всех доменов
+    title       text,
+    content     text NOT NULL,
+    tags        text[] NOT NULL DEFAULT '{}',
+    importance  numeric(3,2) NOT NULL DEFAULT 0.50 CHECK (importance >= 0 AND importance <= 1),
+    status      mem.memory_status NOT NULL DEFAULT 'active',
+    source      text,
+    created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
+    embedding   vector(1536),
+    search_tsv  tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(content,''))
+    ) STORED,
+    metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_global_knowledge_domain_status ON mem.global_knowledge (domain_id, status);
+CREATE INDEX IF NOT EXISTS idx_global_knowledge_search_tsv    ON mem.global_knowledge USING gin (search_tsv);
+CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_knowledge
+                                                              USING hnsw (embedding vector_cosine_ops)
+                                                              WHERE embedding IS NOT NULL;
+```
+
+Глобальные таблицы не содержат `user_id`: записи общие для всех. Запись закрыта правами администратора (пометка
+`is_admin`), а секреты пользователей в глобальную память не попадают — они остаются в личной защищённой памяти. Итого с
+глобальной памятью — восемнадцать таблиц.
+
+---
+
 ## Связанные документы
 
 - Как используется память — [06-memory.md](06-memory.md)
@@ -413,3 +467,4 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 - Планировщик и инструменты — [10-operations.md](10-operations.md)
 - Проактивность — [09-proactivity.md](09-proactivity.md)
 - Поджатие истории и миграция `003` — [13-history-compression.md](13-history-compression.md)
+- Глобальная память и миграция `005` — [14-global-memory.md](14-global-memory.md)

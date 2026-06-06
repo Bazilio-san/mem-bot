@@ -6,7 +6,7 @@ import { query } from '../db.js';
 import { chat } from '../llm.js';
 import { config } from '../config.js';
 import { getDomainId, getLastUserMessageTime } from '../repo.js';
-import { buildTemporalContext, formatTemporalContext } from '../utils/temporal.js';
+import { buildTemporalContext, formatTemporalContext, formatDateTime } from '../utils/temporal.js';
 import { getTopicContext, formatTopicContext } from './topics.js';
 
 async function loadFacts(userId, domainId) {
@@ -30,7 +30,8 @@ const TASK_BY_TRIGGER = {
 export async function buildProactiveMessage({ userId, domainKey, triggerType, timezone }) {
   const domainId = await getDomainId(domainKey);
   const facts = await loadFacts(userId, domainId);
-  const temporal = formatTemporalContext(buildTemporalContext(timezone, await getLastUserMessageTime(userId)));
+  const tctx = buildTemporalContext(timezone, await getLastUserMessageTime(userId));
+  const temporal = `${formatDateTime(tctx)}\n${formatTemporalContext(tctx)}`;
   let topics = 'Нет данных о темах.';
   try { topics = formatTopicContext(await getTopicContext(userId, domainId)); } catch { /* темы опциональны */ }
 

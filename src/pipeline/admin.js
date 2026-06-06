@@ -30,3 +30,10 @@ export async function forgetAll(userId) {
   );
   return rowCount;
 }
+
+// Является ли пользователь администратором (ручная пометка is_admin в БД).
+// Только администратор может наполнять и чистить глобальную память (см. global-memory.js).
+export async function isAdmin(userId) {
+  const { rows } = await query('SELECT is_admin FROM mem.users WHERE id = $1', [userId]);
+  return rows[0]?.is_admin === true;
+}

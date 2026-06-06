@@ -1,4 +1,6 @@
-// Темпоральный контекст: время суток, тип дня, пауза с прошлого сообщения и подсказка о настроении момента.
+// Темпоральный контекст: дата, время, часовой пояс, время суток, тип дня, пауза с прошлого сообщения и
+// подсказка о настроении момента. Дата/время/пояс выводятся always-on блоком (formatDateTime), а настрой
+// момента — только в режиме собеседника (formatTemporalContext).
 // Чистый модуль без внешних зависимостей и побочных эффектов. При некорректном поясе откатывается на московское время.
 const DAYS_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 const MONTHS_RU = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
@@ -65,16 +67,22 @@ export function buildTemporalContext(timezone, lastMessageAt) {
   return {
     currentDate: `${t.getDate()} ${MONTHS_RU[t.getMonth()]} ${t.getFullYear()}`,
     currentTime: `${String(hour).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`,
-    timeOfDay: tod, dayOfWeek: DAYS_RU[dow], dayType: dt,
+    timeOfDay: tod, dayOfWeek: DAYS_RU[dow], dayType: dt, timezone,
     timeSinceLastMessage: since, contextHint: contextHint(tod, dt, since),
   };
 }
 
+// Компактная строка с датой, временем, днём недели и часовым поясом. Передаётся модели при ЛЮБОМ
+// запросе (см. agent.js), поэтому держим её одной строкой без зависимости от паузы и настроя момента.
+export function formatDateTime(ctx) {
+  return `Текущая дата и время: ${ctx.currentDate}, ${ctx.currentTime} (${ctx.dayOfWeek}), ` +
+    `часовой пояс ${ctx.timezone}.`;
+}
+
+// Настрой момента для режима собеседника: период суток, пауза с прошлого сообщения и подсказка по тону.
+// Дата, время и часовой пояс сюда НЕ входят — они выводятся отдельным always-on блоком через formatDateTime.
 export function formatTemporalContext(ctx) {
-  const lines = [
-    `Дата и время: ${ctx.currentDate}, ${ctx.currentTime}`,
-    `Сейчас: ${ctx.dayOfWeek}, ${ctx.timeOfDay} (${ctx.dayType})`,
-  ];
+  const lines = [`Период суток: ${ctx.timeOfDay} (${ctx.dayType})`];
   if (ctx.timeSinceLastMessage) lines.push(`Пользователь не писал: ${ctx.timeSinceLastMessage}`);
   if (ctx.contextHint) lines.push(`Подсказка по тону: ${ctx.contextHint}`);
   return lines.join('\n');
