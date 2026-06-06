@@ -66,8 +66,11 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
   }
   const memoryContext = buildMemoryContext(memory, effectiveDomain);
 
+  // [always] Блок CURRENT_DATETIME — текущая дата, время, день недели и часовой пояс. Передаётся модели
+  //          при ЛЮБОМ запросе, независимо от режимов (см. 09-proactivity, формирование в src/utils/temporal.js).
+  //          Стоит в динамической зоне (меняется каждую минуту), чтобы не ломать кэш стабильного префикса.
   // [history] При HISTORY_COMPRESSION_ENABLED собирается HISTORY_CONTEXT — сжатая история (см. 13-history-compression).
-  // [companion] При COMPANION_MODE собирается дополнительный справочный блок: время + темы (см. 09-proactivity).
+  // [companion] При COMPANION_MODE собирается дополнительный справочный блок: настрой момента + темы (см. 09-proactivity).
 
   // Этап 3: ответ модели с циклом инструментов (до 5 шагов).
   // Горячее окно: при выключенном флаге это последние 8 сообщений; при включённом — config.historyCompression.hotWindow.
@@ -77,6 +80,7 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
     { role: 'system', content: memoryContext },
     // ...historyContext (HISTORY_CONTEXT, если включён флаг),
     // ...extraSystem (companion-блок, если включён),
+    dateTimeSystem, // CURRENT_DATETIME — всегда (дата, время, часовой пояс), последним system-блоком
     ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
     { role: 'user', content: userMessage },
   ];

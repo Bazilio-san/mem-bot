@@ -52,6 +52,7 @@
 MAIN_SYSTEM            -- стабильный системный промпт (удобен для кэширования)
 MEMORY_CONTEXT         -- долговременная память: профиль, домен, задачи, защищённые ссылки
 HISTORY_CONTEXT        -- сжатая история текущего диалога
+CURRENT_DATETIME       -- дата, время, часовой пояс; всегда, но в динамической зоне (меняется каждую минуту)
 последние N сообщений   -- горячее окно, дословно
 новое сообщение пользователя
 ```
@@ -210,6 +211,7 @@ const messages = [
   { role: 'system', content: MAIN_SYSTEM },
   { role: 'system', content: memoryContext },
   ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
+  dateTimeSystem, // CURRENT_DATETIME — дата, время, часовой пояс; всегда, в динамической зоне
   ...hotMessages.map(toChatMessage),
   { role: 'user', content: userMessage },
 ];

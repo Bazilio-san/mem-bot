@@ -43,7 +43,7 @@
 | ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
 |---------|----------|-------------------------------|----------------|
 | CRIT-13 | Бот не зацикливается на темах (тематический трекинг) | `mem.topic_mentions` + `src/pipeline/topics.js` | `COMPANION_MODE` |
-| CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | `COMPANION_MODE` |
+| CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | дата/время/пояс — всегда; настрой момента — `COMPANION_MODE` |
 | CRIT-15 | Бот пишет первым по уместному поводу (триггеры и анти-спам) | `mem.proactive_triggers` + `src/pipeline/proactive.js` | `PROACTIVE_ENABLED` |
 | CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | `welcome_back` + `src/pipeline/proactiveMessage.js` | `PROACTIVE_ENABLED` |
 | CRIT-17 | Внешние события превращаются в персональные поводы | `src/pipeline/events.js` + `mem.event_deliveries` | `PROACTIVE_EVENTS_ENABLED` |
