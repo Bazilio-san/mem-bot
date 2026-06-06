@@ -71,3 +71,44 @@ ${assistantResponse}`,
   });
   return result.candidates || [];
 }
+
+// Извлечение тем диалога для тематического трекинга (критерий 13). Возвращает массив тем с оценкой
+// вовлечённости пользователя. Используется только в режиме собеседника (COMPANION_MODE).
+const TOPICS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['topics'],
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['topic_key', 'user_engagement'],
+        properties: {
+          topic_key: { type: 'string' },        // короткий стабильный ключ: fitness, work_stress, travel
+          user_engagement: { type: 'number' },   // 0..1 — насколько живо пользователь отвечал по теме
+        },
+      },
+    },
+  },
+};
+
+const TOPICS_SYSTEM = `Ты выделяешь темы из диалога. Верни короткие стабильные ключи тем латиницей в snake_case
+и оценку вовлечённости пользователя в каждую тему от 0 до 1 (высокая — пользователь активно отвечает и развивает тему,
+низкая — отвечает односложно или уходит). Если тем нет — верни {"topics": []}.`;
+
+export async function extractTopics({ recentMessages }) {
+  try {
+    const res = await chatJSON({
+      model: config.llm.auxModel,
+      schema: TOPICS_SCHEMA,
+      schemaName: 'dialog_topics',
+      system: TOPICS_SYSTEM,
+      user: recentMessages,
+    });
+    return Array.isArray(res?.topics) ? res.topics : [];
+  } catch {
+    return [];
+  }
+}

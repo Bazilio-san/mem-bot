@@ -72,3 +72,36 @@ export async function logToolCall({ conversationId, userId, toolName, toolCallId
     [conversationId, userId, toolName, toolCallId ?? null, input ?? {}, output ?? null, status, latencyMs ?? null, error ?? null],
   );
 }
+
+// Время последнего сообщения пользователя (для темпорального контекста и триггера возврата).
+export async function getLastUserMessageTime(userId) {
+  const { rows } = await query(
+    `SELECT max(cm.created_at) AS last_at
+       FROM mem.conversation_messages cm
+      WHERE cm.user_id = $1 AND cm.role = 'user'`,
+    [userId],
+  );
+  return rows[0]?.last_at ? new Date(rows[0].last_at) : null;
+}
+
+// Все пользователи, у которых есть хотя бы один включённый триггер (для прохода проактивности).
+export async function listUsersWithTriggers() {
+  const { rows } = await query(
+    `SELECT DISTINCT u.id, u.external_id, u.timezone
+       FROM mem.users u
+       JOIN mem.proactive_triggers pt ON pt.user_id = u.id AND pt.enabled = true`,
+  );
+  return rows;
+}
+
+// Идемпотентное создание набора триггеров по умолчанию для пользователя.
+export async function ensureDefaultTriggers(userId, domainId, defaults) {
+  for (const t of defaults) {
+    await query(
+      `INSERT INTO mem.proactive_triggers (user_id, domain_id, trigger_type, config)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (user_id, trigger_type) DO NOTHING`,
+      [userId, domainId, t.trigger_type, JSON.stringify(t.config || {})],
+    );
+  }
+}

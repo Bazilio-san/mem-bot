@@ -11,6 +11,10 @@ import 'dotenv/config';
 
 const env = process.env;
 
+// Чтение булевых флагов из окружения. Включают значения 1/true/on/yes; всё прочее — выключено.
+const flag = (v, d = false) =>
+  v === undefined ? d : ['1', 'true', 'on', 'yes'].includes(String(v).trim().toLowerCase());
+
 // Базовая БД, к которой подключаемся для создания целевой БД памяти.
 const adminUrl = env.DATABASE_URL || 'postgresql://postgres:1@localhost:5432/postgres';
 
@@ -47,6 +51,26 @@ export const config = {
 
   timezone: env.TZ_DEFAULT || 'Europe/Moscow',
   debug: (env.DEBUG || '').split(',').map((s) => s.trim()).filter(Boolean),
+
+  // Режим собеседника: темпоральный и тематический контекст в онлайн-ответе + извлечение тем после ответа.
+  companion: {
+    enabled: flag(env.COMPANION_MODE, false),
+  },
+
+  // Проактивный контур: бот пишет первым по триггерам с анти-спамом. По умолчанию выключен.
+  proactive: {
+    enabled: flag(env.PROACTIVE_ENABLED, false),
+    intervalMs: Number(env.PROACTIVE_INTERVAL_MS || 300000),       // как часто воркер проверяет триггеры
+    inactivityMinutes: Number(env.PROACTIVE_INACTIVITY_MIN || 1440),
+    checkinHour: Number(env.PROACTIVE_CHECKIN_HOUR || 10),
+    goalIntervalMinutes: Number(env.PROACTIVE_GOAL_INTERVAL_MIN || 2880),
+    welcomeBackGapMinutes: Number(env.PROACTIVE_WELCOME_GAP_MIN || 60),
+    events: {
+      // Контур внешних событий. Требует proactive.enabled (использует ту же доставку и анти-спам).
+      enabled: flag(env.PROACTIVE_EVENTS_ENABLED, false),
+      relevanceThreshold: Number(env.NEWS_RELEVANCE_THRESHOLD || 0.6),
+    },
+  },
 };
 
 export function debugEnabled(category) {
