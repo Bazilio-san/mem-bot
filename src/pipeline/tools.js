@@ -61,7 +61,7 @@ export const toolDefs = [
     type: 'function',
     function: {
       name: 'search_flights',
-      description: 'Поиск авиабилетов по маршруту и дате (доменный инструмент travel).',
+      description: 'Поиск авиабилетов по маршруту и дате (доменный инструмент flight_search).',
       parameters: {
         type: 'object', additionalProperties: false,
         required: ['origin', 'destination', 'date'],

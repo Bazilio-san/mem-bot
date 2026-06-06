@@ -34,8 +34,8 @@
 
 ```jsonc
 {
-  "domain_key": "flights",
-  "title": "Поиск и покупка авиабилетов",
+  "domain_key": "flight_search",
+  "title": "Поиск авиабилетов",
   "entities": [
     {
       "entity_type": "flight_preference",

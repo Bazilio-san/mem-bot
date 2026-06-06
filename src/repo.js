@@ -25,6 +25,22 @@ export async function getDomainId(domainKey) {
   return id;
 }
 
+let domainsListCache = null;
+
+// Получить список всех доменов агента (ключ, название, описание) с кэшированием.
+// Используется классификатором, чтобы перечень доменов брался из базы, а не дублировался в промпте.
+export async function listDomains() {
+  if (domainsListCache) return domainsListCache;
+  const { rows } = await query('SELECT domain_key, title, description FROM mem.agent_domains ORDER BY domain_key');
+  domainsListCache = rows;
+  return rows;
+}
+
+// Сбросить кэш списка доменов (вызывать после добавления или изменения домена в базе).
+export function invalidateDomainsCache() {
+  domainsListCache = null;
+}
+
 // Найти или создать активный диалог пользователя в указанном домене.
 export async function ensureConversation(userId, domainKey = 'general') {
   const domainId = await getDomainId(domainKey);

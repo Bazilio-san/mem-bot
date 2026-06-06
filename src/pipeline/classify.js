@@ -1,6 +1,7 @@
 // Этап 1 пайплайна: быстрая классификация входящего сообщения дешёвой моделью.
 // Определяет намерение, домен, сущности и то, какие виды памяти и инструменты нужны.
 import { chatJSON } from '../llm.js';
+import { listDomains } from '../repo.js';
 
 const SCHEMA = {
   type: 'object',
@@ -21,16 +22,26 @@ const SCHEMA = {
   },
 };
 
-const SYSTEM = `Ты классификатор входящего сообщения для агентского приложения с памятью.
-Определи: намерение пользователя; домен (general, travel, landing_sales, math_tutor или другой явно указанный);
-важные сущности; какие виды памяти нужны; нужны ли инструменты.
+// Системный промпт собирается динамически: перечень доменов берётся из таблицы mem.agent_domains,
+// чтобы добавление нового домена в базу не требовало правки этого файла.
+async function buildSystemPrompt() {
+  const domains = await listDomains();
+  const domainsList = domains
+    .map((d) => `  - ${d.domain_key} (${d.title})${d.description ? `: ${d.description}` : ''}`)
+    .join('\n');
+  return `Ты классификатор входящего сообщения для агентского приложения с памятью.
+Определи: намерение пользователя; домен; важные сущности; какие виды памяти нужны; нужны ли инструменты.
+В поле domain_key укажи ключ одного из доступных доменов:
+${domainsList}
+Если ни один домен не подходит, используй general.
 Не отвечай пользователю. Верни только JSON по схеме.`;
+}
 
 export async function classifyIntent(userMessage, currentDomainKey = 'general', shortState = '') {
   return chatJSON({
     schema: SCHEMA,
     schemaName: 'intent_classification',
-    system: SYSTEM,
+    system: await buildSystemPrompt(),
     user: `Текущий домен агента: ${currentDomainKey}
 Последнее состояние диалога: ${shortState || 'нет'}
 Сообщение пользователя: ${userMessage}`,
