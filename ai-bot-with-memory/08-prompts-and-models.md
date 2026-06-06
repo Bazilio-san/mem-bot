@@ -90,6 +90,32 @@ reminder`.
 Подаётся отдельным system-сообщением после стабильного системного промпта и всегда предваряется правилами, объявляющими
 его справочными данными. Полный вид — в [06-memory.md](06-memory.md).
 
+### Решение о слиянии факта (схема для доделки)
+
+В текущей реализации конфликт нового факта с уже сохранённым решается детерминированными правилами `decideMerge`
+(см. [06-memory.md](06-memory.md)). На случай сложных конфликтов, которые правилами разрешить трудно, в архитектуре
+заложена альтернатива — отдельный вызов модели, возвращающий решение о слиянии по строгой JSON-схеме `MergeDecision`.
+Схема пока не используется и сохранена как кандидат на доделку (см. таблицу доделок в [12-appendix.md](12-appendix.md)):
+
+```json
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["decision", "target_memory_id", "merged_memory_text", "merged_data", "reason"],
+  "properties": {
+    "decision": { "type": "string",
+      "enum": ["create_new","update_existing","replace_existing","archive_existing","ignore","ask_confirmation"] },
+    "target_memory_id":   { "type": ["string","null"] },
+    "merged_memory_text": { "type": ["string","null"] },
+    "merged_data":        { "type": ["object","null"], "additionalProperties": true },
+    "reason":             { "type": "string" }
+  }
+}
+```
+
+Поле `decision` выбирает одно из шести действий: создать новый факт, обновить существующий, заменить его целиком,
+архивировать, проигнорировать кандидата или переспросить пользователя. Поля `target_memory_id`, `merged_memory_text` и
+`merged_data` заполняются, когда действие затрагивает конкретную запись, а `reason` хранит обоснование решения для аудита.
+
 ---
 
 ## Конфигурация
