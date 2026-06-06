@@ -46,7 +46,7 @@ ${JSON.stringify(schema)}
 
 ## Промпты всех этапов
 
-### Классификатор запроса ✅
+### Классификатор запроса
 
 Дешёвая модель определяет намерение, домен, сущности и то, какие виды памяти и инструменты нужны. Возвращает строгий JSON,
 а не ответ пользователю.
@@ -62,14 +62,14 @@ ${JSON.stringify(schema)}
 `needed_memory_scopes`, `needs_tools`, `candidate_tools`; область памяти — одно из `dialog | profile | domain | secure |
 reminder`.
 
-### Извлечение кандидатов в память ✅
+### Извлечение кандидатов в память
 
 Запускается после ответа. Промпт перечисляет, что сохранять и что не сохранять, требует помечать чувствительные данные как
 `high`/`secret` с `requires_confirmation = true` и безопасным `memory_text`. Схема `memory_candidates`: массив объектов с
 полями `scope`, `memory_kind`, `entity_type`, `entity_key`, `memory_text`, `data`, `importance`, `confidence`,
 `sensitivity`, `ttl_days`, `requires_confirmation`, `reason`. Полный текст промпта с примерами — в `src/pipeline/extract.js`.
 
-### Извлечение задачи для планировщика ✅
+### Извлечение задачи для планировщика
 
 ```text
 Ты извлекаешь задачи, напоминания и фоновые проверки из сообщения пользователя.
@@ -79,35 +79,16 @@ reminder`.
 Верни только JSON по схеме.
 ```
 
-### Извлечение тем диалога ✅ (режим собеседника)
+### Извлечение тем диалога (режим собеседника)
 
 Параллельно с извлечением фактов при `COMPANION_MODE` отдельный вызов возвращает темы диалога с оценкой вовлечённости.
 Схема `dialog_topics`: массив объектов с `topic_key` (короткий ключ латиницей в snake_case) и `user_engagement` (0..1).
 Подробнее — в [09-proactivity.md](09-proactivity.md).
 
-### Служебный блок MEMORY_CONTEXT ✅
+### Служебный блок MEMORY_CONTEXT
 
 Подаётся отдельным system-сообщением после стабильного системного промпта и всегда предваряется правилами, объявляющими
 его справочными данными. Полный вид — в [06-memory.md](06-memory.md).
-
-### Решение о слиянии факта 🔜 (схема для доделки)
-
-В реализации заменена правилами `decideMerge`. Оставлена для будущего умного слияния сложных конфликтов.
-
-```json
-{
-  "type": "object", "additionalProperties": false,
-  "required": ["decision", "target_memory_id", "merged_memory_text", "merged_data", "reason"],
-  "properties": {
-    "decision": { "type": "string",
-      "enum": ["create_new","update_existing","replace_existing","archive_existing","ignore","ask_confirmation"] },
-    "target_memory_id":   { "type": ["string","null"] },
-    "merged_memory_text": { "type": ["string","null"] },
-    "merged_data":        { "type": ["object","null"], "additionalProperties": true },
-    "reason":             { "type": "string" }
-  }
-}
-```
 
 ---
 
@@ -158,13 +139,12 @@ export const config = {
 | Классификация запроса | `gpt-5.4-nano` | `AUX_MODEL` |
 | Извлечение фактов в память | `gpt-5.4-mini` | `EXTRACT_MODEL` |
 | Извлечение тем диалога | `gpt-5.4-nano` (auxModel) | `AUX_MODEL` |
-| Слияние фактов | заменено правилами (без модели) | — |
+| Слияние фактов | детерминированные правила, без вызова модели | — |
 | Эмбеддинги | `text-embedding-3-small` (1536) | `EMBED_MODEL` |
 
 Все модели проверены через прокси скриптом `tests/check-llm.js` (`npm run check:llm`): подтверждены чат, строгий JSON,
 вызов инструментов и эмбеддинги. Замечание о скорости: на этом прокси модели `gpt-5.4-*` отвечают примерно за 5–10 секунд,
 а `gpt-4o-mini` — примерно за 1,2 секунды; для максимально быстрого отклика можно задать `MAIN_MODEL=gpt-4o-mini`.
-Потоковая передача ответа и кэширование неизменной части промпта пока не включены (доделки).
 
 ---
 

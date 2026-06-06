@@ -82,8 +82,8 @@ ON CONFLICT (domain_key) DO NOTHING;
 ## Диалоги, сообщения и сводки
 
 `mem.conversations` — отдельные диалоги; `current_state` хранит оперативное состояние задачи. `mem.conversation_messages`
-— сырые сообщения; в промпт идут только последние несколько. `mem.conversation_summaries` — сжатая краткосрочная память
-(резюме плюс состояние); таблица создана, но её наполнение суммаризатором отнесено к доделкам (🔜).
+— сырые сообщения; в промпт идут только последние несколько. `mem.conversation_summaries` хранит сжатую краткосрочную
+память: резюме диалога плюс структурированное состояние.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.conversations (
@@ -186,8 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw     ON mem.memory_items USI
 
 Секретные данные хранятся в `mem.secure_records` в зашифрованном виде (`encrypted_payload bytea`), а в обычную память и
 в промпт идёт только безопасное описание `redacted_summary`. Таблица `memory_secure_links` связывает безопасный факт с
-секретной записью (создана, в текущем коде ещё не используется, 🔜). Подробности работы — в
-[07-secure-privacy.md](07-secure-privacy.md).
+секретной записью. Подробности работы — в [07-secure-privacy.md](07-secure-privacy.md).
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.secure_records (
@@ -300,8 +299,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_a
 ## Журнал инструментов и очередь записи памяти
 
 `tool_calls` — журнал всех вызовов инструментов (вход, выход, статус, задержка, ошибка) для отладки, аудита и
-безопасности. `memory_jobs` — очередь асинхронной записи памяти (создана для будущего выноса записи в отдельный воркер;
-сейчас запись идёт промисом сразу после ответа, 🟡).
+безопасности. `memory_jobs` — очередь асинхронной записи памяти отдельным воркером.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.tool_calls (

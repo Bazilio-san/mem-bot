@@ -108,8 +108,7 @@ tests/check-llm.js           проверка доступности и возм
 8. **Инструменты и агент.** `src/pipeline/tools.js` и `src/agent.js` — см. [04-architecture.md](04-architecture.md).
 9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
 10. **Проактивность.** Миграция `002`, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под
-    флагами — см. [09-proactivity.md](09-proactivity.md). Полный код шаг за шагом — в
-    `ai-bot-proactivity-implementation-plan.md` в корне проекта.
+    флагами — см. [09-proactivity.md](09-proactivity.md). Код — каталог `src/`.
 
 ---
 

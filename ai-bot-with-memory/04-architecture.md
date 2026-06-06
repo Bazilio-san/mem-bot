@@ -109,7 +109,7 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
 }
 ```
 
-Полный код с ветками собеседника — в `ai-bot-proactivity-implementation-plan.md` (шаг 6) и в `src/agent.js`.
+Полный код с ветками собеседника — в `src/agent.js`.
 
 ---
 
