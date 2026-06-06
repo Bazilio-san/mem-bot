@@ -14,11 +14,18 @@
     "scheduler": "node src/scheduler-run.js",
     "sandbox": "node src/sandbox/server.js",
     "seed:sandbox": "node scripts/seed-sandbox.js",
+    "delete:user": "node scripts/delete-user.js",
     "test": "node tests/run.js",
-    "check:llm": "node tests/check-llm.js"
+    "test:schema": "node tests/schema.test.js",
+    "check:llm": "node tests/check-llm.js",
+    "schema:generate": "node src/schema/cli.js generate",
+    "schema:save": "node src/schema/cli.js save",
+    "schema:list": "node src/schema/cli.js list",
+    "schema:show": "node src/schema/cli.js show"
   },
   "private": true,
   "dependencies": {
+    "ajv": "^8.20.0",
     "dotenv": "^16.4.7",
     "openai": "^4.77.0",
     "pg": "^8.13.1"

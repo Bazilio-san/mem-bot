@@ -1,0 +1,50 @@
+{
+  "domain_key": "math_tutor",
+  "title": "Репетитор по математике",
+  "description": "Темы, ошибки и прогресс ученика по математике.",
+  "allowed_memory_kinds": ["preference", "goal", "progress", "state", "history"],
+  "entities": [
+    {
+      "entity_type": "topic",
+      "description": "Тема, над которой работает ученик, и уровень его понимания.",
+      "entity_key": { "mode": "slug" },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["understanding", "notes"],
+        "properties": {
+          "understanding": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "entity_type": "mistake",
+      "description": "Типичная ошибка ученика, которую стоит отрабатывать.",
+      "entity_key": { "mode": "slug" },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description", "topic"],
+        "properties": {
+          "description": { "type": ["string", "null"] },
+          "topic": { "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "entity_type": "goal",
+      "description": "Учебная цель ученика.",
+      "entity_key": { "mode": "slug" },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description", "deadline"],
+        "properties": {
+          "description": { "type": ["string", "null"] },
+          "deadline": { "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

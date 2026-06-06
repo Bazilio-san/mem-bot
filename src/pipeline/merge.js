@@ -4,6 +4,7 @@
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 import { getDomainId } from '../repo.js';
+import { validateAndCanonicalize } from '../schema/validate.js';
 
 // Порог автосохранения (раздел 19): важность ≥0.6, уверенность ≥0.7, не чувствительное.
 function passesAutoSave(c) {
@@ -28,26 +29,26 @@ async function findSimilar(userId, c) {
   return rows;
 }
 
-async function insertMemory(userId, domainId, c, sourceConversationId) {
+async function insertMemory(userId, domainId, c, sourceConversationId, extraMeta = null) {
   const vec = await embed(c.memory_text);
   const expiresAt = c.ttl_days ? new Date(Date.now() + c.ttl_days * 86400000) : null;
   const { rows } = await query(
     `INSERT INTO mem.memory_items
        (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text, data,
-        importance, confidence, sensitivity, status, source_conversation_id, expires_at, embedding)
+        importance, confidence, sensitivity, status, source_conversation_id, expires_at, embedding, metadata)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
              CASE WHEN $12 THEN 'pending_confirmation'::mem.memory_status ELSE 'active'::mem.memory_status END,
-             $13,$14,$15)
+             $13,$14,$15,$16)
      RETURNING id`,
     [userId, domainId, c.scope, c.memory_kind, c.entity_type, c.entity_key, c.memory_text, c.data || {},
       c.importance, c.confidence, c.sensitivity, !!c.requires_confirmation, sourceConversationId, expiresAt,
-      vec ? vectorToSql(vec) : null],
+      vec ? vectorToSql(vec) : null, extraMeta ? JSON.stringify(extraMeta) : {}],
   );
   return rows[0].id;
 }
 
 // Обновить существующий факт новым значением, сохранив историю предыдущего значения.
-async function updateMemory(targetId, c) {
+async function updateMemory(targetId, c, extraMeta = null) {
   const vec = await embed(c.memory_text);
   const { rows: prev } = await query('SELECT memory_text, data FROM mem.memory_items WHERE id = $1', [targetId]);
   const history = prev[0] ? { previous_text: prev[0].memory_text, previous_data: prev[0].data, replaced_at: new Date().toISOString() } : {};
@@ -58,7 +59,7 @@ async function updateMemory(targetId, c) {
          metadata = metadata || $7::jsonb
      WHERE id = $1`,
     [targetId, c.memory_text, c.data || {}, c.importance, c.confidence,
-      vec ? vectorToSql(vec) : null, JSON.stringify({ last_update: history })],
+      vec ? vectorToSql(vec) : null, JSON.stringify({ last_update: history, ...(extraMeta || {}) })],
   );
   return targetId;
 }
@@ -105,19 +106,33 @@ export async function processCandidate(userId, domainKey, candidate, sourceConve
     return { action: 'ignored', reason: 'низкая важность/уверенность', candidate };
   }
 
+  // Применить схему домена: проверить data и привести entity_key к словарю.
+  // Схема обязательна для предметных фактов: если у домена нет схемы, сущность не объявлена
+  // или data не проходит валидацию — факт отклоняется и НЕ сохраняется.
+  const v = await validateAndCanonicalize(domainKey, candidate);
+  if (!v.ok) {
+    return { action: 'rejected', reason: v.reason, issues: v.issues, candidate: v.candidate };
+  }
+  candidate = v.candidate;
+  // Метаданные схемы (версия и замечания канонизации) кладём в строку факта.
+  const schemaMeta = v.schema_version == null ? null : {
+    schema_version: v.schema_version,
+    ...(v.issues.length ? { schema_issues: v.issues } : {}),
+  };
+
   const similar = await findSimilar(userId, candidate);
   const { decision, targetId } = decideMerge(candidate, similar);
 
   if (decision === 'create_new') {
-    const id = await insertMemory(userId, domainId, candidate, sourceConversationId);
+    const id = await insertMemory(userId, domainId, candidate, sourceConversationId, schemaMeta);
     return { action: 'created', id };
   }
   if (decision === 'update_existing') {
-    const id = await updateMemory(targetId, candidate);
+    const id = await updateMemory(targetId, candidate, schemaMeta);
     return { action: 'updated', id };
   }
   if (decision === 'replace_existing') {
-    const newId = await insertMemory(userId, domainId, candidate, sourceConversationId);
+    const newId = await insertMemory(userId, domainId, candidate, sourceConversationId, schemaMeta);
     await archiveMemory(targetId, newId);
     return { action: 'replaced', id: newId, archived: targetId };
   }

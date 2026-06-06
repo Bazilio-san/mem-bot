@@ -2,10 +2,11 @@
 
 ## Вкратце
 
-Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего восемнадцать таблиц. Их определяют миграции:
+Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего девятнадцать таблиц. Их определяют миграции:
 `001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
-`005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`. Все миграции идемпотентны
-(`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
+`005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `006_domain_schemas.sql` — таблица-реестр
+схем `data` под домен. Все миграции идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются
+расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
 
@@ -455,8 +456,36 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
 ```
 
 Глобальные таблицы не содержат `user_id`: записи общие для всех. Запись закрыта правами администратора (пометка
-`is_admin`), а секреты пользователей в глобальную память не попадают — они остаются в личной защищённой памяти. Итого с
-глобальной памятью — восемнадцать таблиц.
+`is_admin`), а секреты пользователей в глобальную память не попадают — они остаются в личной защищённой памяти.
+
+---
+
+## [DATA-10] Реестр схем `data` под домен (миграция `006`)
+
+Таблица `mem.domain_schemas` хранит версионируемые определения схем `data` и правил канонизации `entity_key` по доменам.
+Это источник истины во время выполнения: на каждый домен приходится не более одной активной версии (гарантирует
+частичный уникальный индекс), а при сохранении новой версии прежняя активная уходит в архив. Подробно слой описан в
+[11-per-domain-schema.md](11-per-domain-schema.md).
+
+```sql
+CREATE TABLE IF NOT EXISTS mem.domain_schemas (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_key  text NOT NULL,
+    version     integer NOT NULL,
+    status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','draft')),
+    title       text NOT NULL,
+    description text,
+    definition  jsonb NOT NULL,        -- entities[].data_schema (закрытая JSON Schema) + словари entity_key
+    created_by  text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (domain_key, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_schemas_active
+ON mem.domain_schemas (domain_key) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_domain_schemas_domain ON mem.domain_schemas (domain_key, version DESC);
+```
+
+Итого с глобальной памятью и реестром схем доменов — девятнадцать таблиц.
 
 ---
 

@@ -1,0 +1,69 @@
+{
+  "domain_key": "flight_search",
+  "title": "Поиск авиабилетов",
+  "description": "Авиабилеты, рейсы, аэропорты, даты вылета и пересадки.",
+  "allowed_memory_kinds": ["preference", "constraint", "goal", "state", "history"],
+  "entities": [
+    {
+      "entity_type": "city",
+      "description": "Город пользователя в контексте перелётов: домашний, вылета, назначения.",
+      "entity_key": {
+        "mode": "fixed_vocab",
+        "vocabulary": ["home_city", "departure", "destination"],
+        "synonyms": {
+          "home_city": ["домашний город", "родной город", "мой город"],
+          "departure": ["вылет", "город вылета", "откуда"],
+          "destination": ["прилёт", "город назначения", "куда"]
+        }
+      },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["city_name"],
+        "properties": {
+          "city_name": { "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "entity_type": "flight_preference",
+      "description": "Устойчивые предпочтения по перелётам.",
+      "entity_key": {
+        "mode": "fixed_vocab",
+        "vocabulary": ["cabin", "time", "airline", "baggage"],
+        "synonyms": {
+          "time": ["время", "ночные", "ночные рейсы", "время вылета"],
+          "cabin": ["класс", "класс обслуживания"],
+          "baggage": ["багаж", "ручная кладь"]
+        }
+      },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["avoid", "cabin_class", "notes"],
+        "properties": {
+          "avoid": { "type": "array", "items": { "type": "string" } },
+          "cabin_class": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "entity_type": "trip",
+      "description": "Текущая или планируемая поездка.",
+      "entity_key": { "mode": "slug" },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["origin", "destination", "date", "passengers", "status"],
+        "properties": {
+          "origin": { "type": ["string", "null"] },
+          "destination": { "type": ["string", "null"] },
+          "date": { "type": ["string", "null"] },
+          "passengers": { "type": ["integer", "null"] },
+          "status": { "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

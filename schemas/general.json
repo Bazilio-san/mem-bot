@@ -1,0 +1,37 @@
+{
+  "domain_key": "general",
+  "title": "Универсальный помощник",
+  "description": "Базовый домен без узкой специализации. Предметные сущности общего назначения.",
+  "allowed_memory_kinds": ["fact", "preference", "goal", "relationship", "state", "history"],
+  "entities": [
+    {
+      "entity_type": "person",
+      "description": "Человек, о котором пользователь рассказал (родственник, коллега, знакомый).",
+      "entity_key": { "mode": "slug" },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "relation", "notes"],
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "relation": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "entity_type": "note",
+      "description": "Произвольная предметная заметка о чём-то, что стоит запомнить.",
+      "entity_key": { "mode": "slug" },
+      "data_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["topic", "content"],
+        "properties": {
+          "topic": { "type": ["string", "null"] },
+          "content": { "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

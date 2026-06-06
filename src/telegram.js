@@ -74,6 +74,15 @@ function enqueueUpdate(message) {
   next.catch(() => {}).finally(() => { if (chatChains.get(chatId) === next) chatChains.delete(chatId); });
 }
 
+// Список команд для меню бота (кнопка «Меню» рядом с полем ввода и подсказки при наборе «/»).
+// Описания видны пользователю, поэтому они краткие и на русском языке.
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Запустить бота и показать справку' },
+  { command: 'help', description: 'Показать справку и список команд' },
+  { command: 'domain', description: 'Сменить домен общения, например work или personal' },
+  { command: 'proactive', description: 'Вручную запустить проактивный триггер' },
+];
+
 // Вызов произвольного метода Telegram Bot API. Бросает исключение, если Telegram вернул ошибку.
 async function tg(method, body) {
   const res = await fetch(`${API}/${method}`, {
@@ -312,6 +321,9 @@ async function pollLoop() {
 
 async function main() {
   const me = await tg('getMe', {});                                 // заодно проверяем валидность токена
+  // Регистрируем команды в меню бота. Если запрос не прошёл, это не критично — продолжаем работу.
+  try { await tg('setMyCommands', { commands: BOT_COMMANDS }); }
+  catch (err) { console.error('Не удалось зарегистрировать меню команд:', err.message); }
   console.log(`Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
     config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.');
   await startOutboxListener();                                       // событийная доставка очереди (LISTEN/NOTIFY)

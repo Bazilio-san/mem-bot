@@ -92,10 +92,15 @@ reminder`.
 
 ### [PROMPT-3] Извлечение кандидатов в память
 
-Запускается после ответа. Промпт перечисляет, что сохранять и что не сохранять, требует помечать чувствительные данные как
-`high`/`secret` с `requires_confirmation = true` и безопасным `memory_text`. Схема `memory_candidates`: массив объектов с
-полями `scope`, `memory_kind`, `entity_type`, `entity_key`, `memory_text`, `data`, `importance`, `confidence`,
-`sensitivity`, `ttl_days`, `requires_confirmation`, `reason`. Полный текст промпта с примерами — в `src/pipeline/extract.js`.
+Запускается после ответа и работает в два прохода. Первый проход перечисляет, что сохранять и что не сохранять, требует
+помечать чувствительные данные как `high`/`secret` с `requires_confirmation = true` и безопасным `memory_text`, и для
+домена со схемой подставляет перечень его сущностей и полей. Схема `memory_candidates`: массив объектов с полями `scope`,
+`memory_kind`, `entity_type`, `entity_key`, `memory_text`, `data`, `importance`, `confidence`, `sensitivity`, `ttl_days`,
+`requires_confirmation`, `reason`. Второй проход применяется к предметным кандидатам, чья сущность объявлена в схеме
+домена: под каждую сущность собирается закрытая схема ответа, где `data` равно `data_schema` сущности, а `entity_key` для
+режима `fixed_vocab` ограничен словарём. Модель перезаполняет ровно эти поля с точными типами и значениями, поэтому на
+запись приходит уже валидный кандидат, а итоговый контроль всё равно выполняется в `validateAndCanonicalize`. Полный текст
+промптов — в `src/pipeline/extract.js`, слой схем — в [11-per-domain-schema.md](11-per-domain-schema.md).
 
 ### [PROMPT-4] Извлечение задачи для планировщика
 
