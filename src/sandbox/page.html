@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Песочница памяти</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#ffffff; --panel2:#f8fafc; --hover:#f1f5f9;
+    --line:#e3e7ee; --line2:#d3d9e3;
+    --ink: #000000; --ink-dim:#2b3340; --ink-faint:#56606e;
+    --profile:#8a4f08; --dialog:#0b6492; --domain:#0a7a52; --secure:#bf3128; --reminder:#5f37b0;
+    --accent:#0b6492;
+    --mono:'JetBrains Mono',monospace; --sans:'IBM Plex Sans',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  .wrap{height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+  header{display:flex;align-items:center;gap:14px;padding:9px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:9px;margin-right:4px}
+  .brand b{font-weight:700;font-size:13.5px;letter-spacing:-.2px}
+  .ctrl{display:flex;align-items:center;gap:6px}
+  .ctrl label{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-faint);font-family:var(--mono)}
+  select{appearance:none;background:var(--panel2);color:var(--ink);border:1px solid var(--line2);border-radius:3px;
+    padding:5px 26px 5px 9px;font-family:var(--mono);font-size:12px;cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M1 3l4 4 4-4' stroke='%2356606e' stroke-width='1.4' fill='none'/></svg>");
+    background-repeat:no-repeat;background-position:right 9px center}
+  select:focus{outline:none;border-color:var(--accent)}
+  .tabs{margin-left:auto;display:flex;gap:0;background:var(--panel);padding:0;border-radius:3px;border:1px solid var(--line2);overflow:hidden}
+  .tab{padding:6px 13px;border:none;background:transparent;color:var(--ink-dim);
+    font-family:var(--mono);font-size:11.5px;cursor:pointer;transition:.12s;display:flex;align-items:center;gap:6px}
+  .tab+.tab{border-left:1px solid var(--line2)}
+  .tab.active{background:var(--ink);color:#fff}
+  .pill{font-family:var(--mono);font-size:10px;background:rgba(255,255,255,.25);color:inherit;padding:0 6px;border-radius:2px}
+  .tab:not(.active) .pill{background:#e9edf3;color:var(--ink-dim)}
+  .domain-badge{font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--panel2);border:1px solid var(--line2);border-radius:3px;padding:4px 9px;display:inline-flex;align-items:center}
+  .domain-badge b{font-weight:600}
+
+  main{flex:1;display:grid;grid-template-columns:340px 1fr;min-height:0}
+  @media(max-width:920px){main{grid-template-columns:1fr}}
+
+  .chat{border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--panel);min-height:0}
+  .messages{flex:1;overflow:auto;padding:13px;display:flex;flex-direction:column;gap:8px;min-height:110px}
+  .messages::before{content:"";margin-top:auto}
+  .msg{max-width:90%;padding:7px 11px;border-radius:4px;font-size:12.5px;line-height:1.42}
+  .msg.user{align-self:flex-end;background:#e4f1fb;border:1px solid #bfe0f5}
+  .msg.bot{align-self:flex-start;background:var(--panel2);border:1px solid var(--line)}
+  .msg.sys{align-self:center;max-width:100%;background:transparent;border:1px dashed var(--line2);color:var(--ink-faint);
+    font-family:var(--mono);font-size:10px;text-align:center;border-radius:3px;padding:4px 10px}
+  .msg .used{margin-top:5px;display:flex;flex-wrap:wrap;gap:3px}
+  .chip{font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:2px;border:1px solid;background:#fff}
+
+  .composer{border-top:1px solid var(--line);padding:10px;background:var(--panel2)}
+  textarea{width:100%;resize:none;background:var(--panel);border:1px solid var(--line2);border-radius:3px;
+    color:var(--ink);font-family:var(--sans);font-size:12.5px;padding:8px 10px;min-height:50px}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  .composer-row{display:flex;gap:6px;margin-top:7px}
+  button.act{flex:1;border:none;border-radius:3px;padding:8px;font-family:var(--mono);font-size:11px;cursor:pointer;transition:.12s}
+  button.act:hover{filter:brightness(.97)}
+  button.act:disabled{opacity:.5;cursor:wait}
+  .btn-filter{background:var(--domain);color:#fff;font-weight:500}
+  .btn-send{background:var(--panel);color:var(--ink-dim);border:1px solid var(--line2)}
+  .hint{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:6px;line-height:1.5}
+  .hint b{color:var(--domain);font-weight:500}
+
+  .stage{overflow:auto;padding:14px 18px 32px;min-height:0;font-size:14px}
+  .stage-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .stage-head h2{font-size:16px;font-weight:600;margin:0}
+  .stage-head p{color:var(--ink-dim);font-size:13px;margin:0}
+
+  .result{display:none;border:1px solid var(--line2);border-radius:4px;margin-bottom:14px;overflow:hidden;background:var(--panel)}
+  .result.show{display:block}
+  .r-top{display:flex;align-items:center;gap:9px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--panel2)}
+  .r-top b{font-size:12px}
+  .q{font-family:var(--mono);font-size:11.5px;color:var(--accent);background:#e7f3fb;padding:2px 8px;border-radius:2px}
+  .clearbtn{margin-left:auto;background:transparent;border:1px solid var(--line2);color:var(--ink-dim);border-radius:2px;padding:4px 10px;font-family:var(--mono);font-size:10px;cursor:pointer}
+  .clearbtn:hover{border-color:var(--secure);color:var(--secure)}
+  .r-body{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.3fr)}
+  @media(max-width:720px){.r-body{grid-template-columns:1fr}}
+  .r-col{padding:10px 12px}
+  .r-col+.r-col{border-left:1px solid var(--line)}
+  @media(max-width:720px){.r-col+.r-col{border-left:none;border-top:1px solid var(--line)}}
+  .r-col h4{font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-faint);margin:0 0 7px}
+  .kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;padding:2px 0}
+  .kv b{color:var(--ink)}
+  .lim-row{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;margin-top:5px}
+  .lim-row .nm{width:78px;flex:none}
+  .bar{flex:1;height:4px;border-radius:3px;background:var(--line);overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:3px}
+  .mc{font-family:var(--mono);font-size:12px;white-space:pre-wrap;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--line);border-radius:3px;padding:9px 10px;max-height:280px;overflow:auto;line-height:1.5}
+  .mc .h{color:var(--accent);font-weight:600}
+
+  .section{margin-bottom:14px}
+  .sec-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .sec-head .sw{width:9px;height:9px;border-radius:2px;background:var(--c)}
+  .sec-head h3{font-size:14px;font-weight:600;margin:0}
+  .sec-head .tag{font-family:var(--mono);font-size:12px;color:var(--c)}
+  .sec-head .lim{font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin-left:auto}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line2);border-radius:3px;overflow:hidden}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-faint);
+    text-align:left;font-weight:500;padding:6px 9px;background:var(--panel2);border-bottom:1px solid var(--line2);white-space:nowrap}
+  tbody td{padding:6px 9px;border-top:1px solid var(--line);font-size:14px;vertical-align:top;color:var(--ink)}
+  tbody tr{transition:.12s}
+  .c-fact{width:auto;color:var(--ink)}
+  .c-ent{font-family:var(--mono);font-size:12px;color:var(--ink-dim);white-space:nowrap}
+  .c-data{font-family:var(--mono);font-size:12px;color:var(--ink-dim);max-width:200px;word-break:break-word;white-space:normal}
+  .c-num{font-family:var(--mono);font-size:11px;text-align:right;width:46px;color:var(--ink);white-space:nowrap}
+  .c-date{font-family:var(--mono);font-size:12px;color:var(--ink-dim);white-space:nowrap;width:64px}
+  .c-score{font-family:var(--mono);font-size:11px;font-weight:600;text-align:right;width:62px;white-space:nowrap;color:var(--ink-faint)}
+  .lockicon{font-size:10px}
+  .c-del{width:28px;text-align:center;padding:4px 6px}
+  .del{border:1px solid var(--line2);background:var(--panel2);color:var(--ink-faint);border-radius:3px;
+    width:20px;height:20px;line-height:1;font-size:11px;cursor:pointer;padding:0;transition:.12s}
+  .del:hover{border-color:var(--secure);color:var(--secure);background:#fdeceb}
+  tbody tr.hit{background:color-mix(in srgb,var(--c) 13%,transparent);box-shadow:inset 3px 0 0 var(--c)}
+  tbody tr.hit .c-score{color:var(--c)}
+  tbody tr.dim{opacity:.45}
+  .rank{font-family:var(--mono);font-size:9px;color:var(--c);margin-left:4px}
+
+  .ptable td .ptype{font-family:var(--mono);font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:var(--c)}
+  .ptable td b{font-size:14px;font-weight:600;display:block;margin:1px 0}
+  .ptable td p{margin:0;color:var(--ink-dim);font-size:13px;line-height:1.4}
+  .status{font-family:var(--mono);font-size:9px;padding:1px 7px;border-radius:20px;border:1px solid;white-space:nowrap}
+  .st-ready{color:var(--domain);border-color:#9adcc3;background:#e7f7f0}
+  .st-pending{color:#9a6b00;border-color:#e4cf94;background:#fbf3df}
+  .st-block{color:var(--ink-faint);border-color:var(--line2);background:var(--panel2)}
+  .relbar{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:3px}
+  .relbar .bar{width:90px;flex:none}
+  .heat{height:5px;width:90px;border-radius:3px;background:var(--line);overflow:hidden;display:inline-block;vertical-align:middle}
+  .heat>i{display:block;height:100%;background:var(--reminder)}
+  .empty{color:var(--ink-faint);font-family:var(--mono);font-size:12px;padding:8px 9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><b>Песочница памяти</b></div>
+    <div class="ctrl"><label>юзер</label><select id="userSelect"></select></div>
+    <div class="ctrl"><label>домен</label><span class="domain-badge" id="domainBadge"><b id="domainVal">—</b></span></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="memory">Память</button>
+      <button class="tab" data-tab="proac">Проактивность <span class="pill" id="proacCount">0</span></button>
+    </div>
+  </header>
+
+  <main>
+    <section class="chat">
+      <div class="messages" id="messages"></div>
+      <div class="composer">
+        <textarea id="phrase" placeholder="Фраза для прогона фильтра…"></textarea>
+        <div class="composer-row">
+          <button class="act btn-filter" id="btnFilter">▶ Фильтр памяти</button>
+          <button class="act btn-send" id="btnSend">Отправить боту</button>
+        </div>
+        <div class="hint"><b>Фильтр</b> не пишет боту — прогоняет реальные этапы классификации и выборки и
+          подсвечивает факты, что попадут в MEMORY_CONTEXT. <b>Отправить</b> — полный ответ бота.</div>
+      </div>
+    </section>
+
+    <section class="stage" id="stage">
+      <div id="tab-memory">
+        <div class="stage-head"><h2>Память пользователя</h2><p>Пять видов памяти по категориям · прогон фильтра подсветит строки.</p></div>
+        <div class="result" id="result">
+          <div class="r-top"><b>Результат выборки</b><span class="q" id="resQuery"></span>
+            <button class="clearbtn" id="clearRes">сбросить</button></div>
+          <div class="r-body">
+            <div class="r-col"><h4>Классификация · лимиты</h4><div id="classBox"></div></div>
+            <div class="r-col"><h4>Собранный MEMORY_CONTEXT</h4><div class="mc" id="mcBox"></div></div>
+          </div>
+        </div>
+        <div id="memorySections"></div>
+      </div>
+      <div id="tab-proac" style="display:none">
+        <div class="stage-head"><h2>Проактивность · ожидают выполнения</h2><p>Триггеры, ожидающие доставки уведомления, события и тематический трекинг.</p></div>
+        <div id="proacSections"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const CAT={
+  profile:{color:'var(--profile)',title:'Профиль',tag:"scope='profile'"},
+  dialog:{color:'var(--dialog)',title:'Диалог',tag:"scope='dialog'"},
+  domain:{color:'var(--domain)',title:'Предметная',tag:"scope='domain'"},
+  secure:{color:'var(--secure)',title:'Защищённая',tag:'secure_records'},
+  reminder:{color:'var(--reminder)',title:'Напоминания',tag:'scheduled_tasks'},
+};
+
+const $=s=>document.querySelector(s);
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+const esc=s=>String(s==null?'':s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+const fmtD=iso=>{if(!iso)return'—';const d=new Date(iso);return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'short'});};
+const relDue=iso=>{if(!iso)return'';const ms=new Date(iso)-Date.now(),h=Math.round(ms/36e5);
+  if(Math.abs(h)<24)return(h>=0?'через ':'')+Math.abs(h)+'ч';const d=Math.round(ms/864e5);return(d>=0?'через ':'')+Math.abs(d)+'д';};
+const fnum=v=>v==null?'':(+v).toFixed(2);
+
+const api={
+  async get(u){const r=await fetch(u);if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.statusText);return r.json();},
+  async post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.statusText);return r.json();},
+  async del(u){const r=await fetch(u,{method:'DELETE'});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.statusText);return r.json();},
+};
+
+let state={users:[],user:null,memory:null,proac:null,tab:'memory',last:null};
+
+// ---- Загрузка данных --------------------------------------------------------
+async function init(){
+  state.users=await api.get('/api/users');
+  const s=$('#userSelect');s.innerHTML='';
+  for(const u of state.users){const o=el('option');o.value=u.id;o.textContent=`${u.name} · ${u.memoryCount} фактов`;s.appendChild(o);}
+  if(!state.users.length){$('#memorySections').innerHTML='<div class="empty">В базе нет пользователей.</div>';return;}
+  state.user=state.users[0];s.value=state.user.id;
+  await loadUser();
+}
+async function loadUser(){
+  clearHL();
+  $('#domainVal').textContent='—';$('#domainBadge').title='';
+  chatSeed();
+  const [memory,proac]=await Promise.all([
+    api.get('/api/memory?user='+encodeURIComponent(state.user.id)),
+    api.get('/api/proactivity?user='+encodeURIComponent(state.user.id)),
+  ]);
+  state.memory=memory;state.proac=proac;
+  renderMemory();renderProac();
+}
+function chatSeed(){const b=$('#messages');b.innerHTML='';
+  b.appendChild(el('div','msg sys',`Пользователь: ${esc(state.user.name)} · ${esc(state.user.externalId)}`));
+  b.appendChild(el('div','msg bot','Введите фразу и нажмите «Фильтр памяти», чтобы увидеть, какие факты попадут в контекст.'));}
+
+// ---- Память -----------------------------------------------------------------
+function renderMemory(){
+  const wrap=$('#memorySections');wrap.innerHTML='';const m=state.memory;
+  const groups={profile:m.profile,dialog:m.dialog,domain:m.domain,secure:m.secure,reminder:m.reminder};
+  for(const cat of ['profile','dialog','domain','secure','reminder']){
+    const items=groups[cat]||[],sec=el('div','section');
+    const head=el('div','sec-head');head.style.setProperty('--c',CAT[cat].color);
+    head.innerHTML=`<span class="sw"></span><h3>${CAT[cat].title}</h3><span class="tag">${CAT[cat].tag}</span><span class="lim">${items.length} записей</span>`;
+    sec.appendChild(head);
+    const tbl=el('table');tbl.style.setProperty('--c',CAT[cat].color);
+    let head_,rows='';
+    const delCell='<td class="c-del"><button class="del" title="Удалить запись">✕</button></td>';
+    if(cat==='secure'){
+      head_='<tr><th>Резюме (в промпт идёт только это)</th><th>Тип</th><th>Согласие</th><th>В выборке</th><th class="c-del"></th></tr>';
+      for(const it of items)rows+=`<tr data-id="${it.id}"><td><span class="lockicon">🔒</span> ${esc(it.text)}</td><td class="c-ent">${esc(it.recordType)}</td><td class="c-ent">${esc(it.consent)}</td><td class="c-ent" style="color:var(--secure)">нет · только резюме</td>${delCell}</tr>`;
+    }else if(cat==='reminder'){
+      head_='<tr><th>Задача</th><th>Срок</th><th class="c-num">приор</th><th class="c-score">score</th><th class="c-del"></th></tr>';
+      for(const it of items)rows+=`<tr data-id="${it.id}"><td class="c-fact">${esc(it.title)}</td><td class="c-date">${fmtD(it.due)} · ${relDue(it.due)}</td><td class="c-num">${it.priority}</td><td class="c-score"></td>${delCell}</tr>`;
+    }else{
+      head_='<tr><th>Факт</th><th>Сущность</th><th>data</th><th class="c-num">важн</th><th class="c-num">увер</th><th class="c-date">обновл</th><th class="c-score">score</th><th class="c-del"></th></tr>';
+      for(const it of items){
+        const d=it.data&&Object.keys(it.data).length?esc(JSON.stringify(it.data)):'—';
+        const ent=esc(it.entityKey||'—')+(it.domain?(' @'+esc(it.domain)):'');
+        rows+=`<tr data-id="${it.id}"><td class="c-fact">${esc(it.text)}</td><td class="c-ent">${ent}</td><td class="c-data">${d}</td><td class="c-num">${fnum(it.importance)}</td><td class="c-num">${fnum(it.confidence)}</td><td class="c-date">${fmtD(it.updated)}</td><td class="c-score"></td>${delCell}</tr>`;
+      }
+    }
+    tbl.innerHTML=`<thead>${head_}</thead><tbody>${rows||'<tr><td class="empty" colspan="8">— нет записей —</td></tr>'}</tbody>`;
+    [...tbl.querySelectorAll('tbody tr')].forEach(tr=>{const it=items.find(x=>x.id===tr.dataset.id);if(it){tr._item=it;tr._cat=cat;}});
+    sec.appendChild(tbl);wrap.appendChild(sec);
+  }
+  if(state.last)applyHL(state.last);
+}
+
+// ---- Удаление записи --------------------------------------------------------
+async function deleteRow(cat,id){
+  const it=(state.memory[cat]||[]).find(x=>x.id===id);
+  const label=it?(it.text||it.title||cat):cat;
+  if(!confirm('Удалить из памяти?\n\n'+label))return;
+  try{
+    await api.del(`/api/memory?user=${encodeURIComponent(state.user.id)}&category=${encodeURIComponent(cat)}&id=${encodeURIComponent(id)}`);
+    state.memory=await api.get('/api/memory?user='+encodeURIComponent(state.user.id));
+    const u=state.users.find(x=>x.id===state.user.id);
+    if(u){u.memoryCount=state.memory.profile.length+state.memory.dialog.length+state.memory.domain.length;
+      const opt=[...$('#userSelect').options].find(o=>o.value===u.id);if(opt)opt.textContent=`${u.name} · ${u.memoryCount} фактов`;}
+    renderMemory();
+  }catch(e){alert('Ошибка удаления: '+e.message);}
+}
+
+// ---- Подсветка выбранных строк ----------------------------------------------
+function applyHL(res){
+  const all=new Set([...res.chosen.profile,...res.chosen.dialog,...res.chosen.domain,...res.chosen.reminder]);
+  document.querySelectorAll('#memorySections tbody tr').forEach(tr=>{
+    tr.classList.remove('hit','dim');const it=tr._item;if(!it)return;
+    const sc=tr.querySelector('.c-score');
+    if(tr._cat==='secure'){tr.classList.add('dim');return;}
+    if(all.has(it.id)){
+      tr.classList.add('hit');
+      if(sc){const score=res.scores[it.id];const rank=res.ranks[it.id];
+        sc.innerHTML=(score!=null?score.toFixed(2):'')+(rank?`<span class="rank">#${rank}</span>`:'');}
+    }else{tr.classList.add('dim');if(sc)sc.textContent='';}
+  });
+}
+function clearHL(){state.last=null;$('#result').classList.remove('show');
+  document.querySelectorAll('#memorySections tbody tr').forEach(tr=>{tr.classList.remove('hit','dim');
+    const sc=tr.querySelector('.c-score');if(sc)sc.textContent='';});}
+
+// ---- Панель результата фильтра ----------------------------------------------
+function showResult(res,phrase){
+  $('#result').classList.add('show');$('#resQuery').textContent='«'+phrase+'»';
+  const c=res.classification;
+  const ents=Object.values(c.entities||{}).filter(v=>typeof v==='string').slice(0,4).join(', ')||'—';
+  let cb=`<div class="kv">намерение <b>${esc(c.intent)}</b></div>`
+    +`<div class="kv">needs_memory <b>${c.needsMemory}</b></div>`
+    +`<div class="kv">домен <b>${esc(c.domainKey)} <span style="color:var(--ink-faint)">· увер ${fnum(c.confidence)}</span></b></div>`
+    +`<div class="kv">сущности <b>${esc(ents)}</b></div>`
+    +`<div class="kv">выбрано <b>${res.total} / ${res.limits.total}</b></div>`;
+  for(const cat of ['profile','domain','dialog','reminder']){const p=res.perCat[cat];if(!p)continue;
+    const w=p.limit?Math.round(p.picked/p.limit*100):0;
+    cb+=`<div class="lim-row"><span class="nm" style="color:${CAT[cat].color}">${CAT[cat].title}</span><div class="bar"><i style="width:${w}%;background:${CAT[cat].color}"></i></div><b>${p.picked}/${p.limit}</b></div>`;}
+  $('#classBox').innerHTML=cb;
+  $('#mcBox').textContent=res.memoryContext||'';
+  $('#mcBox').innerHTML=$('#mcBox').innerHTML.replace(/MEMORY_CONTEXT/,'<span class="h">MEMORY_CONTEXT</span>');
+}
+
+// ---- Проактивность ----------------------------------------------------------
+function renderProac(){
+  const wrap=$('#proacSections');wrap.innerHTML='';const p=state.proac;
+  $('#proacCount').textContent=p.waitingCount;
+
+  // Триггеры.
+  const s1=el('div','section'),h1=el('div','sec-head');h1.style.setProperty('--c','var(--reminder)');
+  h1.innerHTML=`<span class="sw"></span><h3>Триггеры</h3><span class="tag">mem.proactive_triggers</span><span class="lim">${p.triggers.length} настроено</span>`;s1.appendChild(h1);
+  let r1='';
+  for(const t of p.triggers){
+    const st=t.status==='ready'?['st-ready','готов сработать']:t.status==='pending'?['st-pending','порог не достигнут']:['st-block','выключен'];
+    const cfg=Object.entries(t.config||{}).map(([k,v])=>`${k}=${v}`).join(', ');
+    const fired=t.lastFiredAt?`срабатывал ${fmtD(t.lastFiredAt)}`:'ещё не срабатывал';
+    r1+=`<tr style="--c:var(--reminder)"><td><span class="ptype">${esc(t.type)}</span><b>${esc(t.title)}</b><p>${esc(t.text)}</p><div class="relbar">${esc(cfg||'—')} · ${esc(fired)}</div></td><td style="width:120px"><span class="status ${st[0]}">${st[1]}</span></td></tr>`;
+  }
+  const t1=el('table','ptable');t1.innerHTML=`<thead><tr><th>Триггер</th><th>статус</th></tr></thead><tbody>${r1||'<tr><td class="empty" colspan="2">— триггеры не настроены —</td></tr>'}</tbody>`;s1.appendChild(t1);wrap.appendChild(s1);
+
+  // Ожидающие доставки уведомления.
+  const s2=el('div','section'),h2=el('div','sec-head');h2.style.setProperty('--c','var(--domain)');
+  h2.innerHTML=`<span class="sw"></span><h3>Ожидают доставки</h3><span class="tag">mem.notification_outbox</span><span class="lim">${p.pending.length} в очереди</span>`;s2.appendChild(h2);
+  let r2='';
+  for(const n of p.pending){
+    r2+=`<tr style="--c:var(--domain)"><td><span class="ptype" style="--c:var(--domain)">${esc(n.kind)}</span><b>${esc(n.channel)}</b><p>${esc(n.text)}</p></td><td class="c-date" style="width:90px">${fmtD(n.nextAttemptAt)}<br>${relDue(n.nextAttemptAt)}</td></tr>`;
+  }
+  const t2=el('table','ptable');t2.innerHTML=`<thead><tr><th>Уведомление</th><th class="c-date">когда</th></tr></thead><tbody>${r2||'<tr><td class="empty" colspan="2">— очередь пуста —</td></tr>'}</tbody>`;s2.appendChild(t2);wrap.appendChild(s2);
+
+  // Доставленные внешние события.
+  const s4=el('div','section'),h4=el('div','sec-head');h4.style.setProperty('--c','var(--dialog)');
+  h4.innerHTML=`<span class="sw"></span><h3>Доставленные события</h3><span class="tag">mem.event_deliveries</span><span class="lim">${p.events.length} в журнале</span>`;s4.appendChild(h4);
+  let r4='';
+  for(const e of p.events){
+    const rel=e.relevance==null?'':`<div class="relbar">релевантность <div class="bar"><i style="width:${Math.round(e.relevance*100)}%;background:var(--dialog)"></i></div> ${e.relevance.toFixed(2)}</div>`;
+    r4+=`<tr style="--c:var(--dialog)"><td><span class="ptype" style="--c:var(--dialog)">${esc(e.type)}</span><b>${esc(e.eventId)}</b><p>${esc(e.reason||'')}</p>${rel}</td><td class="c-date" style="width:90px">${fmtD(e.deliveredAt)}</td></tr>`;
+  }
+  const t4=el('table','ptable');t4.innerHTML=`<thead><tr><th>Событие</th><th class="c-date">доставлено</th></tr></thead><tbody>${r4||'<tr><td class="empty" colspan="2">— событий не доставлялось —</td></tr>'}</tbody>`;s4.appendChild(t4);wrap.appendChild(s4);
+
+  // Тематический трекинг.
+  const s3=el('div','section'),h3=el('div','sec-head');h3.style.setProperty('--c','var(--profile)');
+  h3.innerHTML=`<span class="sw"></span><h3>Тематический трекинг</h3><span class="tag">mem.topic_mentions</span><span class="lim">чтобы не зацикливаться</span>`;s3.appendChild(h3);
+  const mx=Math.max(...p.topics.map(t=>t.count),1);let r3='';
+  for(const t of p.topics)r3+=`<tr><td>${esc(t.name)}</td><td style="width:110px"><span class="heat"><i style="width:${Math.round(t.count/mx*100)}%"></i></span></td><td class="c-num">увл ${fnum(t.engagement)}</td><td class="c-num" style="color:var(--reminder)">×${t.count}</td></tr>`;
+  const t3=el('table','ptable');t3.innerHTML=`<thead><tr><th>Тема</th><th>частота</th><th class="c-num">вовлеч</th><th class="c-num">упом.</th></tr></thead><tbody>${r3||'<tr><td class="empty" colspan="4">— тем пока нет —</td></tr>'}</tbody>`;s3.appendChild(t3);wrap.appendChild(s3);
+}
+
+// ---- Действия ---------------------------------------------------------------
+function setDomainBadge(dom){$('#domainVal').textContent=dom;$('#domainBadge').title='домен определён классификатором по фразе';}
+function sysMsg(text){const b=$('#messages');const e=el('div','msg sys',text);b.appendChild(e);b.scrollTop=b.scrollHeight;return e;}
+
+async function doFilter(){
+  const ph=$('#phrase').value.trim();if(!ph){$('#phrase').focus();return;}
+  const btn=$('#btnFilter');btn.disabled=true;btn.textContent='⏳ классификация и выборка…';
+  const note=sysMsg('Прогон фильтра памяти…');
+  try{
+    const res=await api.post('/api/filter',{user:state.user.id,phrase:ph,domain:state.user.domain||'general'});
+    note.remove();state.last=res;setDomainBadge(res.classification.domainKey);
+    applyHL(res);showResult(res,ph);$('#result').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){note.textContent='Ошибка фильтра: '+e.message;}
+  finally{btn.disabled=false;btn.textContent='▶ Фильтр памяти';}
+}
+
+async function doSend(){
+  const ph=$('#phrase').value.trim();if(!ph)return;
+  const b=$('#messages');b.appendChild(el('div','msg user',esc(ph)));b.scrollTop=b.scrollHeight;
+  const btn=$('#btnSend');btn.disabled=true;
+  const wait=sysMsg('Бот думает…');
+  try{
+    const res=await api.post('/api/chat',{externalId:state.user.externalId,phrase:ph,domain:state.user.domain||'general'});
+    wait.remove();setDomainBadge(res.domainKey);state.last=res;
+    const all=[...res.chosen.profile,...res.chosen.dialog,...res.chosen.domain,...res.chosen.reminder];
+    const chips=all.slice(0,5).map(id=>{
+      let item=null,cat=null;
+      for(const c of ['profile','dialog','domain']){const f=(state.memory[c]||[]).find(x=>x.id===id);if(f){item=f;cat=c;break;}}
+      if(!item){const f=(state.memory.reminder||[]).find(x=>x.id===id);if(f){item=f;cat='reminder';}}
+      if(!item)return'';const col=CAT[cat].color;const lbl=item.entityKey||item.title||cat;
+      return `<span class="chip" style="color:${col};border-color:${col}">${cat}: ${esc(lbl)}</span>`;
+    }).join('');
+    const tools=res.toolsUsed.length?` · инструменты: ${esc(res.toolsUsed.join(', '))}`:'';
+    b.appendChild(el('div','msg bot',esc(res.answer)+`<div class="used">${chips}</div>`+(tools?`<div class="hint">${tools}</div>`:'')));
+    b.scrollTop=b.scrollHeight;applyHL(res);
+    // Память могла измениться после ответа (асинхронная запись) — мягко обновим через паузу.
+  }catch(e){wait.textContent='Ошибка ответа: '+e.message;}
+  finally{btn.disabled=false;$('#phrase').value='';}
+}
+
+function switchTab(t){state.tab=t;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
+  $('#tab-memory').style.display=t==='memory'?'':'none';$('#tab-proac').style.display=t==='proac'?'':'none';}
+
+$('#userSelect').onchange=e=>{state.user=state.users.find(u=>u.id===e.target.value);loadUser();};
+$('#memorySections').addEventListener('click',e=>{const b=e.target.closest('.del');if(!b)return;
+  const tr=b.closest('tr');if(tr&&tr._cat)deleteRow(tr._cat,tr.dataset.id);});
+$('#btnFilter').onclick=doFilter;$('#btnSend').onclick=doSend;$('#clearRes').onclick=clearHL;
+$('#phrase').onkeydown=e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey))doFilter();};
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+
+init().catch(e=>{$('#memorySections').innerHTML='<div class="empty">Не удалось загрузить данные: '+esc(e.message)+'</div>';});
+</script>
+</body>
+</html>

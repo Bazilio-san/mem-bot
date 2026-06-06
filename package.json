@@ -12,6 +12,8 @@
     "chat": "node src/cli.js",
     "telegram": "node src/telegram.js",
     "scheduler": "node src/scheduler-run.js",
+    "sandbox": "node src/sandbox/server.js",
+    "seed:sandbox": "node scripts/seed-sandbox.js",
     "test": "node tests/run.js",
     "check:llm": "node tests/check-llm.js"
   },
