@@ -85,6 +85,25 @@ reminder`.
 Схема `dialog_topics`: массив объектов с `topic_key` (короткий ключ латиницей в snake_case) и `user_engagement` (0..1).
 Подробнее — в [09-proactivity.md](09-proactivity.md).
 
+### Суммаризатор истории диалога (поджатие истории)
+
+При `HISTORY_COMPRESSION_ENABLED` отдельный вызов сжимает холодную часть диалога. Промпт требует сохранить только то, что
+нужно для продолжения разговора, не трогать последние сообщения (они не переданы и добавятся отдельно), не дублировать
+факты из `active_memory`, описывать ближний контекст подробнее дальнего, выносить устойчивые факты в `facts_to_memory`,
+не сохранять секреты в открытом виде и не выдумывать факты.
+
+```text
+Ты сжимаешь старую часть истории диалога для чат-бота с долговременной памятью.
+Сохрани только то, что нужно для продолжения текущего диалога. Не дублируй факты из active_memory.
+Ближний к текущему моменту контекст описывай подробнее, дальний — сжимай сильнее. Не сохраняй секреты и мусор.
+Устойчивые факты для долговременной памяти вынеси в facts_to_memory. Верни только JSON по схеме.
+```
+
+Схема `history_summary`: обязательные поля `summary_text`, `state_json`, `facts_to_memory`, `dropped_because_in_memory`,
+`sensitive_mentions_redacted`. Размеры в токенах в схему **намеренно не входят** — их считает код по `token_count`
+сообщений, потому что модель ненадёжно меряет собственные токены. Полная схема и разбор — в
+[13-history-compression.md](13-history-compression.md).
+
 ### Служебный блок MEMORY_CONTEXT
 
 Подаётся отдельным system-сообщением после стабильного системного промпта и всегда предваряется правилами, объявляющими
@@ -149,8 +168,19 @@ export const config = {
     events: { enabled: flag(env.PROACTIVE_EVENTS_ENABLED, false),
               relevanceThreshold: Number(env.NEWS_RELEVANCE_THRESHOLD || 0.6) },
   },
+  historyCompression: {
+    enabled: flag(env.HISTORY_COMPRESSION_ENABLED, false),
+    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8),
+    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000),
+    shrinkTokens: Number(env.HISTORY_SHRINK_TOKENS || 800),
+    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15').split(',').map(Number),
+    model: env.HISTORY_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
+    minCompressGain: Number(env.HISTORY_MIN_COMPRESS_GAIN || 0.35),
+  },
 };
 ```
+
+При старте проверяется инвариант гистерезиса: `shrinkTokens` должен быть строго меньше `maxTokens`.
 
 ---
 
@@ -165,6 +195,7 @@ export const config = {
 | Классификация запроса | `gpt-5.4-nano` | `AUX_MODEL` |
 | Извлечение фактов в память | `gpt-5.4-mini` | `EXTRACT_MODEL` |
 | Извлечение тем диалога | `gpt-5.4-nano` (auxModel) | `AUX_MODEL` |
+| Суммаризатор истории диалога | `gpt-5.4-nano` (auxModel) | `HISTORY_SUMMARY_MODEL` |
 | Слияние фактов | детерминированные правила, без вызова модели | — |
 | Эмбеддинги | `text-embedding-3-small` (1536) | `EMBED_MODEL` |
 
@@ -180,3 +211,4 @@ export const config = {
 - Память и извлечение — [06-memory.md](06-memory.md)
 - Флаги и команды — [03-quickstart.md](03-quickstart.md)
 - Слой per-domain-схем (где строгий режим снова применим) — [11-per-domain-schema.md](11-per-domain-schema.md)
+- Поджатие истории и схема суммаризатора — [13-history-compression.md](13-history-compression.md)

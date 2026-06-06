@@ -38,6 +38,8 @@
 - `claudedocs/per-domain-schema/per-domain-schema-EXPLAINED.md` — разбор слоя per-domain-схем на сквозном примере.
 - `claudedocs/per-domain-schema/per-domain-schema-proposal.md` — предложение по реализации слоя схем `data` под домен.
 - `ai-bot-with-memory-req.md` и `ai-bot-with-memory-and-proactivity-req.md` — сводные требования к памяти и проактивности.
+- `claudedocs/integral-history-compression-requirement.md` — итоговое проектное требование к поджатию истории диалога
+  (основа документа [13-history-compression.md](13-history-compression.md)).
 - `README.md` в корне проекта — краткое описание реализации.
 
 ---
@@ -49,7 +51,7 @@
 
 | Что | Текущий статус | Где продолжать |
 |-----|----------------|----------------|
-| Суммаризатор диалога | `conversation_summaries` создана, но пока не наполняется автоматически | новый этап после ответа |
+| Поджатие истории диалога | реализовано: модули `history-*`, миграция `003`, слой тестов `layerHistory`; остаются точный токенизатор (`tiktoken`) и опциональное послойное досжатие | [13-history-compression.md](13-history-compression.md) |
 | Очередь записи памяти | `memory_jobs` создана, но запись идёт промисом внутри процесса ответа | отдельный memory worker |
 | Отправитель уведомлений | `notification_outbox` наполняется, внешней доставки в Telegram/email/push пока нет | transport worker |
 | `cron` и `rrule` | поля есть, но расписание сведено к суточному шагу | разбор cron/rrule в `scheduler.js` |
@@ -72,4 +74,5 @@
 
 - Конфигурация и выбор моделей — [08-prompts-and-models.md](08-prompts-and-models.md)
 - Проверки и тесты — [10-operations.md](10-operations.md)
+- Поджатие истории диалога — [13-history-compression.md](13-history-compression.md)
 - Вернуться ко входу — [README.md](README.md)

@@ -28,6 +28,8 @@
         ▼
   Сборка MEMORY_CONTEXT (отдельным system-сообщением)
         ▼
+  [history] Сжатая история диалога HISTORY_CONTEXT (флаг HISTORY_COMPRESSION_ENABLED, ещё одно справочное system-сообщение)
+        ▼
   [companion] Темпоральный контекст + управление темами (ещё одно справочное system-сообщение)
         ▼
   Основной агент отвечает и вызывает инструменты (цикл инструментов)
@@ -79,3 +81,4 @@
 - Как запустить — [03-quickstart.md](03-quickstart.md)
 - Контур ответа — [04-architecture.md](04-architecture.md)
 - Проактивность — [09-proactivity.md](09-proactivity.md)
+- Поджатие истории диалога — [13-history-compression.md](13-history-compression.md)

@@ -47,6 +47,7 @@
 | [10-operations.md](10-operations.md) | 2 — глубоко | Планировщик, инструменты, логирование, тесты |
 | [11-per-domain-schema.md](11-per-domain-schema.md) | 2 — глубоко | Слой схем `data` под домен |
 | [12-appendix.md](12-appendix.md) | 2 — глубоко | Источники, пояснения, упрощения и доделки |
+| [13-history-compression.md](13-history-compression.md) | 2 — глубоко | Поджатие истории: горячее окно, дайджест, градиент |
 
 ---
 
@@ -58,5 +59,8 @@
   [08-prompts-and-models](08-prompts-and-models.md) → [10-operations](10-operations.md). Код реализации — каталог `src/`.
 - **Добавить проактивность.** [09-proactivity.md](09-proactivity.md) → [05-data-schema](05-data-schema.md) (три новые
   таблицы) → [10-operations](10-operations.md) (тесты слоя 6).
+- **Добавить поджатие истории.** [13-history-compression.md](13-history-compression.md) → [05-data-schema](05-data-schema.md)
+  (миграция `003`) → [08-prompts-and-models](08-prompts-and-models.md) (промпт суммаризатора) → [10-operations](10-operations.md)
+  (слой `layerHistory`).
 - **Проверить готовность.** [02-criteria](02-criteria.md) → [10-operations](10-operations.md) (раздел тестов).
 - **Понять ограничения MVP.** [12-appendix](12-appendix.md) (таблица упрощений и доделок).

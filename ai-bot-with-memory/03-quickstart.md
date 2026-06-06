@@ -61,11 +61,28 @@ COMPANION_MODE=on PROACTIVE_ENABLED=on PROACTIVE_EVENTS_ENABLED=on npm run sched
 
 ---
 
+## Флаги поджатия истории (по умолчанию выключено)
+
+| Переменная | Назначение | По умолчанию |
+|------------|------------|--------------|
+| `HISTORY_COMPRESSION_ENABLED` | слой сжатой истории диалога (`HISTORY_CONTEXT` поверх горячего окна) | выключено |
+| `HISTORY_HOT_WINDOW` | сколько последних сообщений уходит в запрос дословно | 8 |
+| `HISTORY_MAX_TOKENS` | порог размера холодной зоны, при превышении запускается сжатие | 2000 |
+| `HISTORY_SHRINK_TOKENS` | целевой размер дайджеста после сжатия (должен быть меньше `HISTORY_MAX_TOKENS`) | 800 |
+| `HISTORY_ZONE_WEIGHTS` | доли бюджета дайджеста на ближнюю, среднюю и дальнюю зоны | 0.55,0.30,0.15 |
+| `HISTORY_SUMMARY_MODEL` | модель суммаризатора истории (по умолчанию `AUX_MODEL`) | gpt-5.4-nano |
+| `HISTORY_MIN_COMPRESS_GAIN` | минимальный выигрыш сжатия, ниже которого пересжатие не выполняется | 0.35 |
+
+Подробный разбор слоя — в [13-history-compression.md](13-history-compression.md).
+
+---
+
 ## Структура каталогов
 
 ```text
 migrations/001_init.sql      схема памяти: 13 базовых таблиц, типы, индексы, базовые домены
 migrations/002_proactive.sql три таблицы проактивности (темы, триггеры, доставленные события)
+migrations/003_history_summaries.sql  новые колонки conversation_summaries для сжатой истории
 src/config.js                конфигурация, выбор моделей и флаги проактивности (из .env)
 src/db.js                    пул подключений PostgreSQL плюс помощник vectorToSql
 src/llm.js                   клиент LLM: чат, строгий JSON (chatJSON), эмбеддинги
@@ -87,7 +104,10 @@ src/pipeline/topics.js       тематический трекинг (крите
 src/pipeline/proactive.js    триггеры проактивности и анти-спам (критерии 15, 16)
 src/pipeline/proactiveMessage.js  генератор проактивного сообщения
 src/pipeline/events.js       внешние события и фильтр релевантности (критерий 17)
-tests/run.js                 комплексная проверка по слоям (36 базовых плюс слой 6)
+src/pipeline/history-context.js   сборка справочного блока HISTORY_CONTEXT (критерий 18)
+src/pipeline/history-compress.js  решение о сжатии и вызов суммаризатора холодной зоны
+src/pipeline/token-counter.js     консервативная оценка числа токенов (estimateTokens)
+tests/run.js                 комплексная проверка по слоям (36 базовых плюс слои проактивности и истории)
 tests/memory_cases.json      набор кейсов извлечения фактов
 tests/check-llm.js           проверка доступности и возможностей моделей через прокси
 ```
@@ -109,6 +129,9 @@ tests/check-llm.js           проверка доступности и возм
 9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
 10. **Проактивность.** Миграция `002`, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под
     флагами — см. [09-proactivity.md](09-proactivity.md). Код — каталог `src/`.
+11. **Поджатие истории.** Миграция `003`, модули `token-counter`, `history-compress`, `history-context`, заполнение
+    `token_count` в `saveMessage` и сборка `HISTORY_CONTEXT` в `agent.js` под флагом — см.
+    [13-history-compression.md](13-history-compression.md).
 
 ---
 
@@ -117,3 +140,4 @@ tests/check-llm.js           проверка доступности и возм
 - Полный DDL — [05-data-schema.md](05-data-schema.md)
 - Конфигурация и выбор моделей — [08-prompts-and-models.md](08-prompts-and-models.md)
 - Проактивность — [09-proactivity.md](09-proactivity.md)
+- Поджатие истории диалога — [13-history-compression.md](13-history-compression.md)

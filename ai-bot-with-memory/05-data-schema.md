@@ -126,6 +126,13 @@ CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
 CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversation_summaries (conversation_id, created_at DESC);
 ```
 
+Слой поджатия истории диалога наполняет именно `conversation_summaries`. Для него аддитивная миграция
+`003_history_summaries.sql` добавляет к таблице служебные колонки через `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`:
+`layer` (`near` / `middle` / `far` / `full`), `covered_from_message_id`, `covered_to_message_id`, `covered_until`,
+`source_message_count`, `source_token_count`, `summary_token_count`, `memory_dedupe`, `summary_version` и `is_active`
+(в каждом диалоге активна ровно одна сводка). Базовых таблиц это не меняет, итог остаётся прежним — шестнадцать таблиц.
+Полный DDL миграции и смысл колонок — в [13-history-compression.md](13-history-compression.md).
+
 ---
 
 ## Главная таблица памяти `memory_items`
@@ -406,3 +413,4 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 - Защищённая память — [07-secure-privacy.md](07-secure-privacy.md)
 - Планировщик и инструменты — [10-operations.md](10-operations.md)
 - Проактивность — [09-proactivity.md](09-proactivity.md)
+- Поджатие истории и миграция `003` — [13-history-compression.md](13-history-compression.md)
