@@ -1,4 +1,4 @@
-import { addGlobalKnowledge } from '../global-memory.js';
+import { addGlobalKnowledge } from '../../global-memory.js';
 
 export const globalKnowledgeAddTool = {
   name: 'global_knowledge_add',

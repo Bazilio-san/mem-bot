@@ -1,6 +1,6 @@
-import { query, vectorToSql } from '../../db.js';
-import { embed } from '../../llm.js';
-import { getDomainId } from '../../repo.js';
+import { query, vectorToSql } from '../../../db.js';
+import { embed } from '../../../llm.js';
+import { getDomainId } from '../../../repo.js';
 
 export const memorySearchTool = {
   name: 'memory_search',

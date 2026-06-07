@@ -1,4 +1,4 @@
-import { deleteGlobalKnowledge } from '../global-memory.js';
+import { deleteGlobalKnowledge } from '../../global-memory.js';
 
 export const globalKnowledgeDeleteTool = {
   name: 'global_knowledge_delete',

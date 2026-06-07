@@ -1,4 +1,4 @@
-import { deleteByEntity } from '../admin.js';
+import { deleteByEntity } from '../../admin.js';
 
 export const memoryForgetEntityTool = {
   name: 'memory_forget_entity',

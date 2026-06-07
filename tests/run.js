@@ -134,8 +134,8 @@ function layerToolRegistry() {
   const names = allTools.map((tool) => tool.name);
   const uniqueNames = new Set(names);
   const toolDir = path.join(rootDir, 'src', 'pipeline', 'agent-tools');
-  const moduleFiles = fs.readdirSync(toolDir)
-    .filter((name) => name.endsWith('.js') && name !== 'index.js');
+  const moduleFiles = fs.readdirSync(toolDir, { recursive: true })
+    .filter((name) => name.endsWith('.js') && path.basename(name) !== 'index.js');
   const cyrillicDescriptions = allTools.flatMap((tool) => collectDescriptions(tool.definition)
     .filter((text) => /[А-Яа-яЁё]/.test(text))
     .map((text) => `${tool.name}: ${text}`));

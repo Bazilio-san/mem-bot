@@ -1,4 +1,4 @@
-import { listGlobalFacts } from '../global-memory.js';
+import { listGlobalFacts } from '../../global-memory.js';
 
 export const globalFactListTool = {
   name: 'global_fact_list',

@@ -1,4 +1,4 @@
-import { searchGlobalKnowledge } from '../global-memory.js';
+import { searchGlobalKnowledge } from '../../global-memory.js';
 
 export const globalKnowledgeSearchTool = {
   name: 'global_knowledge_search',

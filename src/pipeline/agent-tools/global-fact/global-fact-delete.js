@@ -1,4 +1,4 @@
-import { deleteGlobalFact } from '../global-memory.js';
+import { deleteGlobalFact } from '../../global-memory.js';
 
 export const globalFactDeleteTool = {
   name: 'global_fact_delete',

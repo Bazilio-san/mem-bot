@@ -1,4 +1,4 @@
-import { listMemory } from '../admin.js';
+import { listMemory } from '../../admin.js';
 
 export const memoryListTool = {
   name: 'memory_list',

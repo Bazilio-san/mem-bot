@@ -1,4 +1,4 @@
-import { forgetAll } from '../admin.js';
+import { forgetAll } from '../../admin.js';
 
 export const memoryForgetAllTool = {
   name: 'memory_forget_all',
