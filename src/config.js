@@ -102,6 +102,17 @@ export const config = {
     ragMinRelevance: Number(env.GLOBAL_RAG_MIN_RELEVANCE || 0.3), // порог отсечения слабых совпадений базы знаний
   },
 
+  // Распознавание входящего аудио (речь в текст). По умолчанию выключено, как и прочие необязательные контуры.
+  // При выключенном флаге голосовые сообщения, кружки и присланные аудио/видео игнорируются, как и раньше.
+  voiceInput: {
+    enabled: flag(env.VOICE_INPUT_ENABLED, false),
+    // Выбор распознавателя из реестра src/voice/transcribe.js. По умолчанию — самый быстрый и дешёвый.
+    provider: env.VOICE_INPUT_PROVIDER || 'groq-whisper-large-v3-turbo',
+    maxSeconds: Number(env.VOICE_INPUT_MAX_SECONDS || 300),        // предел длительности (пять минут)
+    maxBytes: Number(env.VOICE_INPUT_MAX_BYTES || 25000000),       // предел размера, когда длительность неизвестна
+    language: env.VOICE_INPUT_LANG || 'ru',                        // код языка-подсказки для распознавателя
+  },
+
   // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.
   // Последние hotWindow сообщений всегда передаются дословно; всё, что старше, сжимается в дайджест.
   historyCompression: {

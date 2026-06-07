@@ -18,6 +18,10 @@ import { query, getPool, closePool } from './db.js';
 import {
   decideDeliveryIntent, normalizeTelegramReaction, shouldConsiderReaction,
 } from './pipeline/reactions.js';
+import {
+  detectAttachment, checkAttachmentLimits, shouldEchoTranscript,
+  transcribeTelegramAttachment, isProviderConfigured, providerKeyEnv,
+} from './voice/transcribe.js';
 
 const TOKEN = process.env.TELEGRAM_API_KEY;
 if (!TOKEN) {
@@ -257,6 +261,29 @@ async function sendTyping(chatId) {
   catch { /* индикатор необязателен */ }
 }
 
+// Показывать индикатор «печатает…» непрерывно, пока идёт длительная обработка (скачивание и распознавание речи).
+// Telegram гасит индикатор примерно через пять секунд, поэтому отправляем событие сразу и обновляем по таймеру.
+// Возвращает функцию остановки, которую нужно вызвать по завершении тяжёлого участка.
+function startTypingLoop(chatId) {
+  sendTyping(chatId);
+  const timer = setInterval(() => sendTyping(chatId), 4500);
+  return () => clearInterval(timer);
+}
+
+// Признак готовности распознавания речи: общий флаг включён и для выбранного распознавателя задан ключ доступа.
+// Вычисляется один раз при старте в main(); если контур не готов, входящее аудио обрабатывается как раньше.
+let voiceReady = false;
+
+// Сообщение пользователю при отклонении вложения по лимиту (до скачивания файла).
+function voiceLimitMessage(reason) {
+  if (reason === 'too_long') {
+    const minutes = Math.round(config.voiceInput.maxSeconds / 60);
+    return `Запись слишком длинная. Я распознаю аудио длительностью до ${minutes} мин — пришлите, пожалуйста, короче.`;
+  }
+  const megabytes = Math.round(config.voiceInput.maxBytes / 1000000);
+  return `Файл слишком большой. Я обрабатываю вложения размером до ${megabytes} МБ — пришлите, пожалуйста, меньше.`;
+}
+
 // Обработка служебных команд. Возвращает true, если сообщение было командой и уже обработано.
 async function handleCommand(chatId, externalId, text) {
   if (text === '/start' || text === '/help') {
@@ -377,22 +404,68 @@ async function handleCallback(cq) {
   }
 }
 
-// Обработка одного текстового сообщения пользователя.
+// Обработка одного входящего сообщения пользователя: обычный текст либо вложение с речью.
 async function handleUpdate(message) {
   const chatId = message.chat.id;
-  const text = (message.text || '').trim();
-  if (!text) return;
   const externalId = String(chatId);
+  let text = (message.text || '').trim();
 
+  // Текстовые команды разбираются до распознавания речи.
   if (text.startsWith('/') && await handleCommand(chatId, externalId, text)) return;
 
+  // Если текста нет, пробуем распознать вложение с речью (голос, кружок, аудио- или видеофайл).
+  // При выключенном или неготовом контуре распознавания такое сообщение, как и раньше, игнорируется.
+  const attachment = (!text && voiceReady) ? detectAttachment(message) : null;
+  if (!text && !attachment) return;
+
   const domainKey = chatDomains.get(chatId) || 'general';
-  const reactionCandidate = shouldConsiderReaction(text);
+  // Реакции применяем только к чистому тексту; на голос всегда отвечаем по сути.
+  const reactionCandidate = !attachment && shouldConsiderReaction(text);
   if (!reactionCandidate) await sendTyping(chatId);
-  // Захватываем слот семафора на время вызова агента: индикатор «печатает…» уже показан,
-  // а сам тяжёлый вызов LLM ждёт, пока освободится слот, ограничивая нагрузку на прокси.
+  // Захватываем слот семафора на весь тяжёлый участок: для голоса это скачивание файла, распознавание и
+  // последующий вызов агента, для текста — только вызов агента. Слот ограничивает нагрузку на прокси и STT.
   await acquireSlot();
+  let stopTyping = null;
   try {
+    if (attachment) {
+      // Проверяем лимиты до скачивания: слишком длинные или слишком большие вложения отклоняем сразу.
+      const limit = checkAttachmentLimits(attachment, {
+        maxSeconds: config.voiceInput.maxSeconds, maxBytes: config.voiceInput.maxBytes,
+      });
+      if (!limit.ok) {
+        await sendMessage(chatId, voiceLimitMessage(limit.reason));
+        return;
+      }
+      // Скачивание и распознавание длятся заметно дольше текста — держим индикатор «печатает…» всё это время.
+      stopTyping = startTypingLoop(chatId);
+      let stt;
+      try {
+        stt = await transcribeTelegramAttachment({
+          attachment, telegramApiBase: API, botToken: TOKEN,
+          provider: config.voiceInput.provider, language: config.voiceInput.language,
+        });
+      } catch (err) {
+        console.error(`Не удалось распознать аудио в чате ${chatId}:`, err.message);
+        await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте, пожалуйста, чуть позже.');
+        return;
+      }
+      if (stt.empty) {
+        await sendMessage(chatId,
+          'Не удалось распознать речь — возможно, в записи нет голоса или она слишком тихая. '
+          + 'Попробуйте записать ещё раз.');
+        return;
+      }
+      text = stt.text;
+      // Для присланных аудио- и видеофайлов показываем распознанный текст, для голоса и кружков — нет.
+      if (shouldEchoTranscript(attachment.kind)) {
+        await sendMessage(chatId, `Распознанный текст: ${text}`);
+      }
+      // Дальше распознанный текст идёт в обычный пайплайн, поэтому переключаем индикатор на разовый режим.
+      stopTyping();
+      stopTyping = null;
+      await sendTyping(chatId);
+    }
+
     if (reactionCandidate) {
       let delivery = { kind: 'text_needed' };
       try {
@@ -420,6 +493,7 @@ async function handleUpdate(message) {
     console.error(`Ошибка обработки сообщения чата ${chatId}:`, err.message);
     await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте ещё раз чуть позже.');
   } finally {
+    if (stopTyping) stopTyping();
     releaseSlot();
   }
 }
@@ -622,6 +696,20 @@ async function main() {
   // Меню конкретного чата уточняется динамически в updateChatMenu/refreshChatMenu. Сбой не критичен.
   try { await tg('setMyCommands', { commands: buildCommands(false) }); }
   catch (err) { console.error('Не удалось зарегистрировать меню команд:', err.message); }
+  // Распознавание входящего аудио: включаем только если общий флаг поднят и для распознавателя задан ключ.
+  // Иначе пишем понятную причину в журнал и оставляем контур выключенным, не падая на первом голосовом.
+  if (config.voiceInput.enabled) {
+    if (isProviderConfigured(config.voiceInput.provider)) {
+      voiceReady = true;
+      console.log(`Распознавание входящего аудио включено (распознаватель ${config.voiceInput.provider}).`);
+    } else {
+      const keyEnv = providerKeyEnv(config.voiceInput.provider);
+      const reason = keyEnv
+        ? `не задан ключ доступа ${keyEnv}`
+        : `распознаватель «${config.voiceInput.provider}» не поддерживается`;
+      console.warn(`Распознавание входящего аудио выключено: ${reason}. Голосовые сообщения будут игнорироваться.`);
+    }
+  }
   console.log(`Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
     config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.');
   await startOutboxListener();                                       // событийная доставка очереди (LISTEN/NOTIFY)
