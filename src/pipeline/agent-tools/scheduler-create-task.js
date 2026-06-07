@@ -1,4 +1,4 @@
-import { createTask } from '../scheduler.js';
+import { createTask, formatLocalDateTime } from '../scheduler.js';
 
 export const schedulerCreateTaskTool = {
   name: 'scheduler_create_task',
@@ -59,6 +59,15 @@ export const schedulerCreateTaskTool = {
         payload: {},
       },
     });
-    return { task_id: task.id, title: task.title, next_run_at: task.next_run_at };
+    return {
+      task_id: task.id,
+      title: task.title,
+      schedule_kind: task.schedule_kind,
+      timezone: task.timezone,
+      cron_expr: task.cron_expr,
+      rrule: task.rrule,
+      next_run_at: task.next_run_at,
+      next_run_at_local: formatLocalDateTime(task.next_run_at, task.timezone),
+    };
   },
 };

@@ -390,6 +390,26 @@ async function mandatory() {
     )).rows[0];
     check('9e. scheduler_create_task сохраняет cron_expr, timezone и будущий next_run_at',
       row?.cron_expr === '0 9 * * 1-5' && row?.timezone === 'Europe/Moscow' && new Date(row.next_run_at) > new Date());
+    check('9e. scheduler_create_task возвращает timezone и локальное next_run_at',
+      res.timezone === 'Europe/Moscow'
+      && res.schedule_kind === 'cron'
+      && res.cron_expr === '0 9 * * 1-5'
+      && /Europe\/Moscow$/.test(res.next_run_at_local || ''));
+
+    const mem = await retrieveMemory({
+      userId: u.id,
+      domainKey: 'general',
+      query: 'Какие у меня активные напоминания?',
+      scopes: ['reminder'],
+    });
+    const ctx = buildMemoryContext(mem, 'general');
+    check('9e. MEMORY_CONTEXT показывает локальное время и cron активной задачи',
+      ctx.includes('Будний отчёт')
+      && ctx.includes('следующее:')
+      && ctx.includes('Europe/Moscow')
+      && ctx.includes('UTC:')
+      && ctx.includes('schedule: cron')
+      && ctx.includes('cron: 0 9 * * 1-5'));
   }
 
   // 11. Вредная запись в памяти не становится инструкцией.

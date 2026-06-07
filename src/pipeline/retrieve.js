@@ -6,6 +6,7 @@ import { embed } from '../llm.js';
 import { getDomainId } from '../repo.js';
 import { listSecureSummaries } from './secure.js';
 import { config } from '../config.js';
+import { formatLocalDateTime } from './scheduler.js';
 
 // Жёсткие лимиты минимизации (из раздела 10.7 архитектуры).
 // Значения берутся из конфигурации (переменные окружения MEMORY_LIMIT_*), по умолчанию — прежние константы.
@@ -96,7 +97,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
   let reminders = [];
   if (wantReminder) {
     const { rows } = await query(
-      `SELECT id, title, instruction, next_run_at
+      `SELECT id, title, instruction, schedule_kind, timezone, cron_expr, rrule, next_run_at
        FROM mem.scheduled_tasks
        WHERE user_id = $1 AND status = 'active'
        ORDER BY next_run_at ASC LIMIT $2`,
@@ -118,7 +119,7 @@ export function buildMemoryContext(mem, domainKey) {
   const profile = lines(mem.profile.map((i) => `- ${i.memory_text}`));
   const dialog = lines(mem.dialog.map((i) => `- ${i.memory_text}`));
   const domain = lines(mem.domain.map((i) => `- ${i.memory_text}`));
-  const reminders = lines(mem.reminders.map((r) => `- ${r.title} (срок: ${new Date(r.next_run_at).toISOString()})`));
+  const reminders = lines(mem.reminders.map(formatReminderLine));
   const secure = lines(mem.secure.map((s) => `- ${s.display_name ? s.display_name + ': ' : ''}${s.redacted_summary}`));
 
   return `MEMORY_CONTEXT
@@ -144,6 +145,15 @@ ${secure}
 
 Активные напоминания и задачи:
 ${reminders}`;
+}
+
+function formatReminderLine(r) {
+  const utc = new Date(r.next_run_at).toISOString();
+  const local = formatLocalDateTime(r.next_run_at, r.timezone);
+  const details = [`UTC: ${utc}`, `schedule: ${r.schedule_kind}`];
+  if (r.cron_expr) details.push(`cron: ${r.cron_expr}`);
+  if (r.rrule) details.push(`rrule: ${r.rrule}`);
+  return `- ${r.title} — ${r.instruction}; следующее: ${local}\n  (${details.join('; ')})`;
 }
 
 export { LIMITS };

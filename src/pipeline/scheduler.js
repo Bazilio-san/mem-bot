@@ -100,6 +100,26 @@ export function normalizeTimezone(timezone, fallback = config.timezone || 'Europ
   return 'Europe/Moscow';
 }
 
+export function formatLocalDateTime(dateLike, timezone) {
+  const date = new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return null;
+  const normalizedTimezone = normalizeTimezone(timezone);
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: normalizedTimezone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const parts = Object.fromEntries(
+    fmt.formatToParts(date).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} ${normalizedTimezone}`;
+}
+
 function assertValidDate(date, label) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     throw new ScheduleError(`Некорректное время расписания: ${label}`);
