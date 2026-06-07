@@ -74,6 +74,39 @@ export async function saveMessage(conversationId, userId, role, content, extra =
   return rows[0];
 }
 
+// Связать внутреннее сообщение истории с идентификатором сообщения во внешнем канале доставки.
+// Это позволяет обработчику реакций найти, на какое сообщение ассистента отреагировал пользователь.
+export async function saveMessageExternalRef({
+  conversationMessageId, channel, chatExternalId, messageExternalId, metadata = {},
+}) {
+  const { rows } = await query(
+    `INSERT INTO mem.message_external_refs
+       (conversation_message_id, channel, chat_external_id, message_external_id, metadata)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (channel, chat_external_id, message_external_id)
+     DO UPDATE SET conversation_message_id = EXCLUDED.conversation_message_id,
+                   metadata = mem.message_external_refs.metadata || EXCLUDED.metadata
+     RETURNING *`,
+    [conversationMessageId, channel, String(chatExternalId), String(messageExternalId), metadata],
+  );
+  return rows[0];
+}
+
+// Найти внутреннее сообщение по внешнему идентификатору канала.
+export async function findMessageByExternalRef({ channel, chatExternalId, messageExternalId }) {
+  const { rows } = await query(
+    `SELECT cm.*, d.domain_key, mer.channel, mer.chat_external_id, mer.message_external_id
+       FROM mem.message_external_refs mer
+       JOIN mem.conversation_messages cm ON cm.id = mer.conversation_message_id
+       JOIN mem.conversations c ON c.id = cm.conversation_id
+       LEFT JOIN mem.agent_domains d ON d.id = c.domain_id
+      WHERE mer.channel = $1 AND mer.chat_external_id = $2 AND mer.message_external_id = $3
+      LIMIT 1`,
+    [channel, String(chatExternalId), String(messageExternalId)],
+  );
+  return rows[0] || null;
+}
+
 // Получить активную сводку холодной зоны диалога (последнюю помеченную is_active).
 export async function getActiveConversationSummary(conversationId) {
   const { rows } = await query(

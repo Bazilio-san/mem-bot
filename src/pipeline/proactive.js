@@ -65,14 +65,18 @@ export async function fire(trigger, user) {
   });
   if (!text || !text.trim()) return false;
 
-  // Доставка 1: очередь внешней доставки (Telegram, push, e-mail — как доделка базового требования).
+  // Доставка 1: сообщение появляется в истории диалога как реплика ассистента.
+  const message = await saveMessage(conversation.id, user.id, 'assistant', text);
+  // Доставка 2: очередь внешней доставки (Telegram, push, e-mail — как доделка базового требования).
   await query(
     `INSERT INTO mem.notification_outbox (user_id, channel, message_text, payload)
      VALUES ($1, 'default', $2, $3::jsonb)`,
-    [user.id, text, JSON.stringify({ kind: 'proactive', trigger: trigger.trigger_type })],
+    [user.id, text, JSON.stringify({
+      kind: 'proactive',
+      trigger: trigger.trigger_type,
+      conversation_message_id: message.id,
+    })],
   );
-  // Доставка 2: сообщение появляется в истории диалога как реплика ассистента.
-  await saveMessage(conversation.id, user.id, 'assistant', text);
 
   await query(
     `UPDATE mem.proactive_triggers SET last_fired_at = now(), updated_at = now() WHERE id = $1`,

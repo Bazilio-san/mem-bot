@@ -2,11 +2,12 @@
 
 ## Вкратце
 
-Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего девятнадцать таблиц. Их определяют миграции:
+Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего двадцать таблиц. Их определяют миграции:
 `001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
 `005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `006_domain_schemas.sql` — таблица-реестр
-схем `data` под домен; `007_proactivity_flag.sql` — колонка `proactivity_enabled` в `mem.users`. Все миграции
-идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
+схем `data` под домен; `007_proactivity_flag.sql` — колонка `proactivity_enabled` в `mem.users`;
+`008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах доставки. Все миграции идемпотентны
+(`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
 
@@ -492,7 +493,30 @@ ON mem.domain_schemas (domain_key) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_domain_schemas_domain ON mem.domain_schemas (domain_key, version DESC);
 ```
 
-Итого с глобальной памятью и реестром схем доменов — девятнадцать таблиц.
+## [DATA-11] Внешние ссылки сообщений (миграция `008`)
+
+Таблица `mem.message_external_refs` связывает внутреннюю строку истории с сообщением во внешнем канале доставки. Она
+нужна для событий, которые ссылаются на уже доставленное сообщение: реакции, прочтения, клики или другие канальные
+события. Таблица остаётся канально-нейтральной: конкретный адаптер сам выбирает значение `channel` и формат внешних
+идентификаторов.
+
+```sql
+CREATE TABLE IF NOT EXISTS mem.message_external_refs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_message_id uuid NOT NULL REFERENCES mem.conversation_messages(id) ON DELETE CASCADE,
+    channel text NOT NULL,
+    chat_external_id text NOT NULL,
+    message_external_id text NOT NULL,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (channel, chat_external_id, message_external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
+ON mem.message_external_refs (conversation_message_id);
+```
+
+Итого с глобальной памятью, реестром схем доменов и внешними ссылками сообщений — двадцать таблиц.
 
 ---
 

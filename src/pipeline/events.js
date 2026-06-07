@@ -94,11 +94,15 @@ ${facts}`;
   const text = msg.content || `📰 ${event.title}\n\n${event.summary}`;
 
   const conversation = await ensureConversation(user.id, 'general');
+  const message = await saveMessage(conversation.id, user.id, 'assistant', text);
   await query(
     `INSERT INTO mem.notification_outbox (user_id, channel, message_text, payload)
      VALUES ($1, 'default', $2, $3::jsonb)`,
-    [user.id, text, JSON.stringify({ kind: 'event', event_id: event.id })]);
-  await saveMessage(conversation.id, user.id, 'assistant', text);
+    [user.id, text, JSON.stringify({
+      kind: 'event',
+      event_id: event.id,
+      conversation_message_id: message.id,
+    })]);
   await query(
     `INSERT INTO mem.event_deliveries (user_id, event_id, event_type, relevance_score, reason)
      VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id, event_id) DO NOTHING`,

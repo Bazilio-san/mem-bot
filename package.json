@@ -17,6 +17,7 @@
     "delete:user": "node scripts/delete-user.js",
     "test": "node tests/run.js",
     "test:schema": "node tests/schema.test.js",
+    "test:reactions": "node tests/reactions.test.mjs",
     "check:llm": "node tests/check-llm.js",
     "schema:generate": "node src/schema/cli.js generate",
     "schema:save": "node src/schema/cli.js save",

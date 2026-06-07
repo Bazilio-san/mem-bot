@@ -120,6 +120,10 @@ const SYSTEM = `Ты извлекаешь кандидаты в долговре
 ставь sensitivity = high или secret и requires_confirmation = true, а memory_text делай безопасным
 резюме без полного значения.
 Если из сообщения нечего сохранять (короткие подтверждения, смех, эмоции, погода) — верни {"candidates": []}.
+Реакции пользователя на сообщение ассистента являются значимыми только если смысл реакции очевиден из целевого
+сообщения ассистента. Например, если ассистент спросил «Ты любишь торты?», а пользователь отреагировал :heart:,
+можно сохранить предпочтение «Пользователь любит торты». Если реакция может быть просто вежливостью, настроением
+или разовым одобрением без будущей пользы — верни {"candidates": []}.
 
 Примеры:
 Сообщение «Я не люблю длинные ответы, пиши коротко» →
@@ -127,6 +131,9 @@ const SYSTEM = `Ты извлекаешь кандидаты в долговре
 Сообщение «Я плохо понимаю квадратные уравнения» (домен math_tutor) →
   candidates:[{scope:"domain",memory_kind:"progress",entity_type:"topic",entity_key:"quadratic_equations",memory_text:"Пользователь слабо понимает квадратные уравнения",importance:0.8,confidence:0.85,sensitivity:"normal",...}]
 Сообщение «Ок» / «Хаха» / «Сегодня плохая погода» → candidates:[]
+Сообщение ассистента «Ты любишь торты?» + реакция пользователя :heart: →
+  candidates:[{scope:"profile",memory_kind:"preference",entity_type:"food_preference",entity_key:"cakes",memory_text:"Пользователь любит торты",importance:0.7,confidence:0.8,sensitivity:"low",requires_confirmation:false,...}]
+Сообщение ассистента «Сделаем напоминание?» + реакция пользователя :like: → candidates:[]
 Сообщение «Мой паспорт 1234 567890» →
   candidates:[{scope:"domain",memory_kind:"secure_reference",memory_text:"У пользователя есть паспорт (полное значение не хранить как обычный факт)",importance:0.7,confidence:0.9,sensitivity:"secret",requires_confirmation:true,...}]`;
 

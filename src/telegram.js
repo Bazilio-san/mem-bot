@@ -5,13 +5,19 @@
 // благодаря этому проактивные сообщения из очереди доставки находят нужный чат.
 // Запуск: npm run telegram
 import { config } from './config.js';
-import { handleMessage } from './agent.js';
+import { handleMessage, recordReactionTurn, recordUserReaction } from './agent.js';
 import { tick } from './pipeline/scheduler.js';
 import { checkProactiveTriggers } from './pipeline/proactive.js';
 import { processEvents } from './pipeline/events.js';
 import { fireProactiveNow } from './pipeline/proactive.js';
-import { setUserProactivity, getProactivityState, setTrigger } from './repo.js';
+import {
+  setUserProactivity, getProactivityState, setTrigger,
+  saveMessageExternalRef, findMessageByExternalRef,
+} from './repo.js';
 import { query, getPool, closePool } from './db.js';
+import {
+  decideDeliveryIntent, normalizeTelegramReaction, shouldConsiderReaction,
+} from './pipeline/reactions.js';
 
 const TOKEN = process.env.TELEGRAM_API_KEY;
 if (!TOKEN) {
@@ -29,6 +35,21 @@ const OUTBOX_SAFETY_INTERVAL_MS = Number(process.env.OUTBOX_SAFETY_INTERVAL_MS |
 // Предел одновременных тяжёлых обработок входящих сообщений (по сути — одновременных вызовов LLM).
 // Общий по всем чатам: ограничивает только параллелизм, порядок внутри чата гарантируется отдельно.
 const TELEGRAM_MAX_CONCURRENCY = Number(process.env.TELEGRAM_MAX_CONCURRENCY || 5);
+const TELEGRAM_REACTION_EMOJI = {
+  like: '👍',
+  okay: '👌',
+  heart: '❤',
+  laugh: '😁',
+  fire: '🔥',
+  smile: '😊',
+  100: '💯',
+  sad: '😢',
+};
+const TELEGRAM_DELIVERY_CAPABILITIES = {
+  channel: 'telegram',
+  supportsReactions: true,
+  reactionKeys: Object.keys(TELEGRAM_REACTION_EMOJI),
+};
 
 // Память процесса: выбранный домен общения для каждого чата (по умолчанию «general»).
 const chatDomains = new Map();
@@ -72,6 +93,14 @@ function enqueueUpdate(message) {
   // Когда это звено завершилось и осталось последним в цепочке — убираем ключ, чтобы Map не рос.
   // Глотаем ошибку звена в ветке очистки, иначе отклонение последнего звена цепочки осталось бы
   // необработанным (unhandled rejection): сам next в pollLoop не дожидается и не обрабатывается.
+  next.catch(() => {}).finally(() => { if (chatChains.get(chatId) === next) chatChains.delete(chatId); });
+}
+
+function enqueueReactionUpdate(reactionUpdate) {
+  const chatId = reactionUpdate.chat.id;
+  const prev = chatChains.get(chatId) || Promise.resolve();
+  const next = prev.catch(() => {}).then(() => handleReactionUpdate(reactionUpdate));
+  chatChains.set(chatId, next);
   next.catch(() => {}).finally(() => { if (chatChains.get(chatId) === next) chatChains.delete(chatId); });
 }
 
@@ -175,9 +204,51 @@ function splitText(text, limit) {
 
 // Отправить сообщение в чат, разбивая его на части при превышении лимита Telegram.
 async function sendMessage(chatId, text) {
+  const sent = [];
   for (const chunk of splitText(text, TG_MAX_LEN)) {
-    await tg('sendMessage', { chat_id: chatId, text: chunk });
+    sent.push(await tg('sendMessage', { chat_id: chatId, text: chunk }));
   }
+  return sent;
+}
+
+async function saveSentRefs(chatId, sentMessages, conversationMessageId, kind = 'text') {
+  if (!conversationMessageId) return;
+  for (const msg of sentMessages || []) {
+    if (!msg?.message_id) continue;
+    await saveMessageExternalRef({
+      conversationMessageId,
+      channel: 'telegram',
+      chatExternalId: chatId,
+      messageExternalId: msg.message_id,
+      metadata: { kind },
+    });
+  }
+}
+
+async function sendReaction(chatId, messageId, reactionKey) {
+  const emoji = TELEGRAM_REACTION_EMOJI[reactionKey];
+  if (!emoji) throw new Error(`Unknown reaction key: ${reactionKey}`);
+  await tg('setMessageReaction', {
+    chat_id: chatId,
+    message_id: messageId,
+    reaction: [{ type: 'emoji', emoji }],
+  });
+}
+
+async function deliverAgentResult(chatId, sourceMessageId, result) {
+  if (result.delivery?.kind === 'reaction') {
+    try {
+      await sendReaction(chatId, sourceMessageId, result.delivery.reactionKey);
+      return;
+    } catch (err) {
+      console.error(`Не удалось поставить реакцию в чате ${chatId}:`, err.message);
+      const sent = await sendMessage(chatId, result.delivery.fallbackText || result.answer || 'Окей.');
+      await saveSentRefs(chatId, sent, result.assistantMessageId, 'reaction_fallback');
+      return;
+    }
+  }
+  const sent = await sendMessage(chatId, result.answer || '(пустой ответ)');
+  await saveSentRefs(chatId, sent, result.assistantMessageId, 'text');
 }
 
 // Показать индикатор «печатает…», пока агент думает над ответом.
@@ -316,19 +387,76 @@ async function handleUpdate(message) {
   if (text.startsWith('/') && await handleCommand(chatId, externalId, text)) return;
 
   const domainKey = chatDomains.get(chatId) || 'general';
-  await sendTyping(chatId);
+  const reactionCandidate = shouldConsiderReaction(text);
+  if (!reactionCandidate) await sendTyping(chatId);
   // Захватываем слот семафора на время вызова агента: индикатор «печатает…» уже показан,
   // а сам тяжёлый вызов LLM ждёт, пока освободится слот, ограничивая нагрузку на прокси.
   await acquireSlot();
   try {
+    if (reactionCandidate) {
+      let delivery = { kind: 'text_needed' };
+      try {
+        delivery = await decideDeliveryIntent({
+          userMessage: text,
+          deliveryCapabilities: TELEGRAM_DELIVERY_CAPABILITIES,
+        });
+      } catch (err) {
+        console.error(`Не удалось выбрать реакцию для чата ${chatId}:`, err.message);
+      }
+      if (delivery.kind === 'reaction') {
+        const recorded = await recordReactionTurn({ externalId, userMessage: text, domainKey, delivery });
+        await deliverAgentResult(chatId, message.message_id, recorded);
+        await refreshChatMenu(chatId, externalId);
+        return;
+      }
+      await sendTyping(chatId);
+    }
     const res = await handleMessage({ externalId, userMessage: text, domainKey });
     chatDomains.set(chatId, res.domainKey);                        // агент мог сменить домен по смыслу запроса
-    await sendMessage(chatId, res.answer || '(пустой ответ)');
+    await deliverAgentResult(chatId, message.message_id, res);
     // Меню команд зависит от мастер-флага проактивности, который мог измениться, — пересчитываем его.
     await refreshChatMenu(chatId, externalId);
   } catch (err) {
     console.error(`Ошибка обработки сообщения чата ${chatId}:`, err.message);
     await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте ещё раз чуть позже.');
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function handleReactionUpdate(reactionUpdate) {
+  const chatId = reactionUpdate.chat.id;
+  const externalId = String(chatId);
+  if (reactionUpdate.user?.is_bot) return;
+  const newReaction = Array.isArray(reactionUpdate.new_reaction) ? reactionUpdate.new_reaction[0] : null;
+  const oldReaction = Array.isArray(reactionUpdate.old_reaction) ? reactionUpdate.old_reaction[0] : null;
+  const reactionKey = normalizeTelegramReaction(newReaction);
+  const oldReactionKey = normalizeTelegramReaction(oldReaction);
+  if (!reactionKey && !oldReactionKey) return;
+
+  await acquireSlot();
+  try {
+    const targetMessage = await findMessageByExternalRef({
+      channel: 'telegram',
+      chatExternalId: chatId,
+      messageExternalId: reactionUpdate.message_id,
+    });
+    const domainKey = targetMessage?.domain_key || chatDomains.get(chatId) || 'general';
+    await recordUserReaction({
+      externalId,
+      domainKey,
+      reactionKey,
+      oldReactionKey,
+      targetMessage,
+      rawReaction: {
+        chat_id: chatId,
+        message_id: reactionUpdate.message_id,
+        old_reaction: reactionUpdate.old_reaction || [],
+        new_reaction: reactionUpdate.new_reaction || [],
+      },
+    });
+  } catch (err) {
+    console.error(`Ошибка обработки реакции в чате ${chatId}:`, err.message);
   } finally {
     releaseSlot();
   }
@@ -352,7 +480,7 @@ async function drainOutbox() {
 
 async function drainOutboxOnce() {
   const { rows } = await query(
-    `SELECT o.id, o.message_text, u.external_id
+    `SELECT o.id, o.message_text, o.payload, u.external_id
        FROM mem.notification_outbox o
        JOIN mem.users u ON u.id = o.user_id
       WHERE o.status = 'pending' AND o.next_attempt_at <= now()
@@ -368,7 +496,10 @@ async function drainOutboxOnce() {
       continue;
     }
     try {
-      await sendMessage(chatId, row.message_text);
+      const sent = await sendMessage(chatId, row.message_text);
+      if (row.payload?.conversation_message_id) {
+        await saveSentRefs(chatId, sent, row.payload.conversation_message_id, row.payload.kind || 'outbox');
+      }
       await query(
         `UPDATE mem.notification_outbox SET status = 'sent', sent_at = now(), recipient = $2 WHERE id = $1`,
         [row.id, String(chatId)]);
@@ -461,7 +592,7 @@ async function pollLoop() {
     let updates;
     try {
       updates = await tg('getUpdates', {
-        offset, timeout: POLL_TIMEOUT_SEC, allowed_updates: ['message', 'callback_query'],
+        offset, timeout: POLL_TIMEOUT_SEC, allowed_updates: ['message', 'callback_query', 'message_reaction'],
       });
     } catch (err) {
       console.error('Ошибка длинного опроса getUpdates:', err.message);
@@ -473,6 +604,7 @@ async function pollLoop() {
       // Не ждём обработку: ставим сообщение в цепочку его чата и сразу продолжаем опрос.
       // Разные чаты обрабатываются параллельно, внутри чата — строго по порядку.
       if (update.message) enqueueUpdate(update.message);
+      else if (update.message_reaction) enqueueReactionUpdate(update.message_reaction);
       // Нажатия инлайн-кнопок обрабатываем сразу (без вызова LLM и без семафора): это лёгкие операции
       // с базой и перерисовкой клавиатуры. Ошибку только логируем, чтобы не оборвать опрос.
       else if (update.callback_query) {

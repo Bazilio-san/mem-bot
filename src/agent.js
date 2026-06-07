@@ -16,6 +16,7 @@ import { buildTemporalContext, formatTemporalContext, formatDateTime } from './u
 import { getTopicContext, formatTopicContext, upsertTopicMentions } from './pipeline/topics.js';
 import { buildHistoryContext } from './pipeline/history-context.js';
 import { buildGlobalFactsBlock, buildGlobalKnowledgeBlock } from './pipeline/global-memory.js';
+import { formatReactionToken } from './pipeline/reactions.js';
 
 const MAIN_SYSTEM = `Ты агентское приложение с инструментами и долговременной памятью.
 Правила:
@@ -152,8 +153,8 @@ ${topicsBlock}
   }
 
   // Этап 4: сохранить сообщения диалога.
-  await saveMessage(conversation.id, user.id, 'user', userMessage);
-  await saveMessage(conversation.id, user.id, 'assistant', answer);
+  const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
+  const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer);
 
   // Этап 5: извлечение и запись фактов. По умолчанию асинхронно (не тормозит ответ).
   const recentText = [...history, { role: 'user', content: userMessage }, { role: 'assistant', content: answer }]
@@ -183,5 +184,86 @@ ${topicsBlock}
     answer, intent, toolsUsed, memoryContext,
     memoryUsed: memory, memoryWrites,
     userId: user.id, conversationId: conversation.id, domainKey: effectiveDomain,
+    userMessageId: userMessageRow.id, assistantMessageId: assistantMessageRow.id,
+  };
+}
+
+export async function recordReactionTurn({
+  externalId, userMessage, domainKey = 'general', delivery,
+}) {
+  const user = await ensureUser(externalId);
+  const conversation = await ensureConversation(user.id, domainKey);
+  const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
+  const assistantMessageRow = await saveMessage(
+    conversation.id,
+    user.id,
+    'assistant',
+    delivery?.fallbackText || '',
+    { metadata: { event_type: 'bot_reaction', reaction_key: delivery?.reactionKey || null } },
+  );
+  return {
+    answer: delivery?.fallbackText || '',
+    delivery,
+    userId: user.id,
+    conversationId: conversation.id,
+    domainKey,
+    userMessageId: userMessageRow.id,
+    assistantMessageId: assistantMessageRow.id,
+  };
+}
+
+export async function recordUserReaction({
+  externalId,
+  domainKey = 'general',
+  reactionKey,
+  oldReactionKey = null,
+  targetMessage = null,
+  rawReaction = {},
+  extractSync = false,
+}) {
+  const user = await ensureUser(externalId);
+  const conversation = targetMessage?.conversation_id
+    ? { id: targetMessage.conversation_id }
+    : await ensureConversation(user.id, domainKey);
+  const targetText = targetMessage?.content || '';
+  const token = formatReactionToken(reactionKey);
+  const oldToken = formatReactionToken(oldReactionKey);
+  const removed = !reactionKey && Boolean(oldReactionKey);
+  const content = removed
+    ? `Пользователь убрал реакцию ${oldToken} с сообщения ассистента: «${targetText}»`
+    : `Пользователь отреагировал ${token} на сообщение ассистента: «${targetText}»`;
+  const metadata = {
+    event_type: 'user_reaction',
+    reaction_key: reactionKey || null,
+    old_reaction_key: oldReactionKey || null,
+    target_role: targetMessage?.role || null,
+    target_message_id: targetMessage?.id || null,
+    raw_reaction: rawReaction,
+  };
+  const reactionMessage = await saveMessage(conversation.id, user.id, 'user', content, { metadata });
+
+  let memoryWrites = null;
+  if (reactionKey && targetMessage?.role === 'assistant') {
+    const recentMessages = `assistant: ${targetText}\nuser: ${content}`;
+    const writeJob = (async () => {
+      try {
+        const candidates = await extractCandidates({
+          domainKey, recentMessages, assistantResponse: targetText,
+        });
+        return persistCandidates(user.id, domainKey, candidates, conversation.id);
+      } catch (err) {
+        return { error: String(err.message || err) };
+      }
+    })();
+    if (extractSync) memoryWrites = await writeJob;
+    else writeJob.catch(() => {});
+  }
+
+  return {
+    userId: user.id,
+    conversationId: conversation.id,
+    domainKey,
+    reactionMessageId: reactionMessage.id,
+    memoryWrites,
   };
 }
