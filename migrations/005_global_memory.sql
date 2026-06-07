@@ -1,7 +1,7 @@
 -- migrations/005_global_memory.sql
 -- Слой глобальной памяти: всегда-включённые глобальные факты и общая база знаний (RAG).
 -- Идемпотентно: повторный запуск безопасен. Прежние таблицы не затрагиваются.
--- Подробности — в ai-bot-with-memory/14-global-memory.md.
+-- Подробности — в docs/ai-bot-with-memory/14-global-memory.md.
 
 -- Ручная пометка администратора. Только администратор может наполнять и чистить глобальную память.
 ALTER TABLE mem.users ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;

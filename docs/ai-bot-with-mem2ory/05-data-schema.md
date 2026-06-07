@@ -5,8 +5,8 @@
 Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего девятнадцать таблиц. Их определяют миграции:
 `001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
 `005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `006_domain_schemas.sql` — таблица-реестр
-схем `data` под домен. Все миграции идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются
-расширения `pgcrypto` и `pgvector`.
+схем `data` под домен; `007_proactivity_flag.sql` — колонка `proactivity_enabled` в `mem.users`. Все миграции
+идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
 
@@ -39,9 +39,11 @@ CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed
 
 ## [DATA-2] Пользователи и домены
 
-`mem.users` хранит пользователей; `external_id` связывает запись с внешней системой (Telegram ID, CRM ID, идентификатор
-авторизации); `timezone` нужен планировщику и темпоральному контексту. `mem.agent_domains` описывает специализации
-агента; базовые домены засеваются прямо в миграции.
+`mem.users` хранит пользователей; `external_id` связывает запись с внешней системой (например, идентификатор в
+мессенджере, CRM или системе авторизации); `timezone` нужен планировщику и темпоральному контексту. Колонку `is_admin`
+(права на запись в глобальную память) добавляет миграция `005`, а мастер-переключатель проактивности
+`proactivity_enabled` — миграция `007`.
+`mem.agent_domains` описывает специализации агента; базовые домены засеваются прямо в миграции.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.users (
@@ -51,6 +53,7 @@ CREATE TABLE IF NOT EXISTS mem.users (
     locale       text NOT NULL DEFAULT 'ru',
     timezone     text NOT NULL DEFAULT 'Europe/Moscow',
     is_admin     boolean NOT NULL DEFAULT false,    -- ручная пометка администратора (управление глобальной памятью)
+    proactivity_enabled boolean NOT NULL DEFAULT false, -- мастер-переключатель проактивности пользователя (см. 09)
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
@@ -403,6 +406,10 @@ CREATE TABLE IF NOT EXISTS mem.event_deliveries (
 );
 CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (user_id, delivered_at DESC);
 ```
+
+Признак `enabled` отдельного триггера выбирает активные поводы, а мастер-переключатель `mem.users.proactivity_enabled`
+(миграция `007_proactivity_flag.sql`) стоит над ним и управляет всем контуром у пользователя. Набор триггеров заводится
+выключенным, когда пользователь включает проактивность; подробности — в [09-proactivity.md](09-proactivity.md).
 
 Итого с проактивностью — шестнадцать таблиц.
 

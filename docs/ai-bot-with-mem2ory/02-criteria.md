@@ -44,7 +44,7 @@
 |---------|----------|-------------------------------|----------------|
 | CRIT-13 | Бот не зацикливается на темах (тематический трекинг) | `mem.topic_mentions` + `src/pipeline/topics.js` | `COMPANION_MODE` |
 | CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | дата/время/пояс — всегда; настрой момента — `COMPANION_MODE` |
-| CRIT-15 | Бот пишет первым по уместному поводу (триггеры и анти-спам) | `mem.proactive_triggers` + `src/pipeline/proactive.js` | `PROACTIVE_ENABLED` |
+| CRIT-15 | Бот пишет первым по уместному поводу (триггеры и анти-спам) | `mem.proactive_triggers` + `mem.users.proactivity_enabled` + `src/pipeline/proactive.js` | `PROACTIVE_ENABLED` |
 | CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | `welcome_back` + `src/pipeline/proactiveMessage.js` | `PROACTIVE_ENABLED` |
 | CRIT-17 | Внешние события превращаются в персональные поводы | `src/pipeline/events.js` + `mem.event_deliveries` | `PROACTIVE_EVENTS_ENABLED` |
 
@@ -61,7 +61,7 @@
 
 Критерий считается выполненным, когда последние `N` сообщений всегда уходят дословно, старая история сворачивается в
 `HISTORY_CONTEXT` заданного размера с градиентом «ближнее подробнее дальнего», история не повторяет факты из
-`MEMORY_CONTEXT`, секреты не попадают в открытую сводку, а при выключенном флаге поведение совпадает со старым. Подробный
+`MEMORY_CONTEXT`, секреты не попадают в открытую сводку, а при выключенном флаге поведение остаётся базовым. Подробный
 разбор — в [13-history-compression.md](13-history-compression.md), проверки — слой `layerHistory` в
 [10-operations.md](10-operations.md).
 

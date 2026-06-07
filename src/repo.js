@@ -1,5 +1,6 @@
 // Слой доступа к данным: пользователи, домены, диалоги, сообщения.
 import { query } from './db.js';
+import { config } from './config.js';
 import { estimateTokens } from './pipeline/token-counter.js';
 
 // Найти или создать пользователя по внешнему идентификатору (например, Telegram ID).
@@ -167,24 +168,88 @@ export async function getLastUserMessageTime(userId) {
   return rows[0]?.last_at ? new Date(rows[0].last_at) : null;
 }
 
-// Все пользователи, у которых есть хотя бы один включённый триггер (для прохода проактивности).
+// Все пользователи, у которых проактивность включена мастер-флагом И есть хотя бы один включённый триггер.
+// Мастер-флаг пользователя (proactivity_enabled) стоит над потриггерным enabled: если контур у пользователя
+// выключен целиком, ни один из его триггеров в проход проактивности не попадает.
 export async function listUsersWithTriggers() {
   const { rows } = await query(
     `SELECT DISTINCT u.id, u.external_id, u.timezone
        FROM mem.users u
-       JOIN mem.proactive_triggers pt ON pt.user_id = u.id AND pt.enabled = true`,
+       JOIN mem.proactive_triggers pt ON pt.user_id = u.id AND pt.enabled = true
+      WHERE u.proactivity_enabled = true`,
   );
   return rows;
 }
 
-// Идемпотентное создание набора триггеров по умолчанию для пользователя.
-export async function ensureDefaultTriggers(userId, domainId, defaults) {
+// Набор триггеров проактивности по умолчанию с порогами срабатывания из конфигурации.
+// Используется как сидом песочницы, так и моментом включения проактивности пользователем.
+export function defaultProactiveTriggers() {
+  return [
+    { trigger_type: 'inactivity', config: { minutes_inactive: config.proactive.inactivityMinutes } },
+    { trigger_type: 'daily_checkin', config: { hour: config.proactive.checkinHour } },
+    { trigger_type: 'goal_reminder', config: { interval_minutes: config.proactive.goalIntervalMinutes } },
+    { trigger_type: 'welcome_back', config: { gap_minutes: config.proactive.welcomeBackGapMinutes } },
+  ];
+}
+
+// Идемпотентное создание набора триггеров по умолчанию для пользователя. По умолчанию триггеры создаются
+// выключенными (enabled = false): включение конкретных поводов — отдельное явное действие пользователя.
+// Сид песочницы передаёт { enabled: true }, чтобы демо-пользователи сразу были наглядными.
+export async function ensureDefaultTriggers(userId, domainId, defaults, { enabled = false } = {}) {
   for (const t of defaults) {
     await query(
-      `INSERT INTO mem.proactive_triggers (user_id, domain_id, trigger_type, config)
-       VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO mem.proactive_triggers (user_id, domain_id, trigger_type, config, enabled)
+       VALUES ($1, $2, $3, $4::jsonb, $5)
        ON CONFLICT (user_id, trigger_type) DO NOTHING`,
-      [userId, domainId, t.trigger_type, JSON.stringify(t.config || {})],
+      [userId, domainId, t.trigger_type, JSON.stringify(t.config || {}), enabled],
     );
   }
+}
+
+// Переключить мастер-флаг проактивности пользователя. При включении заодно создаёт набор триггеров
+// по умолчанию (все выключены), чтобы пользователю было что включать через подменю. Гарантирует
+// существование пользователя по внешнему идентификатору (создаёт запись, если её ещё нет).
+export async function setUserProactivity(externalId, enabled) {
+  const user = await ensureUser(externalId);
+  await query(
+    'UPDATE mem.users SET proactivity_enabled = $2, updated_at = now() WHERE id = $1',
+    [user.id, enabled],
+  );
+  if (enabled) {
+    const generalDomainId = await getDomainId('general');
+    await ensureDefaultTriggers(user.id, generalDomainId, defaultProactiveTriggers(), { enabled: false });
+  }
+  return { ...user, proactivity_enabled: enabled };
+}
+
+// Текущее состояние проактивности пользователя: мастер-флаг и список его триггеров с признаком enabled.
+// Возвращает null, если пользователя с таким внешним идентификатором ещё нет. Нужно для отрисовки подменю.
+export async function getProactivityState(externalId) {
+  const { rows } = await query(
+    `SELECT u.proactivity_enabled, pt.trigger_type, pt.enabled AS trigger_enabled
+       FROM mem.users u
+       LEFT JOIN mem.proactive_triggers pt ON pt.user_id = u.id
+      WHERE u.external_id = $1
+      ORDER BY pt.trigger_type`,
+    [externalId],
+  );
+  if (!rows.length) return null;
+  const enabled = rows[0].proactivity_enabled === true;
+  const triggers = rows
+    .filter((r) => r.trigger_type)
+    .map((r) => ({ trigger_type: r.trigger_type, enabled: r.trigger_enabled === true }));
+  return { enabled, triggers };
+}
+
+// Переключить один триггер проактивности конкретного пользователя. Возвращает true, если строка нашлась
+// и обновлена (триггер существует), иначе false.
+export async function setTrigger(externalId, triggerType, enabled) {
+  const { rowCount } = await query(
+    `UPDATE mem.proactive_triggers pt
+        SET enabled = $3, updated_at = now()
+       FROM mem.users u
+      WHERE pt.user_id = u.id AND u.external_id = $1 AND pt.trigger_type = $2`,
+    [externalId, triggerType, enabled],
+  );
+  return rowCount > 0;
 }

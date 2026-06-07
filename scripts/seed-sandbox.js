@@ -16,9 +16,11 @@ const iso = (ms) => new Date(Date.now() + ms).toISOString();
 // Пересоздать пользователя с заданным внешним идентификатором (полное удаление прежних данных по каскаду).
 async function recreateUser(externalId, displayName, timezone) {
   await query('DELETE FROM mem.users WHERE external_id = $1', [externalId]);
+  // Демо-пользователям сразу включаем мастер-флаг проактивности, чтобы их триггеры были наглядны в песочнице
+  // (по умолчанию у новых пользователей он выключен). Глобальный флаг проактивности всё равно гейтит реальную рассылку.
   const { rows } = await query(
-    `INSERT INTO mem.users (external_id, display_name, locale, timezone)
-     VALUES ($1, $2, 'ru', $3) RETURNING *`,
+    `INSERT INTO mem.users (external_id, display_name, locale, timezone, proactivity_enabled)
+     VALUES ($1, $2, 'ru', $3, true) RETURNING *`,
     [externalId, displayName, timezone],
   );
   return rows[0];
@@ -95,7 +97,7 @@ async function seedAnna() {
     { trigger_type: 'daily_checkin', config: { hour: 10 } },
     { trigger_type: 'goal_reminder', config: { interval_minutes: 2880 } },
     { trigger_type: 'welcome_back', config: { gap_minutes: 60 } },
-  ]);
+  ], { enabled: true });
 
   await queueNotification(u.id, 'proactive', 'Привет! Два дня без практики — давай разберём слабую тему: квадратные уравнения?', 4);
   await logEvent(u.id, 'news-ege-2026', 0.78, 'Изменения в КИМ ЕГЭ по математике — релевантно цели пользователя.', 2);
@@ -128,7 +130,7 @@ async function seedDmitry() {
     { trigger_type: 'daily_checkin', config: { hour: 10 } },
     { trigger_type: 'goal_reminder', config: { interval_minutes: 2880 } },
     { trigger_type: 'welcome_back', config: { gap_minutes: 60 } },
-  ]);
+  ], { enabled: true });
 
   await queueNotification(u.id, 'event', 'Распродажа Turkish Airlines из Казани — по вашему направлению и предпочтению вылета.', 1);
   await logEvent(u.id, 'news-turkish-sale', 0.91, 'Распродажа из Казани совпадает с предпочтением вылета и направлением.', 1);
@@ -155,7 +157,7 @@ async function seedLena() {
   await ensureDefaultTriggers(u.id, genId, [
     { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
     { trigger_type: 'daily_checkin', config: { hour: 10 } },
-  ]);
+  ], { enabled: true });
 
   await queueNotification(u.id, 'proactive', 'Шутка дня готова — прислать из любимой категории про программистов?', 16);
   await insertTopic(u.id, 'joke_teller', 'шутки про программистов', 5, 0.8, 1);

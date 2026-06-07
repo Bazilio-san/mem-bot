@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { chat } from './llm.js';
 import {
   ensureUser, ensureConversation, saveMessage, getRecentMessages,
-  getDomainId, getLastUserMessageTime, ensureDefaultTriggers,
+  getDomainId, getLastUserMessageTime,
 } from './repo.js';
 import { classifyIntent } from './pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext } from './pipeline/retrieve.js';
@@ -40,16 +40,9 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
     isAdmin: user.is_admin === true,
   };
 
-  // Авто-создание набора триггеров проактивности для пользователя (идемпотентно, только при включённом контуре).
-  if (config.proactive.enabled) {
-    const generalDomainId = await getDomainId('general');
-    await ensureDefaultTriggers(user.id, generalDomainId, [
-      { trigger_type: 'inactivity', config: { minutes_inactive: config.proactive.inactivityMinutes } },
-      { trigger_type: 'daily_checkin', config: { hour: config.proactive.checkinHour } },
-      { trigger_type: 'goal_reminder', config: { interval_minutes: config.proactive.goalIntervalMinutes } },
-      { trigger_type: 'welcome_back', config: { gap_minutes: config.proactive.welcomeBackGapMinutes } },
-    ]);
-  }
+  // Триггеры проактивности больше НЕ создаются на каждое сообщение: по умолчанию проактивность выключена.
+  // Набор триггеров заводится только в момент, когда пользователь сам включает проактивность командой
+  // /proactivity_on (см. setUserProactivity в src/repo.js и обработчик в src/telegram.js).
 
   // Этап 1: классификация.
   let intent;

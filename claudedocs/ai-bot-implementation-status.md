@@ -1,6 +1,6 @@
 # Чеклист соответствия: реализация чат-бота с памятью
 
-Это единственный артефакт, который знает про конкретный проект. Спецификация в каталоге `ai-bot-with-memory/` описывает,
+Это единственный артефакт, который знает про конкретный проект. Спецификация в каталоге `docs/ai-bot-with-memory/` описывает,
 как система должна быть устроена, и ничего не знает о статусе реализации. Здесь, наоборот, собран срез текущего состояния:
 что готово, что сделано частично, а что ещё не сделано, со ссылками на реальный код и на пронумерованные требования
 спецификации.
@@ -10,7 +10,7 @@
 ## Шапка
 
 - **Проект:** `inter-2-prep` — агентское приложение с долговременной памятью и проактивностью на Node.js и PostgreSQL.
-- **Привязка к спецификации:** набор документов `ai-bot-with-memory/`, версия `doc-v4` (коммит `d8279fd`).
+- **Привязка к спецификации:** набор документов `docs/ai-bot-with-memory/`, версия `doc-v4` (коммит `d8279fd`).
 - **Дата среза:** 2026-06-07.
 - **Как читать статусы:** «готово» — требование выполнено и подтверждается кодом; «частично» — базовый вариант есть,
   но часть требования сведена к упрощению; «нет» — требование описано в спецификации как расширение и пока не реализовано.
@@ -271,8 +271,8 @@
 
 ## Связанные документы
 
-- Вход в спецификацию — [`ai-bot-with-memory/README.md`](../ai-bot-with-memory/README.md)
-- Критерии готовности — [`ai-bot-with-memory/02-criteria.md`](../ai-bot-with-memory/02-criteria.md)
-- Тесты и слои проверки — [`ai-bot-with-memory/10-operations.md`](../ai-bot-with-memory/10-operations.md)
-- Поджатие истории диалога — [`ai-bot-with-memory/13-history-compression.md`](../ai-bot-with-memory/13-history-compression.md)
-- Глобальная память — [`ai-bot-with-memory/14-global-memory.md`](../ai-bot-with-memory/14-global-memory.md)
+- Вход в спецификацию — [`docs/ai-bot-with-memory/README.md`](../docs/ai-bot-with-memory/README.md)
+- Критерии готовности — [`docs/ai-bot-with-memory/02-criteria.md`](../docs/ai-bot-with-memory/02-criteria.md)
+- Тесты и слои проверки — [`docs/ai-bot-with-memory/10-operations.md`](../docs/ai-bot-with-memory/10-operations.md)
+- Поджатие истории диалога — [`docs/ai-bot-with-memory/13-history-compression.md`](../docs/ai-bot-with-memory/13-history-compression.md)
+- Глобальная память — [`docs/ai-bot-with-memory/14-global-memory.md`](../docs/ai-bot-with-memory/14-global-memory.md)
