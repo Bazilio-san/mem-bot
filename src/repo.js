@@ -255,6 +255,18 @@ export async function setUserProactivity(externalId, enabled) {
   return { ...user, proactivity_enabled: enabled };
 }
 
+// Сохранить предпочтение формы ответа пользователя по идентификатору (внутреннему userId): 'text' или 'voice'.
+// Это управляющая настройка ядра; каналы без поддержки голоса значение 'voice' молча игнорируют. Возвращает
+// сохранённый режим. Недопустимое значение приводится к 'text', чтобы в базе всегда было корректное состояние.
+export async function setReplyMode(userId, mode) {
+  const replyMode = mode === 'voice' ? 'voice' : 'text';
+  await query(
+    'UPDATE mem.users SET reply_mode = $2, updated_at = now() WHERE id = $1',
+    [userId, replyMode],
+  );
+  return replyMode;
+}
+
 // Текущее состояние проактивности пользователя: мастер-флаг и список его триггеров с признаком enabled.
 // Возвращает null, если пользователя с таким внешним идентификатором ещё нет. Нужно для отрисовки подменю.
 export async function getProactivityState(externalId) {

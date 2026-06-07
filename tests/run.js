@@ -909,6 +909,51 @@ async function layerGlobalMemory() {
   }
 }
 
+// ========== СЛОЙ 9. Голосовой ответ: предпочтение формы ответа (при VOICE_OUTPUT_ENABLED) ==========
+// Проверяется только при включённом голосовом выводе, чтобы базовый прогон остался прежним (36/36). Здесь
+// проверяется ядровая часть функции: колонка предпочтения, инструмент set_reply_mode и возврат replyMode.
+// Сам синтез речи и доставка голосом относятся к Telegram-каналу и проверяются отдельно (npm run test:voice-output).
+async function layerVoiceOutput() {
+  section('Слой 9. Голосовой ответ: предпочтение формы ответа');
+
+  // 9.1. Колонка reply_mode есть и по умолчанию text; новый пользователь создаётся в текстовом режиме.
+  {
+    const { rows } = await query(
+      `SELECT column_default FROM information_schema.columns
+        WHERE table_schema='mem' AND table_name='users' AND column_name='reply_mode'`);
+    check('9.1. Колонка mem.users.reply_mode есть со значением по умолчанию text',
+      rows.length === 1 && /text/.test(rows[0].column_default || ''));
+    const u = await freshUser('tvo_default');
+    check('9.1b. Новый пользователь по умолчанию в текстовом режиме', u.reply_mode === 'text');
+  }
+
+  // 9.2. Инструмент set_reply_mode сохраняет предпочтение и помечает его в контексте текущего запроса;
+  // обратное переключение на текст возвращает прежний режим.
+  {
+    const u = await freshUser('tvo_tool');
+    const conv = await ensureConversation(u.id, 'general');
+    const ctx = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
+    const res = await executeTool(ctx, 'set_reply_mode', { mode: 'voice' });
+    const saved = (await query('SELECT reply_mode FROM mem.users WHERE id=$1', [u.id])).rows[0].reply_mode;
+    check('9.2. set_reply_mode(voice) сохраняет предпочтение и метит контекст',
+      res.reply_mode === 'voice' && ctx.replyMode === 'voice' && saved === 'voice');
+
+    const ctx2 = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
+    await executeTool(ctx2, 'set_reply_mode', { mode: 'text' });
+    const back = (await query('SELECT reply_mode FROM mem.users WHERE id=$1', [u.id])).rows[0].reply_mode;
+    check('9.2b. Обратное переключение на текст возвращает прежний режим', ctx2.replyMode === 'text' && back === 'text');
+  }
+
+  // 9.3. handleMessage возвращает текущее предпочтение в поле replyMode.
+  {
+    const u = await freshUser('tvo_reply');
+    await query(`UPDATE mem.users SET reply_mode='voice' WHERE id=$1`, [u.id]);
+    const res = await handleMessage({ externalId: 'tvo_reply', userMessage: 'Привет!', domainKey: 'general' });
+    check('9.3. handleMessage возвращает replyMode из сохранённого предпочтения', res.replyMode === 'voice',
+      `replyMode=${res.replyMode}`);
+  }
+}
+
 // ========================= Запуск ===========================================
 async function main() {
   console.log('Запуск комплексной проверки чат-бота с памятью.\n');
@@ -928,6 +973,9 @@ async function main() {
     // Слой 8 выполняется только при включённой глобальной памяти — базовый прогон не меняется.
     if (config.globalMemory.factsEnabled || config.globalMemory.ragEnabled) await layerGlobalMemory();
     else console.log('(Слой 8 пропущен: GLOBAL_MEMORY_ENABLED и GLOBAL_RAG_ENABLED выключены — базовый прогон не меняется.)');
+    // Слой 9 выполняется только при включённом голосовом выводе — базовый прогон не меняется.
+    if (config.voiceOutput.enabled) await layerVoiceOutput();
+    else console.log('(Слой 9 пропущен: VOICE_OUTPUT_ENABLED выключен — базовый прогон не меняется.)');
   } catch (err) {
     console.error('\nКритическая ошибка прогона:', err);
     failed++;

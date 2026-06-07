@@ -43,6 +43,9 @@ export async function handleMessage({ externalId, userMessage, domainKey = 'gene
     timezone: user.timezone || config.timezone,
     // Признак администратора нужен инструментам глобальной памяти: запись доступна только администратору.
     isAdmin: user.is_admin === true,
+    // Предпочтение формы ответа пользователя ('text' | 'voice'). Если инструмент set_reply_mode сменит его
+    // в ходе этого запроса, он перезапишет ctx.replyMode, и смена подействует уже на текущий ответ.
+    replyMode: user.reply_mode === 'voice' ? 'voice' : 'text',
   };
 
   // Триггеры проактивности больше НЕ создаются на каждое сообщение: по умолчанию проактивность выключена.
@@ -187,6 +190,9 @@ ${topicsBlock}
   return {
     answer, intent, toolsUsed, memoryContext,
     memoryUsed: memory, memoryWrites,
+    // Предпочтение формы ответа. Канал решает, как доставить ответ; каналы без поддержки голоса значение
+    // 'voice' просто игнорируют (например, src/cli.js печатает res.answer и поле replyMode не использует).
+    replyMode: ctx.replyMode,
     userId: user.id, conversationId: conversation.id, domainKey: effectiveDomain,
     userMessageId: userMessageRow.id, assistantMessageId: assistantMessageRow.id,
   };

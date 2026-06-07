@@ -11,6 +11,7 @@ import { globalFactListTool } from './global-fact-list.js';
 import { globalKnowledgeSearchTool } from './global-knowledge-search.js';
 import { globalKnowledgeAddTool } from './global-knowledge-add.js';
 import { globalKnowledgeDeleteTool } from './global-knowledge-delete.js';
+import { setReplyModeTool } from './set-reply-mode.js';
 
 export const allTools = [
   memorySearchTool,
@@ -26,4 +27,5 @@ export const allTools = [
   globalKnowledgeSearchTool,
   globalKnowledgeAddTool,
   globalKnowledgeDeleteTool,
+  setReplyModeTool,
 ];

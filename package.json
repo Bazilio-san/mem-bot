@@ -19,6 +19,7 @@
     "test:schema": "node tests/schema.test.js",
     "test:reactions": "node tests/reactions.test.mjs",
     "test:voice": "node tests/voice.test.mjs",
+    "test:voice-output": "node tests/voice-output.test.mjs",
     "check:llm": "node tests/check-llm.js",
     "schema:generate": "node src/schema/cli.js generate",
     "schema:save": "node src/schema/cli.js save",

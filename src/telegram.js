@@ -22,6 +22,7 @@ import {
   detectAttachment, checkAttachmentLimits, shouldEchoTranscript,
   transcribeTelegramAttachment, isProviderConfigured, providerKeyEnv,
 } from './voice/transcribe.js';
+import { buildVoiceText, synthesizeSpeech } from './voice/tts.js';
 
 const TOKEN = process.env.TELEGRAM_API_KEY;
 if (!TOKEN) {
@@ -239,6 +240,50 @@ async function sendReaction(chatId, messageId, reactionKey) {
   });
 }
 
+// Отправить голосовое сообщение. В отличие от sendMessage это не JSON-запрос, а загрузка файла
+// (multipart/form-data), поэтому общий хелпер tg здесь не подходит: тело собирается через FormData.
+// Telegram ожидает голос в формате OGG/OPUS — именно его отдаёт синтез, перекодировка не нужна.
+async function sendVoice(chatId, audioBuffer) {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('voice', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg');
+  const res = await fetch(`${API}/sendVoice`, { method: 'POST', body: form });
+  const data = await res.json();
+  if (!data.ok) throw new Error(`Telegram sendVoice: ${data.description || res.status}`);
+  return data.result;
+}
+
+// Показать индикатор «записывает голосовое сообщение…», пока идёт синтез речи — чтобы ожидание выглядело
+// осмысленно. Индикатор необязателен, поэтому ошибку молча проглатываем.
+async function sendVoiceAction(chatId) {
+  try { await tg('sendChatAction', { chat_id: chatId, action: 'record_voice' }); }
+  catch { /* индикатор необязателен */ }
+}
+
+// Доставить содержательный ответ агента голосом. Короткий ответ без кода и списков озвучивается целиком; для
+// длинного ответа либо ответа с кодом или списками озвучивается краткое резюме, а полный ответ дополнительно
+// уходит текстом, чтобы ничего не терялось. При сбое синтеза бросаем исключение — вызывающая сторона откатится
+// на текстовую доставку. Через state.fullTextSent сообщает, что полный ответ уже отправлен текстом — это поле
+// читается и при сбое (исключении), поэтому при откате полный ответ не дублируется.
+async function deliverVoice(chatId, result, state) {
+  const answer = result.answer || '(пустой ответ)';
+  const { text, summarized } = await buildVoiceText(answer);
+  if (!text) throw new Error('не удалось подготовить текст для синтеза (пустое резюме)');
+
+  // Если озвучивается резюме, полный ответ отправляем текстом заранее: даже если синтез потом упадёт, ответ
+  // у пользователя уже есть и повторно слать его не нужно.
+  if (summarized) {
+    const sent = await sendMessage(chatId, answer);
+    await saveSentRefs(chatId, sent, result.assistantMessageId, 'text');
+    state.fullTextSent = true;
+  }
+
+  await sendVoiceAction(chatId);
+  const audio = await synthesizeSpeech(text);
+  const voiceMsg = await sendVoice(chatId, audio);
+  await saveSentRefs(chatId, [voiceMsg], result.assistantMessageId, 'voice');
+}
+
 async function deliverAgentResult(chatId, sourceMessageId, result) {
   if (result.delivery?.kind === 'reaction') {
     try {
@@ -249,6 +294,20 @@ async function deliverAgentResult(chatId, sourceMessageId, result) {
       const sent = await sendMessage(chatId, result.delivery.fallbackText || result.answer || 'Окей.');
       await saveSentRefs(chatId, sent, result.assistantMessageId, 'reaction_fallback');
       return;
+    }
+  }
+  // Голосовая доставка — только при включённом флаге и выбранном пользователем голосовом режиме. При любом
+  // сбое синтеза не теряем ответ: логируем причину на русском и отправляем тот же ответ текстом.
+  if (config.voiceOutput.enabled && result.replyMode === 'voice') {
+    const state = { fullTextSent: false };
+    try {
+      await deliverVoice(chatId, result, state);
+      return;
+    } catch (err) {
+      console.error(
+        `Не удалось отправить голосовой ответ в чат ${chatId}: ${err.message}. Отправляю ответ текстом.`,
+      );
+      if (state.fullTextSent) return;                              // полный ответ уже ушёл текстом при сбое синтеза
     }
   }
   const sent = await sendMessage(chatId, result.answer || '(пустой ответ)');

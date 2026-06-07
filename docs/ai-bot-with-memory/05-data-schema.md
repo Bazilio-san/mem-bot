@@ -6,7 +6,8 @@
 `001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
 `005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `006_domain_schemas.sql` — таблица-реестр
 схем `data` под домен; `007_proactivity_flag.sql` — колонка `proactivity_enabled` в `mem.users`;
-`008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах доставки. Все миграции идемпотентны
+`008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах доставки; `009_reply_mode.sql` —
+колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа). Все миграции идемпотентны
 (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
@@ -43,7 +44,9 @@ CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed
 `mem.users` хранит пользователей; `external_id` связывает запись с внешней системой (например, идентификатор в
 мессенджере, CRM или системе авторизации); `timezone` нужен планировщику и темпоральному контексту. Колонку `is_admin`
 (права на запись в глобальную память) добавляет миграция `005`, а мастер-переключатель проактивности
-`proactivity_enabled` — миграция `007`.
+`proactivity_enabled` — миграция `007`. Колонку `reply_mode` (предпочитаемая форма ответа — текст или голос)
+добавляет миграция `009`; это управляющая настройка пользователя, которую канал доставки читает на каждом ответе
+(см. [MEM-8]).
 `mem.agent_domains` описывает специализации агента; базовые домены засеваются прямо в миграции.
 
 ```sql
@@ -55,6 +58,8 @@ CREATE TABLE IF NOT EXISTS mem.users (
     timezone     text NOT NULL DEFAULT 'Europe/Moscow',
     is_admin     boolean NOT NULL DEFAULT false,    -- ручная пометка администратора (управление глобальной памятью)
     proactivity_enabled boolean NOT NULL DEFAULT false, -- мастер-переключатель проактивности пользователя (см. 09)
+    reply_mode   text NOT NULL DEFAULT 'text'           -- предпочитаемая форма ответа: 'text' | 'voice' (см. [MEM-8])
+                 CHECK (reply_mode IN ('text', 'voice')),
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
