@@ -28,8 +28,10 @@
   "private": true,
   "dependencies": {
     "ajv": "^8.20.0",
+    "cron-parser": "^5.5.0",
     "dotenv": "^16.4.7",
     "openai": "^4.77.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "rrule": "^2.8.1"
   }
 }

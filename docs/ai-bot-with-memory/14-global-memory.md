@@ -225,7 +225,8 @@ const messages = [
 
 ## [GLOB-7] Инструменты агента: чтение базы знаний всем, запись только администратору
 
-Инструменты глобальной памяти описаны в формате OpenAI function calling в `src/pipeline/tools.js` (см. [10-operations.md](10-operations.md),
+Каждый инструмент глобальной памяти находится в отдельном модуле каталога `src/pipeline/agent-tools/`: модуль содержит
+`name`, пользовательский `title`, OpenAI function definition и `handler` (см. [10-operations.md](10-operations.md),
 раздел `OPS-4`). Инструмент поиска по базе знаний доступен любому пользователю, инструменты изменения — только
 администратору. Проверка прав делается в единой обёртке `executeTool`, чтобы нельзя было обойти её, добавив новый
 инструмент мимо проверки. Набор инструментов зависит от флагов: инструменты фактов регистрируются при
@@ -240,25 +241,22 @@ const messages = [
 | `global_knowledge_add` | добавить текст в общую базу знаний | `GLOBAL_RAG_ENABLED` | только администратор |
 | `global_knowledge_delete` | удалить текст из базы знаний по идентификатору | `GLOBAL_RAG_ENABLED` | только администратор |
 
-Записывающие инструменты перечисляются в множестве административных, и обёртка `executeTool` отклоняет их вызов от
-не-администратора, фиксируя отказ в журнале `tool_calls` со статусом `blocked` (этот статус уже предусмотрен схемой
+Административные инструменты помечены в своих модулях полем `requiresAdmin`, и обёртка `executeTool` отклоняет их вызов
+от не-администратора, фиксируя отказ в журнале `tool_calls` со статусом `blocked` (этот статус уже предусмотрен схемой
 журнала, см. [05-data-schema.md](05-data-schema.md)):
 
 ```js
-const ADMIN_TOOLS = new Set([
-  'global_fact_add', 'global_fact_delete', 'global_fact_list',
-  'global_knowledge_add', 'global_knowledge_delete',
-]);
-
 export async function executeTool(ctx, name, args) {
   const started = Date.now();
-  if (ADMIN_TOOLS.has(name) && !ctx.isAdmin) {
+  const tool = getTool(name);
+  if (tool.requiresAdmin && !ctx.isAdmin) {
     await logToolCall({ conversationId: ctx.conversationId, userId: ctx.userId, toolName: name,
                         input: args, status: 'blocked', latencyMs: Date.now() - started,
                         error: 'Требуются права администратора' });
     return { error: 'Это действие доступно только администратору.' };
   }
-  // далее — прежняя логика выбора и вызова исполнителя из EXECUTORS
+  const output = await tool.handler(ctx, args);
+  // далее — единое журналирование успеха или ошибки
 }
 ```
 
@@ -355,7 +353,7 @@ globalMemory: {
    `is_admin`, индексы, идемпотентный засев базовых фактов), сделать её идемпотентной, прогнать и проверить структуру.
 2. **Модуль доступа.** Реализовать `src/pipeline/global-memory.js` (факты и база знаний: выборка, поиск, добавление,
    удаление) и функцию `isAdmin` в `src/pipeline/admin.js`.
-3. **Инструменты и проверка прав.** Добавить инструменты в `src/pipeline/tools.js` (с учётом флагов) и проверку
+3. **Инструменты и проверка прав.** Добавить по модулю на каждый инструмент в `src/pipeline/agent-tools/` и проверку
    администратора в обёртке `executeTool`.
 4. **Подмешивание в ответ.** Заполнить `ctx.isAdmin` и собрать блоки `GLOBAL_FACTS` (при `GLOBAL_MEMORY_ENABLED`, сразу
    после `MAIN_SYSTEM`) и `GLOBAL_KNOWLEDGE` (при `GLOBAL_RAG_ENABLED`, рядом с `MEMORY_CONTEXT`) в `src/agent.js`.

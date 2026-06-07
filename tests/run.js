@@ -13,9 +13,12 @@ import { extractCandidates } from '../src/pipeline/extract.js';
 import { processCandidate, persistCandidates } from '../src/pipeline/merge.js';
 import { retrieveMemory, buildMemoryContext, LIMITS } from '../src/pipeline/retrieve.js';
 import { saveSecureRecord, grantConsent, getSecureValue, listSecureSummaries } from '../src/pipeline/secure.js';
-import { createTask, tick, runTask } from '../src/pipeline/scheduler.js';
+import {
+  createTask, tick, runTask, computeFirstRun, computeNextRun, normalizeTimezone,
+} from '../src/pipeline/scheduler.js';
 import { listMemory, deleteMemory, forgetAll, deleteByEntity } from '../src/pipeline/admin.js';
-import { executeTool } from '../src/pipeline/tools.js';
+import { buildToolDefs, executeTool, toolMeta, toolTitle } from '../src/pipeline/tools.js';
+import { allTools } from '../src/pipeline/agent-tools/index.js';
 import {
   getActiveGlobalFacts, buildGlobalFactsBlock, addGlobalFact, setGlobalFactEnabled,
   searchGlobalKnowledge, addGlobalKnowledge, deleteGlobalKnowledge,
@@ -37,6 +40,7 @@ const TRIGGER_DEFAULTS = [
 ];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, '..');
 
 // ---- Мини-фреймворк проверок ------------------------------------------------
 let passed = 0, failed = 0;
@@ -116,6 +120,44 @@ async function layerStructure() {
             (SELECT count(*) FROM mem.secure_records WHERE user_id=$1)::int AS s,
             (SELECT count(*) FROM mem.scheduled_tasks WHERE user_id=$1)::int AS t`, [u.id]);
   check('CRUD: все виды записей читаются обратно', back[0].m === 2 && back[0].s === 1 && back[0].t === 1 && !!sec.id && !!task.id);
+}
+
+function collectDescriptions(value, out = []) {
+  if (!value || typeof value !== 'object') return out;
+  if (typeof value.description === 'string') out.push(value.description);
+  for (const v of Object.values(value)) collectDescriptions(v, out);
+  return out;
+}
+
+function layerToolRegistry() {
+  section('Слой 1b. Реестр инструментов агента');
+  const names = allTools.map((tool) => tool.name);
+  const uniqueNames = new Set(names);
+  const toolDir = path.join(rootDir, 'src', 'pipeline', 'agent-tools');
+  const moduleFiles = fs.readdirSync(toolDir)
+    .filter((name) => name.endsWith('.js') && name !== 'index.js');
+  const cyrillicDescriptions = allTools.flatMap((tool) => collectDescriptions(tool.definition)
+    .filter((text) => /[А-Яа-яЁё]/.test(text))
+    .map((text) => `${tool.name}: ${text}`));
+  const publicDefs = buildToolDefs({ isAdmin: false }).map((def) => def.function.name);
+
+  check('Каждый инструмент находится в отдельном модуле', moduleFiles.length === allTools.length,
+    `модулей ${moduleFiles.length}, инструментов ${allTools.length}`);
+  check('Имена инструментов уникальны', uniqueNames.size === names.length);
+  check('У каждого инструмента есть title и toolTitle', allTools.every((tool) => (
+    typeof tool.title === 'string' && tool.title.trim()
+    && toolMeta[tool.name]?.title === tool.title
+    && toolTitle(tool.name) === tool.title
+  )));
+  check('У каждого инструмента есть definition и handler', allTools.every((tool) => (
+    tool.definition?.type === 'function'
+    && tool.definition?.function?.name === tool.name
+    && typeof tool.handler === 'function'
+  )));
+  check('Descriptions инструментов и свойств написаны на английском', cyrillicDescriptions.length === 0,
+    cyrillicDescriptions.slice(0, 3).join(' | '));
+  check('Публичная сборка buildToolDefs возвращает только инструменты с title',
+    publicDefs.every((name) => Boolean(toolMeta[name]?.title)));
 }
 
 // ========================= СЛОЙ 2. Извлечение фактов =========================
@@ -243,8 +285,8 @@ async function mandatory() {
   // 9b. Повторяющаяся задача перепланируется, не зацикливается.
   {
     const u = await freshUser('t9b');
-    await createTask({ userId: u.id, domainKey: 'general', task: { task_type: 'report', title: 'Регулярный отчёт', instruction: 'прислать прогресс', schedule_kind: 'interval', interval_seconds: 3600, run_at: new Date(Date.now() - 1000).toISOString() } });
-    await tick();
+    const task = await createTask({ userId: u.id, domainKey: 'general', task: { task_type: 'report', title: 'Регулярный отчёт', instruction: 'прислать прогресс', schedule_kind: 'interval', interval_seconds: 3600 } });
+    await runTask(task);
     const t = (await query(`SELECT status, next_run_at FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0];
     check('9b. Повторяющаяся задача снова активна с будущим запуском', t.status === 'active' && new Date(t.next_run_at) > new Date());
   }
@@ -258,6 +300,96 @@ async function mandatory() {
     const t = (await query(`SELECT attempts, status FROM mem.scheduled_tasks WHERE id=$1`, [task.id])).rows[0];
     const failRun = (await query(`SELECT count(*)::int c FROM mem.scheduled_task_runs WHERE task_id=$1 AND status='failed'`, [task.id])).rows[0].c;
     check('9c. Ошибка задачи фиксируется и планируется повтор', r.ok === false && t.attempts === 1 && failRun === 1);
+  }
+
+  // 9d. Cron/RRULE считаются календарно, с timezone и явной диагностикой ошибок.
+  {
+    const base = { task_type: 'reminder', title: 'cron', instruction: 'cron', schedule_kind: 'cron' };
+    const beforeWeekday = computeNextRun(
+      { ...base, timezone: 'Europe/Moscow', cron_expr: '0 9 * * 1-5' },
+      new Date('2026-06-05T05:00:00Z'),
+    );
+    check('9d. Cron будни 09:00 даёт ближайший будний локальный запуск',
+      beforeWeekday.toISOString() === '2026-06-05T06:00:00.000Z', beforeWeekday.toISOString());
+
+    const moscow = computeNextRun(
+      { ...base, timezone: 'Europe/Moscow', cron_expr: '0 9 * * 1-5' },
+      new Date('2026-06-04T20:00:00Z'),
+    );
+    const ny = computeNextRun(
+      { ...base, timezone: 'America/New_York', cron_expr: '0 9 * * 1-5' },
+      new Date('2026-06-04T20:00:00Z'),
+    );
+    check('9d. Один cron в разных timezone даёт разные UTC-моменты', moscow.getTime() !== ny.getTime());
+
+    const afterFriday = computeNextRun(
+      { ...base, timezone: 'Europe/Moscow', cron_expr: '0 9 * * 1-5' },
+      new Date('2026-06-05T07:00:00Z'),
+    );
+    check('9d. Cron после пятницы 09:00 переносится на понедельник',
+      afterFriday.toISOString() === '2026-06-08T06:00:00.000Z', afterFriday.toISOString());
+
+    const rruleDaily = computeNextRun(
+      { task_type: 'reminder', title: 'rrule', instruction: 'rrule', schedule_kind: 'rrule', timezone: 'Europe/Moscow', rrule: 'RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0' },
+      new Date('2026-06-05T07:00:00Z'),
+    );
+    check('9d. RRULE возвращает следующий момент строго после опоры',
+      rruleDaily.toISOString() === '2026-06-06T06:00:00.000Z', rruleDaily.toISOString());
+
+    const firstCron = computeFirstRun(
+      { ...base, timezone: 'Europe/Moscow', cron_expr: '0 9 * * 1-5' },
+      new Date('2026-06-05T05:00:00Z'),
+    );
+    const firstRRule = computeFirstRun(
+      { task_type: 'reminder', title: 'rrule', instruction: 'rrule', schedule_kind: 'rrule', timezone: 'Europe/Moscow', rrule: 'RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=10;BYMINUTE=0;BYSECOND=0' },
+      new Date('2026-06-05T05:00:00Z'),
+    );
+    check('9d. Первый cron/RRULE запуск не становится немедленным',
+      firstCron > new Date('2026-06-05T05:00:00Z') && firstRRule > new Date('2026-06-05T05:00:00Z'));
+
+    let cronFailed = false;
+    try {
+      computeNextRun({ ...base, timezone: 'Europe/Moscow', cron_expr: 'bad cron' }, new Date('2026-06-05T05:00:00Z'));
+    } catch (err) {
+      cronFailed = /cron/i.test(String(err.message || err));
+    }
+    let rruleFailed = false;
+    try {
+      computeNextRun({ task_type: 'reminder', title: 'rrule', instruction: 'rrule', schedule_kind: 'rrule', timezone: 'Europe/Moscow', rrule: 'RRULE:FREQ=NOPE' }, new Date('2026-06-05T05:00:00Z'));
+    } catch (err) {
+      rruleFailed = /RRULE|rrule/i.test(String(err.message || err));
+    }
+    check('9d. Невалидный cron/RRULE получает явную ошибку', cronFailed && rruleFailed);
+
+    const fallbackTz = normalizeTimezone('Bad/Timezone');
+    check('9d. Некорректный timezone получает контролируемый fallback', fallbackTz === config.timezone);
+  }
+
+  // 9e. Реальный tool сохраняет cron-поля и будущий next_run_at.
+  {
+    const u = await freshUser('t9e');
+    const conv = await ensureConversation(u.id, 'general');
+    const res = await executeTool(
+      { userId: u.id, conversationId: conv.id, domainKey: 'general', timezone: 'Europe/Moscow' },
+      'scheduler_create_task',
+      {
+        task_type: 'reminder',
+        title: 'Будний отчёт',
+        instruction: 'прислать отчёт',
+        schedule_kind: 'cron',
+        timezone: null,
+        run_at: null,
+        interval_seconds: null,
+        cron_expr: '0 9 * * 1-5',
+        rrule: null,
+      },
+    );
+    const row = (await query(
+      `SELECT cron_expr, timezone, next_run_at FROM mem.scheduled_tasks WHERE id=$1`,
+      [res.task_id],
+    )).rows[0];
+    check('9e. scheduler_create_task сохраняет cron_expr, timezone и будущий next_run_at',
+      row?.cron_expr === '0 9 * * 1-5' && row?.timezone === 'Europe/Moscow' && new Date(row.next_run_at) > new Date());
   }
 
   // 11. Вредная запись в памяти не становится инструкцией.
@@ -782,6 +914,7 @@ async function main() {
   console.log('Запуск комплексной проверки чат-бота с памятью.\n');
   try {
     await layerStructure();
+    layerToolRegistry();
     await layerExtraction();
     await mandatory();
     await layerPrivacy();

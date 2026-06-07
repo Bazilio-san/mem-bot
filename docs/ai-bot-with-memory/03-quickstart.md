@@ -128,7 +128,8 @@ src/pipeline/extract.js      извлечение кандидатов в пам
 src/pipeline/merge.js        фильтр приватности, поиск похожих, дедупликация, запись
 src/pipeline/secure.js       защищённая память: шифрование, согласие, маскирование
 src/pipeline/scheduler.js    извлечение задач, создание, воркер, повторы, перепланирование
-src/pipeline/tools.js        описания и исполнители инструментов агента
+src/pipeline/tools.js        реестр инструментов: сборка definitions, права, журналирование, вызов handler
+src/pipeline/agent-tools/    по одному модулю на инструмент: title, definition и handler
 src/pipeline/admin.js        просмотр и удаление памяти пользователем, проверка прав администратора (isAdmin)
 src/pipeline/global-memory.js  глобальная память: факты (always-on) и общая база знаний (RAG) (критерии 19–21)
 src/pipeline/topics.js       тематический трекинг (критерий 13)
@@ -162,17 +163,19 @@ tests/check-llm.js           проверка доступности и возм
 5. **Контур записи.** `src/pipeline/extract.js` и `src/pipeline/merge.js` — см. [06-memory.md](06-memory.md).
 6. **Приватность.** `src/pipeline/secure.js` — см. [07-secure-privacy.md](07-secure-privacy.md).
 7. **Планировщик.** `src/pipeline/scheduler.js` и воркер — см. [10-operations.md](10-operations.md).
-8. **Инструменты и агент.** `src/pipeline/tools.js` и `src/agent.js` — см. [04-architecture.md](04-architecture.md).
-   Управление своей памятью пользователю доступно прямо в диалоге: инструменты `memory_list`,
-   `memory_forget_entity` и `memory_forget_all` (поверх `src/pipeline/admin.js`) — см. [06-memory.md](06-memory.md).
+8. **Инструменты и агент.** Модули `src/pipeline/agent-tools/*`, реестр `src/pipeline/tools.js` и `src/agent.js` —
+   см. [04-architecture.md](04-architecture.md). Управление своей памятью пользователю доступно прямо в диалоге:
+   инструменты `memory_list`, `memory_forget_entity` и `memory_forget_all` (поверх `src/pipeline/admin.js`) — см.
+   [06-memory.md](06-memory.md).
 9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
 10. **Проактивность.** Миграция `002`, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под
     флагами — см. [09-proactivity.md](09-proactivity.md). Код — каталог `src/`.
 11. **Поджатие истории.** Миграция `003`, модули `token-counter`, `history-compress`, `history-context`, заполнение
     `token_count` в `saveMessage` и сборка `HISTORY_CONTEXT` в `agent.js` под флагом — см.
     [13-history-compression.md](13-history-compression.md).
-12. **Глобальная память.** Миграция `005`, модуль `global-memory`, функция `isAdmin` в `admin.js`, инструменты и
-    проверка прав в `tools.js`, сборка блоков `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` в `agent.js` под флагами — см.
+12. **Глобальная память.** Миграция `005`, модуль `global-memory`, функция `isAdmin` в `admin.js`, модули
+    инструментов и проверка прав в `tools.js`, сборка блоков `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` в `agent.js` под
+    флагами — см.
     [14-global-memory.md](14-global-memory.md).
 
 ---
