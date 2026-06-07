@@ -163,6 +163,8 @@ tests/check-llm.js           проверка доступности и возм
 6. **Приватность.** `src/pipeline/secure.js` — см. [07-secure-privacy.md](07-secure-privacy.md).
 7. **Планировщик.** `src/pipeline/scheduler.js` и воркер — см. [10-operations.md](10-operations.md).
 8. **Инструменты и агент.** `src/pipeline/tools.js` и `src/agent.js` — см. [04-architecture.md](04-architecture.md).
+   Управление своей памятью пользователю доступно прямо в диалоге: инструменты `memory_list`,
+   `memory_forget_entity` и `memory_forget_all` (поверх `src/pipeline/admin.js`) — см. [06-memory.md](06-memory.md).
 9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
 10. **Проактивность.** Миграция `002`, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под
     флагами — см. [09-proactivity.md](09-proactivity.md). Код — каталог `src/`.

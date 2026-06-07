@@ -121,7 +121,7 @@
 | `MEM-4` | Контур записи (извлечение, фильтр, дедупликация) | готово | `src/pipeline/extract.js`, `src/pipeline/merge.js` |
 | `MEM-5` | Порог автосохранения и приватность | готово | `passesAutoSave` в `src/pipeline/merge.js` |
 | `MEM-6` | Дедупликация и обновление вместо дублей | готово | `decideMerge` в `src/pipeline/merge.js` |
-| `MEM-7` | Удаление памяти пользователем | готово | `src/pipeline/admin.js` |
+| `MEM-7` | Удаление памяти пользователем | готово | `src/pipeline/admin.js`; в диалоге — `memory_list`, `memory_forget_entity`, `memory_forget_all` в `src/pipeline/tools.js` |
 
 ### Защищённая память — `SEC`
 

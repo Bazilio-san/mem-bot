@@ -10,6 +10,7 @@ import {
   addGlobalFact, deleteGlobalFact, listGlobalFacts,
   searchGlobalKnowledge, addGlobalKnowledge, deleteGlobalKnowledge,
 } from './global-memory.js';
+import { listMemory, forgetAll, deleteByEntity } from './admin.js';
 
 // ---- Базовые описания инструментов для модели -------------------------------
 export const toolDefs = [
@@ -74,6 +75,53 @@ export const toolDefs = [
           origin: { type: 'string', description: 'Город вылета' },
           destination: { type: 'string', description: 'Город назначения' },
           date: { type: ['string', 'null'], description: 'Дата вылета' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memory_list',
+      description: 'Показать пользователю, что бот о нём помнит. Вызывай, когда пользователь спрашивает, какие факты о нём сохранены.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['scope', 'include_archived'],
+        properties: {
+          scope: {
+            type: ['string', 'null'], enum: ['profile', 'domain', 'dialog', null],
+            description: 'Необязательный фильтр области памяти; null — показать все области',
+          },
+          include_archived: { type: 'boolean', description: 'Показывать ли удалённые записи (по умолчанию false)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memory_forget_entity',
+      description: 'Мягко удалить из памяти конкретную сущность по её названию. Вызывай, когда пользователь просит забыть что-то конкретное («забудь мой адрес», «удали данные о машине»).',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['entity_name', 'entity_type'],
+        properties: {
+          entity_name: { type: 'string', description: 'Название сущности или ключ, например «адрес», «паспорт»' },
+          entity_type: { type: ['string', 'null'], description: 'Уточнение типа, если под название подходит несколько сущностей; иначе null' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memory_forget_all',
+      description: 'Полностью забыть всё об активной памяти пользователя. Вызывай ТОЛЬКО по явной и недвусмысленной просьбе и после подтверждения.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        required: ['confirm'],
+        properties: {
+          confirm: { type: 'boolean', description: 'Должно быть true — защита от случайного срабатывания' },
         },
       },
     },
@@ -241,6 +289,39 @@ async function searchFlights(ctx, args) {
   };
 }
 
+// ---- Исполнители управления личной памятью ----------------------------------
+// Все операции строго в рамках ctx.userId: пользователь видит и удаляет только свою память.
+
+async function memoryListTool(ctx, args) {
+  const rows = await listMemory(ctx.userId, { includeArchived: args.include_archived === true });
+  const scope = args.scope || null;
+  const filtered = scope ? rows.filter((r) => r.scope === scope) : rows;
+  // Приватность: защищённые значения высокого уровня (паспорт, телефон и т. п.) не отдаём целиком —
+  // показываем только обобщённое название (entity_type/entity_key), как это делает memory_search.
+  const items = filtered.map((r) => {
+    const isProtected = r.sensitivity === 'high' || r.sensitivity === 'secret';
+    return {
+      id: r.id, scope: r.scope, entity_type: r.entity_type, entity_key: r.entity_key,
+      importance: r.importance, status: r.status,
+      memory_text: isProtected ? '[защищённые данные — скрыто]' : r.memory_text,
+    };
+  });
+  return { items };
+}
+
+async function memoryForgetEntityTool(ctx, args) {
+  return deleteByEntity(ctx.userId, args.entity_name, args.entity_type || null);
+}
+
+async function memoryForgetAllTool(ctx, args) {
+  // Необратимость с точки зрения пользователя: исполняем только при явном подтверждении.
+  if (args.confirm !== true) {
+    return { deleted: 0, error: 'Нужно явное подтверждение пользователя (confirm=true).' };
+  }
+  const deleted = await forgetAll(ctx.userId);
+  return { deleted };
+}
+
 // ---- Исполнители глобальной памяти ------------------------------------------
 async function globalFactAdd(ctx, args) {
   const f = await addGlobalFact({ factText: args.fact_text, priority: args.priority ?? 100, createdBy: ctx.userId });
@@ -277,6 +358,9 @@ const EXECUTORS = {
   scheduler_create_task: schedulerCreateTask,
   secure_record_get: secureRecordGet,
   search_flights: searchFlights,
+  memory_list: memoryListTool,
+  memory_forget_entity: memoryForgetEntityTool,
+  memory_forget_all: memoryForgetAllTool,
   global_fact_add: globalFactAdd,
   global_fact_delete: globalFactDelete,
   global_fact_list: globalFactList,

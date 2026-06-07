@@ -14,7 +14,7 @@ import { processCandidate, persistCandidates } from '../src/pipeline/merge.js';
 import { retrieveMemory, buildMemoryContext, LIMITS } from '../src/pipeline/retrieve.js';
 import { saveSecureRecord, grantConsent, getSecureValue, listSecureSummaries } from '../src/pipeline/secure.js';
 import { createTask, tick, runTask } from '../src/pipeline/scheduler.js';
-import { listMemory, deleteMemory, forgetAll } from '../src/pipeline/admin.js';
+import { listMemory, deleteMemory, forgetAll, deleteByEntity } from '../src/pipeline/admin.js';
 import { executeTool } from '../src/pipeline/tools.js';
 import {
   getActiveGlobalFacts, buildGlobalFactsBlock, addGlobalFact, setGlobalFactEnabled,
@@ -282,6 +282,44 @@ async function mandatory() {
     const okForget = await forgetAll(u.id);
     const after = await listMemory(u.id);
     check('12. Пользователь может удалить память и забыть всё', okDel && !mem.some((m) => m.id === id) && after.length === 0);
+  }
+
+  // 13. Удаление по названию сущности находит нужную запись и не трогает остальные.
+  {
+    const u = await freshUser('t13');
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: 'Адрес: Москва, ул. Ленина, 1', entityType: 'address', entityKey: 'адрес' });
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: 'Любимый цвет — синий', entityType: 'preference', entityKey: 'цвет' });
+    const res = await deleteByEntity(u.id, 'адрес');
+    const left = await listMemory(u.id);
+    const addrGone = !left.some((m) => m.entity_key === 'адрес');
+    const colorKept = left.some((m) => m.entity_key === 'цвет');
+    check('13. Удаление по названию помечает нужную запись и сохраняет остальные', res.deleted === 1 && addrGone && colorKept);
+  }
+
+  // 14. Все три инструмента памяти проходят через executeTool и пишутся в журнал вызовов.
+  {
+    const u = await freshUser('t14');
+    const conv = await ensureConversation(u.id, 'general');
+    const ctx = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: 'Машина — Lada', entityType: 'car', entityKey: 'машина' });
+
+    const listed = await executeTool(ctx, 'memory_list', { scope: null, include_archived: false });
+    const sawCar = Array.isArray(listed.items) && listed.items.some((i) => i.entity_key === 'машина');
+
+    const forgot = await executeTool(ctx, 'memory_forget_entity', { entity_name: 'машина', entity_type: null });
+
+    // Без подтверждения полное забывание не выполняется.
+    const blocked = await executeTool(ctx, 'memory_forget_all', { confirm: false });
+    const allGone = await executeTool(ctx, 'memory_forget_all', { confirm: true });
+
+    const { rows: logRows } = await query(
+      `SELECT tool_name FROM mem.tool_calls WHERE user_id = $1`, [u.id],
+    );
+    const loggedAll = ['memory_list', 'memory_forget_entity', 'memory_forget_all']
+      .every((name) => logRows.some((r) => r.tool_name === name));
+
+    check('14. Инструменты памяти проходят через executeTool с журналированием',
+      sawCar && forgot.deleted === 1 && blocked.deleted === 0 && typeof allGone.deleted === 'number' && loggedAll);
   }
 }
 
