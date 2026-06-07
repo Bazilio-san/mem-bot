@@ -399,6 +399,29 @@ CREATE TABLE IF NOT EXISTS mem.proactive_triggers (
 );
 CREATE INDEX IF NOT EXISTS idx_proactive_triggers_enabled ON mem.proactive_triggers (enabled) WHERE enabled = true;
 
+-- Состояние контакта: общий анти-спам и реакция на молчание пользователя.
+CREATE TABLE IF NOT EXISTS mem.proactive_contact_state (
+    user_id                           uuid PRIMARY KEY REFERENCES mem.users(id) ON DELETE CASCADE,
+    mode                              text NOT NULL DEFAULT 'active'
+                                      CHECK (mode IN ('active','cautious','quiet')),
+    last_proactive_sent_at            timestamptz,
+    last_soft_proactive_sent_at       timestamptz,
+    last_user_reply_after_proactive_at timestamptz,
+    unanswered_proactive_count        integer NOT NULL DEFAULT 0 CHECK (unanswered_proactive_count >= 0),
+    ignored_soft_count_7d             integer NOT NULL DEFAULT 0 CHECK (ignored_soft_count_7d >= 0),
+    daily_soft_count                  integer NOT NULL DEFAULT 0 CHECK (daily_soft_count >= 0),
+    daily_requested_reminder_count    integer NOT NULL DEFAULT 0 CHECK (daily_requested_reminder_count >= 0),
+    weekly_soft_count                 integer NOT NULL DEFAULT 0 CHECK (weekly_soft_count >= 0),
+    counters_day                      date NOT NULL DEFAULT CURRENT_DATE,
+    counters_week                     date NOT NULL DEFAULT date_trunc('week', now())::date,
+    quiet_until                       timestamptz,
+    last_trigger_type                 text,
+    last_topic_key                    text,
+    updated_at                        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_proactive_contact_state_mode
+    ON mem.proactive_contact_state (mode, quiet_until);
+
 -- Журнал доставленных внешних событий (критерий 17): защита от повторной доставки.
 CREATE TABLE IF NOT EXISTS mem.event_deliveries (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -415,9 +438,11 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 
 Признак `enabled` отдельного триггера выбирает активные поводы, а мастер-переключатель `mem.users.proactivity_enabled`
 (миграция `007_proactivity_flag.sql`) стоит над ним и управляет всем контуром у пользователя. Набор триггеров заводится
-выключенным, когда пользователь включает проактивность; подробности — в [09-proactivity.md](09-proactivity.md).
+выключенным, когда пользователь включает проактивность. Таблица `proactive_contact_state` хранит общий режим контакта,
+лимиты мягкой инициативы и состояние тишины; она не зависит от конкретного канала доставки. Подробности — в
+[09-proactivity.md](09-proactivity.md).
 
-Итого с проактивностью — шестнадцать таблиц.
+Итого с проактивностью — семнадцать таблиц.
 
 ---
 

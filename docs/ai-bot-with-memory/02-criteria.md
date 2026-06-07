@@ -44,8 +44,8 @@
 |---------|----------|-------------------------------|----------------|
 | CRIT-13 | Бот не зацикливается на темах (тематический трекинг) | `mem.topic_mentions` + `src/pipeline/topics.js` | `COMPANION_MODE` |
 | CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | дата/время/пояс — всегда; настрой момента — `COMPANION_MODE` |
-| CRIT-15 | Бот пишет первым по уместному поводу (триггеры и анти-спам) | `mem.proactive_triggers` + `mem.users.proactivity_enabled` + `src/pipeline/proactive.js` | `PROACTIVE_ENABLED` |
-| CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | `welcome_back` + `src/pipeline/proactiveMessage.js` | `PROACTIVE_ENABLED` |
+| CRIT-15 | Бот пишет первым по уместному поводу, учитывая молчание пользователя | `mem.proactive_triggers` + `mem.proactive_contact_state` + `src/pipeline/proactiveContactPolicy.js` | `PROACTIVE_ENABLED` |
+| CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | входящий `welcome_back`-сигнал в `src/agent.js` + `src/pipeline/proactiveMessage.js` | `PROACTIVE_ENABLED` |
 | CRIT-17 | Внешние события превращаются в персональные поводы | `src/pipeline/events.js` + `mem.event_deliveries` | `PROACTIVE_EVENTS_ENABLED` |
 
 Каждый проактивный критерий включается флагом и при выключенном флаге не влияет на базовое поведение. Подробный разбор

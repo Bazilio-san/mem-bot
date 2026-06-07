@@ -5,6 +5,9 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import { chat, chatJSON } from '../llm.js';
 import { ensureConversation, saveMessage, getDomainId, listUsersWithTriggers } from '../repo.js';
+import {
+  classifyEventCandidate, evaluateContactPolicy, getContactState, recordProactiveSent,
+} from './proactiveContactPolicy.js';
 
 // Заглушка источника новостей. В продакшене заменить на внешний API. Каждое событие имеет стабильный id.
 const NEWS_STUB = [
@@ -76,7 +79,7 @@ async function alreadyDelivered(userId, eventId) {
   return rows.length > 0;
 }
 
-async function deliverEvent(user, domainId, event, relevance) {
+async function deliverEvent(user, domainId, event, relevance, candidate) {
   const facts = await loadFactsText(user.id, domainId);
   const system = `Ты дружелюбно делишься новостью. Коротко (2-3 предложения): объясни, почему она может быть интересна
 именно этому пользователю, изложи суть и предложи обсудить, если захочет. Тон тёплый, без навязчивости.
@@ -107,6 +110,7 @@ ${facts}`;
     `INSERT INTO mem.event_deliveries (user_id, event_id, event_type, relevance_score, reason)
      VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id, event_id) DO NOTHING`,
     [user.id, event.id, event.type, relevance.relevanceScore, relevance.reason]);
+  await recordProactiveSent({ userId: user.id, candidate });
 }
 
 // Один проход контура событий: взять событие, проверить релевантность каждому пользователю, доставить подходящим.
@@ -120,9 +124,13 @@ export async function processEvents() {
     try {
       if (await alreadyDelivered(user.id, event.id)) continue;
       const domainId = await getDomainId('general');
+      const candidate = classifyEventCandidate(event);
+      const state = await getContactState(user.id);
+      const decision = evaluateContactPolicy({ state, candidate });
+      if (!decision.allowed) continue;
       const rel = await checkRelevance(user.id, domainId, event);
       if (rel.isRelevant && Number(rel.relevanceScore) >= config.proactive.events.relevanceThreshold) {
-        await deliverEvent(user, domainId, event, rel);
+        await deliverEvent(user, domainId, event, rel, candidate);
         delivered++;
       }
     } catch (err) { console.error('Обработка события не удалась:', event.id, err.message); }

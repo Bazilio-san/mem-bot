@@ -7,6 +7,9 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import { chatJSON } from '../llm.js';
 import { getDomainId } from '../repo.js';
+import {
+  classifyReminderCandidate, evaluateContactPolicy, getContactState, recordProactiveSent,
+} from './proactiveContactPolicy.js';
 
 const WORKER_ID = process.env.WORKER_ID || 'scheduler-1';
 const { rrulestr } = rrulePkg;
@@ -310,11 +313,42 @@ export async function runTask(task, { onReminder } = {}) {
 
   try {
     if (task.task_type === 'reminder' || task.task_type === 'follow_up' || task.task_type === 'report') {
+      let reminderCandidate = null;
+      if (task.task_type === 'reminder') {
+        reminderCandidate = classifyReminderCandidate(task);
+        const state = await getContactState(task.user_id);
+        const decision = evaluateContactPolicy({ state, candidate: reminderCandidate });
+        if (!decision.allowed) {
+          await query(
+            `UPDATE mem.scheduled_tasks
+             SET next_run_at = now() + interval '1 hour',
+                 locked_by = NULL,
+                 locked_until = NULL,
+                 metadata = metadata || $2::jsonb,
+                 updated_at = now()
+             WHERE id = $1`,
+            [task.id, JSON.stringify({
+              last_contact_policy_denial: decision.reason,
+              last_contact_policy_denied_at: new Date().toISOString(),
+            })],
+          );
+          await query(
+            `UPDATE mem.scheduled_task_runs
+             SET status='success', finished_at=now(), result=$2::jsonb
+             WHERE id=$1`,
+            [runId, JSON.stringify({ ok: true, deferred: true, reason: decision.reason })],
+          );
+          return { ok: true, rescheduled: true, deferred: true, reason: decision.reason };
+        }
+      }
       await query(
         `INSERT INTO mem.notification_outbox (user_id, task_id, channel, message_text, payload)
          VALUES ($1,$2,'default',$3,$4::jsonb)`,
         [task.user_id, task.id, task.instruction, JSON.stringify(task.payload || {})],
       );
+      if (reminderCandidate) {
+        await recordProactiveSent({ userId: task.user_id, candidate: reminderCandidate });
+      }
       if (onReminder) await onReminder(task);
     } else if (task.task_type === 'memory_cleanup') {
       await query(

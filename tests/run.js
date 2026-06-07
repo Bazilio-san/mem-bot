@@ -31,6 +31,9 @@ import { getActiveConversationSummary, getColdPendingMessages } from '../src/rep
 import { maybeCompressHistory, factsToCandidates } from '../src/pipeline/history-compress.js';
 import { buildHistoryContext } from '../src/pipeline/history-context.js';
 import { estimateTokens } from '../src/pipeline/token-counter.js';
+import {
+  evaluateContactPolicy, getContactState, recordProactiveSent, recordUserInboundForContactPolicy,
+} from '../src/pipeline/proactiveContactPolicy.js';
 
 const TRIGGER_DEFAULTS = [
   { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
@@ -532,11 +535,12 @@ async function layerProactivity() {
   {
     const { rows: tabs } = await query(`SELECT tablename FROM pg_tables WHERE schemaname='mem'`);
     const have = new Set(tabs.map((t) => t.tablename));
-    const need = ['topic_mentions', 'proactive_triggers', 'event_deliveries'];
+    const need = ['topic_mentions', 'proactive_triggers', 'event_deliveries', 'proactive_contact_state'];
     check('6.1. Новые таблицы созданы', need.every((t) => have.has(t)), need.filter((t) => !have.has(t)).join(','));
     const { rows: idx } = await query(`SELECT indexdef FROM pg_indexes WHERE schemaname='mem'`);
     const defs = idx.map((i) => i.indexdef).join('\n');
-    check('6.1. Индексы новых таблиц есть', /topic_mentions/.test(defs) && /proactive_triggers/.test(defs));
+    check('6.1. Индексы новых таблиц есть',
+      /topic_mentions/.test(defs) && /proactive_triggers/.test(defs) && /proactive_contact_state/.test(defs));
   }
 
   // 6.2. Темпоральный контекст: время суток валидно, пауза форматируется.
@@ -567,7 +571,75 @@ async function layerProactivity() {
     check('6.3. Выгоревшая тема распознана', tc.burnedTopics.includes('smalltalk'), tc.burnedTopics.join(','));
   }
 
-  // 6.4. Триггеры и анти-спам: идемпотентное создание, срабатывание и пропуск повтора.
+  // 6.4. Алгоритмическая contact policy: deny-сценарии не требуют генерации текста.
+  {
+    const now = new Date('2026-06-07T10:00:00.000Z');
+    const base = {
+      unanswered_proactive_count: 0,
+      daily_soft_count: 0,
+      weekly_soft_count: 0,
+      daily_requested_reminder_count: 0,
+      last_soft_proactive_sent_at: null,
+      quiet_until: null,
+      last_topic_key: null,
+    };
+    const soft = { triggerType: 'inactivity', messageKind: 'soft_proactive', importance: 'normal', topicKey: 'idea' };
+    check('6.4. Policy разрешает мягкую инициативу в активном режиме',
+      evaluateContactPolicy({ state: base, candidate: soft, now }).allowed === true);
+    check('6.4. Policy блокирует новую мягкую инициативу без ответа',
+      evaluateContactPolicy({
+        state: { ...base, unanswered_proactive_count: 1, daily_soft_count: 1 },
+        candidate: soft,
+        now,
+      }).reason === 'unanswered_soft_proactive');
+    check('6.4. Policy разрешает high follow-up после большой паузы',
+      evaluateContactPolicy({
+        state: {
+          ...base,
+          unanswered_proactive_count: 1,
+          daily_soft_count: 1,
+          last_soft_proactive_sent_at: new Date('2026-06-07T00:00:00.000Z'),
+        },
+        candidate: { ...soft, importance: 'high' },
+        now,
+      }).allowed === true);
+    check('6.4. Policy переводит второй игнор в тишину до ответа',
+      evaluateContactPolicy({
+        state: { ...base, unanswered_proactive_count: 2 },
+        candidate: { ...soft, importance: 'high' },
+        now,
+      }).reason === 'silent_until_user_reply');
+    check('6.4. Социальные сообщения не отправляются фоновым воркером',
+      evaluateContactPolicy({
+        state: base,
+        candidate: { triggerType: 'daily_checkin', messageKind: 'social_proactive', importance: 'low' },
+        now,
+      }).reason === 'social_requires_incoming_user_message');
+  }
+
+  // 6.5. Contact state: запись отправки и входящего сообщения.
+  {
+    const u = await freshUser('tcontact');
+    const soft = { triggerType: 'inactivity', messageKind: 'soft_proactive', importance: 'normal', topicKey: 'idea' };
+    await recordProactiveSent({ userId: u.id, candidate: soft, sentAt: new Date() });
+    const waiting = await getContactState(u.id);
+    check('6.5. Отправка мягкой инициативы увеличивает unanswered',
+      waiting.unanswered_proactive_count === 1 && waiting.mode === 'cautious');
+    await recordProactiveSent({ userId: u.id, candidate: { ...soft, importance: 'high' }, sentAt: new Date() });
+    const quiet = await getContactState(u.id);
+    check('6.5. Второе мягкое сообщение переводит state в quiet',
+      quiet.unanswered_proactive_count === 2 && quiet.mode === 'quiet' && Boolean(quiet.quiet_until));
+    const inbound = await recordUserInboundForContactPolicy({
+      userId: u.id,
+      previousUserMessageAt: new Date(Date.now() - 2 * 3600000),
+    });
+    const active = await getContactState(u.id);
+    check('6.5. Входящее сообщение сбрасывает unanswered и quiet',
+      active.unanswered_proactive_count === 0 && active.mode === 'active' && active.quiet_until === null);
+    check('6.5. Входящее после паузы даёт welcome_back сигнал', inbound.welcomeBack === true);
+  }
+
+  // 6.6. Триггеры и анти-спам: идемпотентное создание, срабатывание и пропуск повтора.
   {
     const u = await freshUser('tprtrig');
     const dom = await getDomainId('general');
@@ -576,24 +648,29 @@ async function layerProactivity() {
     const cnt = (await query(`SELECT count(*)::int c FROM mem.proactive_triggers WHERE user_id=$1`, [u.id])).rows[0].c;
     check('6.4. Создано ровно 4 триггера идемпотентно', cnt === 4, `триггеров: ${cnt}`);
 
-    // Сообщение пользователя двухчасовой давности — чтобы welcome_back был готов сработать.
+    // Сообщение пользователя двухдневной давности — inactivity готов, а welcome_back не стреляет из фона.
     const conv = await ensureConversation(u.id, 'general');
     await query(
       `INSERT INTO mem.conversation_messages (conversation_id, user_id, role, content, created_at)
-       VALUES ($1,$2,'user','привет', now() - interval '2 hours')`, [conv.id, u.id]);
-    const { rows: trows } = await query(
+       VALUES ($1,$2,'user','привет', now() - interval '2 days')`, [conv.id, u.id]);
+    const { rows: welcomeRows } = await query(
       `SELECT * FROM mem.proactive_triggers WHERE user_id=$1 AND trigger_type='welcome_back'`, [u.id]);
+    const welcomeReady = await shouldFire(welcomeRows[0], u.id);
+    check('6.6. Триггер welcome_back не срабатывает от фонового молчания', welcomeReady === false);
+
+    const { rows: trows } = await query(
+      `SELECT * FROM mem.proactive_triggers WHERE user_id=$1 AND trigger_type='inactivity'`, [u.id]);
     const trig = trows[0];
     const beforeFire = await shouldFire(trig, u.id);
-    check('6.4. Триггер welcome_back готов сработать', beforeFire === true);
+    check('6.6. Триггер inactivity готов сработать', beforeFire === true);
 
     const fired = await fire(trig, { id: u.id, timezone: 'Europe/Moscow' });
-    check('6.4. Проактивное сообщение сгенерировано и доставлено', fired === true);
+    check('6.6. Проактивное сообщение сгенерировано и доставлено', fired === true);
 
     const { rows: trows2 } = await query(
       `SELECT * FROM mem.proactive_triggers WHERE id=$1`, [trig.id]);
     const afterFire = await shouldFire(trows2[0], u.id);
-    check('6.4. Анти-спам: повторное срабатывание подавлено', afterFire === false);
+    check('6.6. Анти-спам: повторное срабатывание подавлено', afterFire === false);
 
     const outbox = (await query(
       `SELECT count(*)::int c FROM mem.notification_outbox WHERE user_id=$1 AND payload->>'kind'='proactive'`,
@@ -601,10 +678,11 @@ async function layerProactivity() {
     const reply = (await query(
       `SELECT count(*)::int c FROM mem.conversation_messages WHERE user_id=$1 AND role='assistant'`,
       [u.id])).rows[0].c;
-    check('6.5. Сообщение попало в outbox и в историю диалога', outbox >= 1 && reply >= 1, `outbox ${outbox}, реплик ${reply}`);
+    check('6.7. Сообщение попало в outbox и в историю диалога',
+      outbox >= 1 && reply >= 1, `outbox ${outbox}, реплик ${reply}`);
   }
 
-  // 6.6. Защита от повторной доставки события (на уровне ограничения уникальности).
+  // 6.8. Защита от повторной доставки события (на уровне ограничения уникальности).
   {
     const u = await freshUser('tevdup');
     await query(

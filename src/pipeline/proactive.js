@@ -5,6 +5,10 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import { ensureConversation, saveMessage, getLastUserMessageTime, listUsersWithTriggers } from '../repo.js';
 import { buildProactiveMessage } from './proactiveMessage.js';
+import {
+  chooseBestAllowed, classifyTriggerCandidate, contactMode, evaluateContactPolicy,
+  getContactState, recordProactiveSent,
+} from './proactiveContactPolicy.js';
 
 // Анти-спам: срабатывал ли триггер за последние N минут.
 function firedRecently(lastFiredAt, minutes) {
@@ -48,20 +52,20 @@ export async function shouldFire(trigger, userId) {
     return rows.length > 0;
   }
   if (trigger.trigger_type === 'welcome_back') {
-    const gap = cfg.gap_minutes ?? config.proactive.welcomeBackGapMinutes;
-    const idle = await lastInactivityMinutes(userId);
-    if (idle === null || idle < gap) return false;
-    return !firedRecently(trigger.last_fired_at, gap);
+    return false;
   }
   return false;
 }
 
 // Сгенерировать и доставить проактивное сообщение, затем обновить last_fired_at.
-export async function fire(trigger, user) {
+export async function fire(trigger, user, { candidate = null, state = null } = {}) {
+  const effectiveCandidate = candidate || classifyTriggerCandidate(trigger);
+  const effectiveState = state || await getContactState(user.id);
   const conversation = await ensureConversation(user.id, 'general');
   const text = await buildProactiveMessage({
     userId: user.id, domainKey: 'general',
     triggerType: trigger.trigger_type, timezone: user.timezone || config.timezone,
+    candidate: effectiveCandidate, contactMode: contactMode(effectiveState),
   });
   if (!text || !text.trim()) return false;
 
@@ -82,6 +86,7 @@ export async function fire(trigger, user) {
     `UPDATE mem.proactive_triggers SET last_fired_at = now(), updated_at = now() WHERE id = $1`,
     [trigger.id],
   );
+  await recordProactiveSent({ userId: user.id, candidate: effectiveCandidate });
   return true;
 }
 
@@ -93,9 +98,25 @@ export async function checkProactiveTriggers() {
   for (const user of users) {
     const { rows: triggers } = await query(
       `SELECT * FROM mem.proactive_triggers WHERE user_id = $1 AND enabled = true`, [user.id]);
+    const state = await getContactState(user.id);
+    const allowed = [];
     for (const t of triggers) {
-      try { if (await shouldFire(t, user.id) && await fire(t, user)) fired++; }
-      catch (err) { console.error('Проактивный триггер не сработал:', t.trigger_type, err.message); }
+      try {
+        if (!await shouldFire(t, user.id)) continue;
+        const candidate = classifyTriggerCandidate(t);
+        const decision = evaluateContactPolicy({ state, candidate });
+        if (decision.allowed) allowed.push({ trigger: t, candidate, decision });
+      } catch (err) {
+        console.error('Проактивный триггер не сработал:', t.trigger_type, err.message);
+      }
+    }
+    const chosen = chooseBestAllowed(allowed);
+    if (chosen) {
+      try {
+        if (await fire(chosen.trigger, user, { candidate: chosen.candidate, state })) fired++;
+      } catch (err) {
+        console.error('Проактивный триггер не сработал:', chosen.trigger.trigger_type, err.message);
+      }
     }
   }
   return { fired };

@@ -65,6 +65,14 @@ export const config = {
     checkinHour: Number(env.PROACTIVE_CHECKIN_HOUR || 10),
     goalIntervalMinutes: Number(env.PROACTIVE_GOAL_INTERVAL_MIN || 2880),
     welcomeBackGapMinutes: Number(env.PROACTIVE_WELCOME_GAP_MIN || 60),
+    contactPolicy: {
+      softDailyLimit: Number(env.PROACTIVE_SOFT_DAILY_LIMIT || 1),
+      softWeeklyLimit: Number(env.PROACTIVE_SOFT_WEEKLY_LIMIT || 3),
+      requestedReminderDailyLimit: Number(env.PROACTIVE_REQUESTED_REMINDER_DAILY_LIMIT || 2),
+      minSoftPauseMinutes: Number(env.PROACTIVE_MIN_SOFT_PAUSE_MIN || 360),
+      quietAfterUnanswered: Number(env.PROACTIVE_QUIET_AFTER_UNANSWERED || 2),
+      quietHoursAfterIgnores: Number(env.PROACTIVE_QUIET_HOURS_AFTER_IGNORES || 24),
+    },
     events: {
       // Контур внешних событий. Требует proactive.enabled (использует ту же доставку и анти-спам).
       enabled: flag(env.PROACTIVE_EVENTS_ENABLED, false),
