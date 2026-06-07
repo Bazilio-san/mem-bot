@@ -163,6 +163,45 @@ function layerToolRegistry() {
     publicDefs.every((name) => Boolean(toolMeta[name]?.title)));
 }
 
+// Покрытие человеческих имён инструментов: каждое имя, которое реально попадает в buildToolDefs при любой
+// комбинации прав пользователя и флагов глобальной памяти и голосового вывода, должно иметь непустой title
+// (то есть toolTitle(name) не равен самому имени). Это страхует UI-события вроде «Вызываю инструмент: …».
+function layerToolTitlesCoverage() {
+  section('Слой 1c. Покрытие человеческих имён инструментов при всех комбинациях флагов');
+  const prev = {
+    facts: config.globalMemory.factsEnabled,
+    rag: config.globalMemory.ragEnabled,
+    voice: config.voiceOutput.enabled,
+  };
+  const bool = [false, true];
+  const missing = [];
+  try {
+    for (const isAdmin of bool) {
+      for (const facts of bool) {
+        for (const rag of bool) {
+          for (const voice of bool) {
+            config.globalMemory.factsEnabled = facts;
+            config.globalMemory.ragEnabled = rag;
+            config.voiceOutput.enabled = voice;
+            for (const def of buildToolDefs({ isAdmin })) {
+              const name = def.function.name;
+              if (toolTitle(name) === name) {
+                missing.push(`${name} (admin=${isAdmin}, facts=${facts}, rag=${rag}, voice=${voice})`);
+              }
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    config.globalMemory.factsEnabled = prev.facts;
+    config.globalMemory.ragEnabled = prev.rag;
+    config.voiceOutput.enabled = prev.voice;
+  }
+  check('Каждое имя из buildToolDefs при любых флагах имеет непустой человеческий title',
+    missing.length === 0, missing.slice(0, 5).join(' | '));
+}
+
 // ========================= СЛОЙ 2. Извлечение фактов =========================
 async function layerExtraction() {
   section('Слой 2. Извлечение фактов (tests/memory_cases.json)');
@@ -263,14 +302,36 @@ async function mandatory() {
     check('7. Текущий запрос (Казань) важнее памяти (Москва)', /казан/i.test(res.answer + JSON.stringify(res.toolsUsed)), `ответ: ${res.answer.slice(0, 120)}`);
   }
 
-  // 8 + 10. Создаёт напоминание реальным вызовом инструмента.
+  // 8 + 10. Создаёт напоминание реальным вызовом инструмента. Заодно проверяем контракт событий ядра:
+  // через onEvent собираем последовательность типов событий и убеждаемся, что порядок корректен.
   {
     const u = await freshUser('t8');
     const before = (await query(`SELECT count(*)::int c FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].c;
-    const res = await handleMessage({ externalId: 't8', userMessage: 'Напомни мне завтра в 10 утра проверить цены на билеты.', domainKey: 'flight_search' });
+    const events = [];
+    const res = await handleMessage({
+      externalId: 't8', userMessage: 'Напомни мне завтра в 10 утра проверить цены на билеты.', domainKey: 'flight_search',
+      onEvent: (e) => events.push(e),
+    });
     const after = (await query(`SELECT count(*)::int c FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].c;
     check('8. Создаёт напоминание (запись в scheduled_tasks)', after - before >= 1, `было ${before}, стало ${after}`);
     check('10. Инструмент вызван реально, а не имитирован текстом', res.toolsUsed.some((t) => t.name === 'scheduler_create_task') || after - before >= 1);
+
+    // 15. Контракт событий: agent.started открывает поток, agent.completed и assistant.completed присутствуют.
+    const types = events.map((e) => e.type);
+    check('15. События ядра: первым идёт agent.started, есть agent.completed и assistant.completed',
+      types[0] === 'agent.started' && types.includes('agent.completed') && types.includes('assistant.completed'),
+      types.join(','));
+    const startedIdx = types.indexOf('tool.started');
+    const completedIdx = types.indexOf('tool.completed');
+    const assistantIdx = types.indexOf('assistant.completed');
+    if (startedIdx >= 0) {
+      const started = events[startedIdx];
+      check('15. tool.started идёт до tool.completed и до assistant.completed, с человеческим именем инструмента',
+        startedIdx < completedIdx && completedIdx < assistantIdx
+        && typeof started.toolTitle === 'string' && started.toolTitle.trim().length > 0
+        && started.toolTitle !== started.toolName,
+        `started=${startedIdx}, completed=${completedIdx}, assistant=${assistantIdx}, title=${started.toolTitle}`);
+    }
   }
 
   // 9. Планировщик выполняет задачу один раз.
@@ -1058,6 +1119,7 @@ async function main() {
   try {
     await layerStructure();
     layerToolRegistry();
+    layerToolTitlesCoverage();
     await layerExtraction();
     await mandatory();
     await layerPrivacy();

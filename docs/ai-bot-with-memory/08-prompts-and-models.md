@@ -3,9 +3,9 @@
 ## Вкратце
 
 Все запросы к моделям идут через LLM-прокси (OpenAI-совместимый API), а не напрямую в публичный API `api.openai.com`.
-Клиент (`src/llm.js`) даёт три операции: обычный чат с инструментами, строгий JSON по схеме (`chatJSON`) и эмбеддинги.
-Каждый вспомогательный этап использует структурированный вывод по JSON-схеме. Основной ответ даёт модель среднего
-уровня, вспомогательные задачи — самая дешёвая быстрая модель.
+Клиент (`src/llm.js`) даёт четыре операции: обычный чат с инструментами (`chat`), его потоковый вариант (`chatStream`),
+строгий JSON по схеме (`chatJSON`) и эмбеддинги (`embed`). Каждый вспомогательный этап использует структурированный
+вывод по JSON-схеме. Основной ответ даёт модель среднего уровня, вспомогательные задачи — самая дешёвая быстрая модель.
 
 ## Зачем структурированный вывод через описание схемы
 
@@ -41,6 +41,36 @@ ${JSON.stringify(schema)}
 
 Эмбеддинги получает функция `embed`; при ошибке она возвращает `null`, и вся система откатывается на полнотекстовый и
 структурный поиск без векторов. Это делает векторный слой опциональным и устойчивым к недоступности модели.
+
+---
+
+## [PROMPT-1a] Потоковый основной ответ
+
+Основной ответ модели выдаётся потоково функцией `chatStream`: прокси возвращает ответ частями (chunks), где текст лежит
+в `delta.content`, а вызовы инструментов — в `delta.tool_calls`, причём части одного вызова приходят по индексу (сначала
+может прийти идентификатор, затем имя функции, затем фрагменты строки аргументов). Клиент по мере поступления текста
+вызывает `onDelta(chunkText)`, а из дельт собирает такой же финальный объект сообщения, какой возвращает непотоковый
+`chat`: поле `tool_calls` присутствует только если инструменты действительно вызывались, и его аргументы — это валидный
+JSON, собранный из всех фрагментов. Аргументы разбираются и валидируются только после полной сборки сообщения, а не на
+ходу.
+
+```js
+export async function chatStream({ model = config.llm.mainModel, messages, tools, toolChoice, onDelta }) {
+  const stream = await client.chat.completions.create({ model, messages, tools, stream: true });
+  const acc = createDeltaAccumulator();
+  for await (const chunk of stream) {
+    const delta = chunk.choices?.[0]?.delta || {};
+    if (delta.content && onDelta) await onDelta(delta.content);
+    accumulateChatDelta(acc, delta);   // копит content и собирает tool_calls по индексу
+  }
+  return finalizeChatMessage(acc);     // tool_calls только если они были
+}
+```
+
+Три чистые функции сборки (`createDeltaAccumulator`, `accumulateChatDelta`, `finalizeChatMessage`) вынесены отдельно и
+покрыты модульными тестами без обращения к сети, потому что именно от их корректности зависит, что потоковый ответ ничем
+не отличается по форме от непотокового. Структурированные этапы (`chatJSON`) и эмбеддинги принципиально не стримятся:
+им нужен готовый результат целиком, а не постепенный показ.
 
 ---
 
@@ -221,6 +251,9 @@ export const config = {
   timezone: env.TZ_DEFAULT || 'Europe/Moscow',
   debug: (env.DEBUG || '').split(',').map((s) => s.trim()).filter(Boolean),
   companion: { enabled: flag(env.COMPANION_MODE, false) },
+  streaming: {
+    enabled: flag(env.LLM_STREAMING_ENABLED, true), // потоковый вызов модели (chatStream) и события onEvent
+  },
   globalMemory: {
     factsEnabled: flag(env.GLOBAL_MEMORY_ENABLED, false), // глобальные факты (always-on)
     factsLimit: Number(env.GLOBAL_FACTS_LIMIT || 5),

@@ -23,6 +23,7 @@ import {
   transcribeTelegramAttachment, isProviderConfigured, providerKeyEnv,
 } from './voice/transcribe.js';
 import { buildVoiceText, synthesizeSpeech } from './voice/tts.js';
+import { createTelegramProgress } from './telegram/progress.js';
 
 const TOKEN = process.env.TELEGRAM_API_KEY;
 if (!TOKEN) {
@@ -543,6 +544,41 @@ async function handleUpdate(message) {
       }
       await sendTyping(chatId);
     }
+
+    // Потоковый путь подключаем, когда стриминг включён и в ядре, и в Telegram. Голосовой ответ требует
+    // целого финального текста для синтеза, поэтому при включённом голосовом выводе остаёмся на прежнем
+    // непотоковом пути доставки — иначе пришлось бы и редактировать черновик, и слать голос, дублируя ответ.
+    const useStream = config.streaming.enabled && config.streaming.telegramEnabled && !config.voiceOutput.enabled;
+    if (useStream) {
+      const progress = createTelegramProgress({
+        chatId,
+        tg,
+        startTyping: () => startTypingLoop(chatId),
+        options: {
+          editIntervalMs: config.streaming.editIntervalMs,
+          minEditChars: config.streaming.minEditChars,
+          maxLen: TG_MAX_LEN,
+          toolStatuses: config.streaming.toolStatuses,
+          splitText,
+        },
+      });
+      try {
+        const res = await handleMessage({
+          externalId, userMessage: text, domainKey, stream: true, onEvent: progress.onEvent,
+        });
+        chatDomains.set(chatId, res.domainKey);                    // агент мог сменить домен по смыслу запроса
+        const sent = await progress.complete(res.answer || '(пустой ответ)');
+        await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
+        await refreshChatMenu(chatId, externalId);
+      } catch (err) {
+        await progress.fail(err);
+        throw err;                                                 // общий обработчик ниже отправит текст сбоя
+      } finally {
+        progress.finish();
+      }
+      return;
+    }
+
     const res = await handleMessage({ externalId, userMessage: text, domainKey });
     chatDomains.set(chatId, res.domainKey);                        // агент мог сменить домен по смыслу запроса
     await deliverAgentResult(chatId, message.message_id, res);

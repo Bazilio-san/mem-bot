@@ -140,6 +140,18 @@ export const config = {
     summaryModel: env.VOICE_OUTPUT_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
   },
 
+  // Потоковая обратная связь. Ядро стримит финальный текст модели по частям и испускает абстрактные
+  // события этапов и вызовов инструментов через callback onEvent (см. src/agent.js). Telegram-адаптер —
+  // лишь один потребитель этих событий. По умолчанию включено: новый UX работает без настройки .env.
+  // streaming.enabled управляет ядром (потоковый вызов модели), telegramEnabled — отображением в Telegram.
+  streaming: {
+    enabled: flag(env.LLM_STREAMING_ENABLED, true),              // потоковый вызов модели в ядре агента
+    telegramEnabled: flag(env.TELEGRAM_STREAMING_ENABLED, true), // редактируемый черновик ответа в Telegram
+    editIntervalMs: Number(env.TELEGRAM_STREAM_EDIT_INTERVAL_MS || 900),  // не чаще одного редактирования за это время
+    minEditChars: Number(env.TELEGRAM_STREAM_MIN_EDIT_CHARS || 20),       // и не реже, чем накопится столько новых символов
+    toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true),  // показывать ли «Вызываю инструмент: …»
+  },
+
   // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.
   // Последние hotWindow сообщений всегда передаются дословно; всё, что старше, сжимается в дайджест.
   historyCompression: {

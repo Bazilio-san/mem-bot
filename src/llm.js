@@ -24,6 +24,76 @@ export async function chat({ model = config.llm.mainModel, messages, tools, tool
   return msg;
 }
 
+// --- Сборка потокового ответа модели -----------------------------------------
+// При потоковом вызове Chat Completions ответ приходит частями (chunks). Текст ответа лежит
+// в delta.content, а вызовы инструментов — в delta.tool_calls, причём части одного вызова
+// приходят по индексу: сначала может прийти id, затем имя функции, затем много фрагментов
+// аргументов. Эти три чистые функции собирают из потока такой же финальный объект message,
+// какой возвращает непотоковый chat, и потому покрыты модульными тестами отдельно от сети.
+
+// Создать пустой аккумулятор потокового ответа.
+export function createDeltaAccumulator() {
+  return { role: 'assistant', content: '', tool_calls: [] };
+}
+
+// Добавить одну delta (содержимое choices[0].delta из очередного chunk) в аккумулятор.
+export function accumulateChatDelta(acc, delta) {
+  if (!delta) return acc;
+  if (delta.content) acc.content += delta.content;
+  if (Array.isArray(delta.tool_calls)) {
+    for (const part of delta.tool_calls) {
+      const index = part.index ?? acc.tool_calls.length;
+      let slot = acc.tool_calls[index];
+      if (!slot) {
+        slot = { id: '', type: 'function', function: { name: '', arguments: '' } };
+        acc.tool_calls[index] = slot;
+      }
+      if (part.id) slot.id = part.id;
+      if (part.type) slot.type = part.type;
+      if (part.function?.name) slot.function.name += part.function.name;
+      if (part.function?.arguments) slot.function.arguments += part.function.arguments;
+    }
+  }
+  return acc;
+}
+
+// Превратить аккумулятор в финальный объект message, идентичный по форме ответу непотокового chat:
+// поле tool_calls присутствует только если инструменты действительно вызывались.
+export function finalizeChatMessage(acc) {
+  const message = { role: 'assistant', content: acc.content };
+  const calls = acc.tool_calls.filter(Boolean);
+  if (calls.length) message.tool_calls = calls;
+  return message;
+}
+
+// Потоковый аналог chat: возвращает такой же финальный объект message (с полями content и tool_calls),
+// но по мере поступления текста вызывает onDelta(chunkText), чтобы канал мог показывать ответ постепенно.
+// Если инструменты не вызываются, onDelta получает текст ответа по частям; на ходу аргументы инструментов
+// не разбираются — это делает вызывающий код после получения готового сообщения.
+export async function chatStream({ model = config.llm.mainModel, messages, tools, toolChoice, onDelta }) {
+  const body = { model, messages, stream: true };
+  if (tools && tools.length) body.tools = tools;
+  if (toolChoice) body.tool_choice = toolChoice;
+  dbg('chatStream ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
+
+  const stream = await client.chat.completions.create(body);
+  const acc = createDeltaAccumulator();
+  let chunks = 0;
+  let finishReason = null;
+  for await (const chunk of stream) {
+    chunks++;
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+    const delta = choice.delta || {};
+    if (delta.content && onDelta) await onDelta(delta.content);
+    accumulateChatDelta(acc, delta);
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+  }
+  const message = finalizeChatMessage(acc);
+  dbg('chatStream <-', 'chunks:', chunks, 'finish:', finishReason, 'tool_calls:', message.tool_calls?.length || 0);
+  return message;
+}
+
 // Чат со структурированным выводом по JSON Schema. Возвращает разобранный объект.
 // Используется режим json_object с описанием схемы прямо в промпте: строгий режим
 // json_schema на этом LiteLLM-прокси отклоняет схемы со свободными полями (data, entities),
