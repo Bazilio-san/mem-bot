@@ -11,7 +11,8 @@ import { config } from '../src/config.js';
 // у которого подменены apiKey и baseURL.
 const PROVIDERS = [
   {
-    label: 'LiteLLM-прокси',
+    // Когда OPENAI_BASE_URL не задан, прокси не используется и клиент идёт напрямую к OpenAI.
+    label: config.llm.baseURL ? 'LiteLLM-прокси' : 'OpenAI напрямую',
     model: process.env.MAIN_MODEL || 'gpt-5.4-mini',
     apiKey: config.llm.apiKey,
     baseURL: config.llm.baseURL,
@@ -53,8 +54,9 @@ async function runSuite(provider) {
       console.log(`     время ответа: ${ms} мс`);
       return res;
     } catch (err) {
+      // Ошибочный запрос не участвует в сравнении скорости: время до ошибки не показательно.
+      // Поэтому в timings его не добавляем — в таблице сравнения у такого запроса будет прочерк.
       const ms = Math.round(performance.now() - t0);
-      timings.push({ label, ms });
       console.log(`     время до ошибки: ${ms} мс`);
       throw err;
     }
@@ -197,7 +199,7 @@ async function runSuite(provider) {
   }
 
   console.log(`\n############### Провайдер: ${provider.label} ###############`);
-  console.log(`Базовый адрес: ${provider.baseURL}`);
+  console.log(`Базовый адрес: ${provider.baseURL || 'по умолчанию (api.openai.com)'}`);
   console.log(`Проверяемая модель: ${MODEL}`);
   if (!provider.apiKey) {
     console.log('  ⚠️  Ключ доступа не задан — провайдер пропущен.');

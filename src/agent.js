@@ -51,6 +51,43 @@ function isCapabilitiesQuestion(text) {
   );
 }
 
+export async function runModelTurn({
+  streamingOn,
+  model,
+  messages,
+  tools,
+  emit,
+  chatFn = chat,
+  chatStreamFn = chatStream,
+}) {
+  if (!streamingOn) return chatFn({ model, messages, tools });
+
+  const bufferedDeltas = [];
+  let msg;
+  try {
+    msg = await chatStreamFn({
+      model,
+      messages,
+      tools,
+      onDelta: (chunk) => {
+        if (chunk) bufferedDeltas.push(chunk);
+      },
+    });
+  } catch (err) {
+    // Если видимого стрима ещё не было, откатываемся на обычный chat: транспортные ошибки streaming API
+    // не должны ломать совместимый путь ответа. Дельты выше только буферизуются, поэтому пользователь их
+    // ещё не видел.
+    return chatFn({ model, messages, tools });
+  }
+
+  // В ходе, который завершился tool_calls, не публикуем промежуточный текст: пользователь сначала увидит
+  // статус инструмента, а финальный ответ придёт после выполнения инструмента и следующего model turn.
+  if (!msg.tool_calls?.length) {
+    for (const chunk of bufferedDeltas) await emit({ type: 'assistant.delta', text: chunk });
+  }
+  return msg;
+}
+
 async function buildCapabilitiesContext(ctx, toolDefs) {
   if (!isCapabilitiesQuestion(ctx.userMessage)) return '';
   const toolLines = toolDefs.length
@@ -252,17 +289,13 @@ ${topicsBlock}
   let degraded = false;
   for (let step = 0; step < 5; step++) {
     await emit({ type: 'stage.started', stage: 'llm', title: 'Готовлю ответ' });
-    // На потоковом пути текст модели уходит в канал по частям событием assistant.delta. Если этот ход
-    // закончится вызовом инструмента, модель почти всегда возвращает пустой content, поэтому преждевременной
-    // публикации текста не происходит, и UX не показывает «половину ответа» перед статусом инструмента.
-    const msg = streamingOn
-      ? await chatStream({
-        model: config.llm.mainModel,
-        messages,
-        tools,
-        onDelta: (chunk) => emit({ type: 'assistant.delta', text: chunk }),
-      })
-      : await chat({ model: config.llm.mainModel, messages, tools });
+    const msg = await runModelTurn({
+      streamingOn,
+      model: config.llm.mainModel,
+      messages,
+      tools,
+      emit,
+    });
     if (msg.tool_calls && msg.tool_calls.length) {
       messages.push(msg);
       for (const tc of msg.tool_calls) {

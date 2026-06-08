@@ -2,6 +2,7 @@
 // собирают из потоковых частей (chunks) такой же финальный объект message, как непотоковый chat. Сеть и
 // реальный прокси здесь не задействованы.
 import assert from 'node:assert/strict';
+import { runModelTurn } from '../src/agent.js';
 import { createDeltaAccumulator, accumulateChatDelta, finalizeChatMessage } from '../src/llm.js';
 
 // 1. Накопление текста ответа из нескольких delta.content.
@@ -49,6 +50,79 @@ import { createDeltaAccumulator, accumulateChatDelta, finalizeChatMessage } from
   const msg = finalizeChatMessage(acc);
   assert.equal('tool_calls' in msg, false);
   assert.equal(msg.role, 'assistant');
+}
+
+// 5. Agent model turn не публикует текстовые дельты, если ход завершился вызовом инструмента.
+{
+  const events = [];
+  const msg = await runModelTurn({
+    streamingOn: true,
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'test' }],
+    tools: [{ type: 'function', function: { name: 'memory_search' } }],
+    emit: (event) => events.push(event),
+    chatStreamFn: async ({ onDelta }) => {
+      onDelta('Сейчас проверю. ');
+      return {
+        role: 'assistant',
+        content: 'Сейчас проверю. ',
+        tool_calls: [{
+          id: 'call_1',
+          type: 'function',
+          function: { name: 'memory_search', arguments: '{"query":"test"}' },
+        }],
+      };
+    },
+    chatFn: async () => {
+      throw new Error('chat fallback must not be called');
+    },
+  });
+  assert.equal(msg.tool_calls.length, 1);
+  assert.deepEqual(events, []);
+}
+
+// 6. Agent model turn публикует буферизованные дельты для финального текстового ответа.
+{
+  const events = [];
+  const msg = await runModelTurn({
+    streamingOn: true,
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'test' }],
+    tools: [],
+    emit: (event) => events.push(event),
+    chatStreamFn: async ({ onDelta }) => {
+      onDelta('При');
+      onDelta('вет');
+      return { role: 'assistant', content: 'Привет' };
+    },
+    chatFn: async () => {
+      throw new Error('chat fallback must not be called');
+    },
+  });
+  assert.equal(msg.content, 'Привет');
+  assert.deepEqual(events, [
+    { type: 'assistant.delta', text: 'При' },
+    { type: 'assistant.delta', text: 'вет' },
+  ]);
+}
+
+// 7. Ранняя ошибка streaming API откатывается на обычный chat, пока пользователь не видел дельты.
+{
+  const events = [];
+  const msg = await runModelTurn({
+    streamingOn: true,
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'test' }],
+    tools: [],
+    emit: (event) => events.push(event),
+    chatStreamFn: async ({ onDelta }) => {
+      onDelta('невидимый буфер');
+      throw new Error('transport reset');
+    },
+    chatFn: async () => ({ role: 'assistant', content: 'Ответ через fallback' }),
+  });
+  assert.equal(msg.content, 'Ответ через fallback');
+  assert.deepEqual(events, []);
 }
 
 console.log('streaming.test.mjs: ok');

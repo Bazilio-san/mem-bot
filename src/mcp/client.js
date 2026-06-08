@@ -2,8 +2,15 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { loadMcpServers } from './config.js';
+import { debugEnabled } from '../config.js';
 
 const CALL_TIMEOUT_MS = 90_000; // предел ожидания ответа инструмента MCP; зависший сервер не блокирует агента
+
+// Трассировка вызовов инструментов MCP: запросы и ответы. Включается категорией DEBUG=mcp:tool (или DEBUG=*).
+// Идёт в stderr, чтобы не смешиваться с пользовательским выводом, и по умолчанию выключена.
+function dbgTool(...args) {
+  if (debugEnabled('mcp:tool')) console.error('[mcp:tool]', ...args);
+}
 
 // Одно живое подключение к серверу. Храним клиента, чтобы переиспользовать соединение между вызовами
 // и уметь переподключаться при разрыве, не пересобирая реестр инструментов.
@@ -48,16 +55,32 @@ class McpConnection {
   }
 
   // Вызвать инструмент. При ошибке, похожей на разрыв связи, переподключаемся один раз и повторяем.
+  // Каждый запрос и ответ трассируется под категорией DEBUG=mcp:tool.
   async call(name, args) {
+    const label = `${this.server.alias}__${name}`;
+    dbgTool(`-> ${label} запрос:`, JSON.stringify(args || {}));
     try {
-      const client = await this.ensureConnected();
-      return await client.callTool({ name, arguments: args || {} }, { timeout: CALL_TIMEOUT_MS });
+      const res = await this.invokeOnce(name, args);
+      dbgTool(`<- ${label} ответ`, res?.isError ? '(isError)' : '(ok)', ':', JSON.stringify(res?.content ?? res));
+      return res;
     } catch (err) {
-      if (!isConnectionError(err)) throw err;
+      if (!isConnectionError(err)) {
+        dbgTool(`xx ${label} ошибка:`, String(err?.message || err));
+        throw err;
+      }
+      dbgTool(`-- ${label} разрыв связи, переподключаюсь и повторяю:`, String(err?.message || err));
       await this.reset();
-      const client = await this.ensureConnected();
-      return await client.callTool({ name, arguments: args || {} }, { timeout: CALL_TIMEOUT_MS });
+      const res = await this.invokeOnce(name, args);
+      dbgTool(`<- ${label} ответ после переподключения`, res?.isError ? '(isError)' : '(ok)', ':',
+        JSON.stringify(res?.content ?? res));
+      return res;
     }
+  }
+
+  // Один сетевой вызов инструмента без логики повтора — общая часть для первой попытки и повтора.
+  async invokeOnce(name, args) {
+    const client = await this.ensureConnected();
+    return client.callTool({ name, arguments: args || {} }, { timeout: CALL_TIMEOUT_MS });
   }
 }
 

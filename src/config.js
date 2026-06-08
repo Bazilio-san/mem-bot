@@ -34,7 +34,9 @@ export const config = {
 
   llm: {
     apiKey: env.OPENAI_API_KEY,
-    baseURL: env.OPENAI_BASE_URL || 'https://litellm.finam.ru/v1',
+    // Адрес LLM-провайдера. Если OPENAI_BASE_URL не задан (или закомментирован), прокси не используется:
+    // baseURL остаётся пустым, и клиент OpenAI обращается напрямую к стандартному https://api.openai.com/v1.
+    baseURL: env.OPENAI_BASE_URL?.trim() || undefined,
     // Основной агент: отвечает пользователю и вызывает инструменты.
     mainModel: env.MAIN_MODEL || 'gpt-5.4-mini',
     // Вспомогательная быстрая модель: классификация запроса.
