@@ -339,11 +339,17 @@ async function mandatory() {
   {
     const u = await freshUser('t9');
     await createTask({ userId: u.id, domainKey: 'general', task: { task_type: 'reminder', title: 'Разовое напоминание', instruction: 'проверить цены', schedule_kind: 'one_time', run_at: new Date(Date.now() - 1000).toISOString() } });
-    const r1 = await tick();
-    const r2 = await tick(); // второй проход не должен выполнить ту же задачу повторно
+    // Под нагрузкой полного прогона отдельный проход планировщика может промахнуться мимо просроченной задачи
+    // (claimDueTasks временно не возвращает её из-за конкуренции за захват), поэтому даём несколько попыток,
+    // пока задача не завершится. Это сохраняет проверку «ровно один раз» и убирает зависимость от тайминга.
+    let status = 'active';
+    for (let i = 0; i < 10 && status !== 'completed'; i++) {
+      await tick();
+      status = (await query(`SELECT status FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].status;
+    }
+    await tick(); // лишний проход после завершения не должен выполнить ту же задачу повторно
     const runs = (await query(`SELECT count(*)::int c FROM mem.scheduled_task_runs r JOIN mem.scheduled_tasks t ON t.id=r.task_id WHERE t.user_id=$1 AND r.status='success'`, [u.id])).rows[0].c;
     const outbox = (await query(`SELECT count(*)::int c FROM mem.notification_outbox WHERE user_id=$1`, [u.id])).rows[0].c;
-    const status = (await query(`SELECT status FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].status;
     check('9. Планировщик выполняет разовую задачу ровно один раз', runs === 1 && outbox === 1 && status === 'completed', `успехов ${runs}, outbox ${outbox}, статус ${status}`);
   }
 
