@@ -267,6 +267,15 @@ export async function setReplyMode(userId, mode) {
   return replyMode;
 }
 
+// Лёгкое чтение предпочтения формы ответа по внешнему идентификатору (например, Telegram ID), без upsert.
+// Нужно каналу, чтобы решить способ доставки (потоковый черновик или голос) ещё ДО вызова ядра: ядро узнаёт
+// режим только внутри handleMessage через ensureUser, а решение о стриминге принимается раньше. Для нового
+// пользователя (записи ещё нет) и при любом некорректном значении возвращает 'text' — безопасный режим по умолчанию.
+export async function getUserReplyMode(externalId) {
+  const { rows } = await query('SELECT reply_mode FROM mem.users WHERE external_id = $1', [externalId]);
+  return rows[0]?.reply_mode === 'voice' ? 'voice' : 'text';
+}
+
 // Текущее состояние проактивности пользователя: мастер-флаг и список его триггеров с признаком enabled.
 // Возвращает null, если пользователя с таким внешним идентификатором ещё нет. Нужно для отрисовки подменю.
 export async function getProactivityState(externalId) {

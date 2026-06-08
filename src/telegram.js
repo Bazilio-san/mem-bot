@@ -12,7 +12,7 @@ import { processEvents } from './pipeline/events.js';
 import { fireProactiveNow } from './pipeline/proactive.js';
 import {
   setUserProactivity, getProactivityState, setTrigger,
-  saveMessageExternalRef, findMessageByExternalRef,
+  saveMessageExternalRef, findMessageByExternalRef, getUserReplyMode,
 } from './repo.js';
 import { query, getPool, closePool } from './db.js';
 import {
@@ -554,9 +554,19 @@ async function handleUpdate(message) {
     }
 
     // Потоковый путь подключаем, когда стриминг включён и в ядре, и в Telegram. Голосовой ответ требует
-    // целого финального текста для синтеза, поэтому при включённом голосовом выводе остаёмся на прежнем
-    // непотоковом пути доставки — иначе пришлось бы и редактировать черновик, и слать голос, дублируя ответ.
-    const useStream = config.streaming.enabled && config.streaming.telegramEnabled && !config.voiceOutput.enabled;
+    // целого финального текста для синтеза, поэтому потоковый черновик несовместим с голосовой доставкой —
+    // иначе пришлось бы и редактировать черновик текстом, и слать голос, дублируя ответ. Решающим является
+    // не глобальный флаг голоса, а реальный режим ответа конкретного пользователя: даже при включённом
+    // VOICE_OUTPUT_ENABLED пользователи в текстовом режиме должны получать стриминг. Поэтому режим читается
+    // лёгким запросом ДО вызова ядра (ядро узнаёт его только внутри handleMessage). Остаётся редкая гонка:
+    // если модель сменит режим инструментом set_reply_mode прямо в этом запросе, предсказание окажется
+    // неточным — это приемлемо, потому что смена режима происходит нечасто, не на каждом сообщении.
+    let userReplyMode = 'text';
+    if (config.voiceOutput.enabled) {
+      try { userReplyMode = await getUserReplyMode(externalId); }
+      catch { userReplyMode = 'text'; }   // при сбое чтения безопаснее считать текстовым (стриминг разрешён)
+    }
+    const useStream = config.streaming.enabled && config.streaming.telegramEnabled && userReplyMode !== 'voice';
     if (useStream) {
       const progress = createTelegramProgress({
         chatId,

@@ -31,3 +31,4 @@ playwright.config.js.map
 /_tmp/
 **/node_modules/
 
+/.playwright-mcp/
