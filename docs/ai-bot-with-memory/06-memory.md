@@ -38,10 +38,8 @@
 Примеры записей предметной памяти для разных доменов:
 
 ```json
-{ "domain_key": "flight_search", "entity_type": "flight_preference", "memory_kind": "preference",
-  "data": { "avoid": ["night_flights", "long_layovers"], "preferred_departure_city": "Moscow" } }
 { "domain_key": "joke_teller", "entity_type": "joke_preference", "memory_kind": "preference",
-  "data": { "liked_categories": ["programmers", "everyday_life"], "disliked_topics": ["politics"], "told_joke_ids": ["j-101", "j-204"] } }
+  "data": { "liked_categories": ["programmers"], "disliked_topics": ["politics"], "told_joke_ids": ["j-101"] } }
 { "domain_key": "math_tutor", "entity_type": "student_skill", "memory_kind": "progress",
   "data": { "topic": "quadratic_equations", "level": "weak", "last_errors": ["confuses discriminant"] } }
 ```

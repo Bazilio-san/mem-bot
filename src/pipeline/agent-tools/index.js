@@ -2,7 +2,6 @@ import { memorySearchTool } from './memory/memory-search.js';
 import { schedulerCreateTaskTool } from './scheduler/scheduler_create_task.js';
 import { schedulerListTasksTool } from './scheduler/scheduler_list_tasks.js';
 import { secureRecordGetTool } from './secure-record-get.js';
-import { searchFlightsTool } from './search-flights.js';
 import { memoryListTool } from './memory/memory-list.js';
 import { memoryForgetEntityTool } from './memory/memory-forget-entity.js';
 import { memoryForgetAllTool } from './memory/memory-forget-all.js';
@@ -19,7 +18,6 @@ export const allTools = [
   schedulerCreateTaskTool,
   schedulerListTasksTool,
   secureRecordGetTool,
-  searchFlightsTool,
   memoryListTool,
   memoryForgetEntityTool,
   memoryForgetAllTool,
