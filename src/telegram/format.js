@@ -30,9 +30,15 @@ const SANITIZE_OPTIONS = {
   allowedSchemesByTag: {},
 };
 
+// Telegram-разметка HTML не знает тега переноса строки <br>: перенос задаётся символом «\n». Модель же
+// нередко вставляет <br>, <br/> или <br />, и без этой замены sanitize-html экранировал бы их и показывал
+// пользователю буквально. Поэтому до санитайза переводим любые варианты <br> в реальный перенос строки.
+const BR_TAG = /<br\s*\/?>/gi;
+
 // Привести HTML-ответ модели к разметке, которую безопасно принять Telegram с parse_mode=HTML.
 export function telegramPostProcess(text) {
-  return sanitizeHtml(String(text ?? ''), SANITIZE_OPTIONS);
+  const withLineBreaks = String(text ?? '').replace(BR_TAG, '\n');
+  return sanitizeHtml(withLineBreaks, SANITIZE_OPTIONS);
 }
 
 // Разбить размеченный HTML-текст на части не длиннее limit по границам тегов.
