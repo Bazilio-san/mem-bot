@@ -25,7 +25,7 @@ import {
 } from '../src/pipeline/global-memory.js';
 import { buildTemporalContext } from '../src/utils/temporal.js';
 import { getTopicContext, upsertTopicMentions } from '../src/pipeline/topics.js';
-import { shouldFire, fire } from '../src/pipeline/proactive.js';
+import { shouldFire, fire, checkProactiveTriggers } from '../src/pipeline/proactive.js';
 import { processEvents } from '../src/pipeline/events.js';
 import { getActiveConversationSummary, getColdPendingMessages } from '../src/repo.js';
 import { maybeCompressHistory, factsToCandidates } from '../src/pipeline/history-compress.js';
@@ -33,6 +33,7 @@ import { buildHistoryContext } from '../src/pipeline/history-context.js';
 import { estimateTokens } from '../src/pipeline/token-counter.js';
 import {
   evaluateContactPolicy, getContactState, recordProactiveSent, recordUserInboundForContactPolicy,
+  classifyTriggerCandidate,
 } from '../src/pipeline/proactiveContactPolicy.js';
 
 const TRIGGER_DEFAULTS = [
@@ -752,6 +753,64 @@ async function layerProactivity() {
       [u.id])).rows[0].c;
     check('6.7. Сообщение попало в outbox и в историю диалога',
       outbox >= 1 && reply >= 1, `outbox ${outbox}, реплик ${reply}`);
+  }
+
+  // 6.7b. Запрет contact policy: фоновой проход не доходит до генерации текста.
+  // Триггер готов сработать, но политика контакта запрещает писать пользователю, поэтому ни сообщение в
+  // историю диалога, ни запись в очередь доставки не появляются (генератор текста вызывается только внутри
+  // fire(), а fire() при запрете не запускается).
+  {
+    const u = await freshUser('tdeny');
+    const dom = await getDomainId('general');
+    await ensureDefaultTriggers(u.id, dom, TRIGGER_DEFAULTS);
+
+    // Сообщение двухдневной давности делает триггер неактивности готовым к срабатыванию.
+    const conv = await ensureConversation(u.id, 'general');
+    await query(
+      `INSERT INTO mem.conversation_messages (conversation_id, user_id, role, content, created_at)
+       VALUES ($1,$2,'user','привет', now() - interval '2 days')`, [conv.id, u.id]);
+
+    // Переводим состояние контакта в «тишину»: бот недавно дважды написал и теперь ждёт ответа пользователя.
+    await getContactState(u.id); // создаёт строку состояния, если её ещё нет
+    await query(
+      `UPDATE mem.proactive_contact_state
+          SET unanswered_proactive_count = $2, quiet_until = now() + interval '12 hours'
+        WHERE user_id = $1`,
+      [u.id, config.proactive.contactPolicy.quietAfterUnanswered]);
+
+    const state = await getContactState(u.id);
+    const inactivity = (await query(
+      `SELECT * FROM mem.proactive_triggers WHERE user_id=$1 AND trigger_type='inactivity'`, [u.id])).rows[0];
+    const candidate = classifyTriggerCandidate(inactivity);
+    check('6.7b. Триггер готов сработать, но contact policy запрещает контакт',
+      (await shouldFire(inactivity, u.id)) === true
+      && evaluateContactPolicy({ state, candidate }).allowed === false);
+
+    // Прогоняем фоновой контур только по тестовому пользователю: остальные триггеры временно отключаем,
+    // а глобальный флаг проактивности включаем на время проверки, затем восстанавливаем исходное состояние.
+    const { rows: otherTrig } = await query(
+      `SELECT id FROM mem.proactive_triggers WHERE user_id <> $1 AND enabled = true`, [u.id]);
+    await query(`UPDATE mem.proactive_triggers SET enabled = false WHERE user_id <> $1`, [u.id]);
+    const proactiveEnabledBefore = config.proactive.enabled;
+    config.proactive.enabled = true;
+    try {
+      await checkProactiveTriggers();
+    } finally {
+      config.proactive.enabled = proactiveEnabledBefore;
+      if (otherTrig.length) {
+        await query(`UPDATE mem.proactive_triggers SET enabled = true WHERE id = ANY($1::uuid[])`,
+          [otherTrig.map((r) => r.id)]);
+      }
+    }
+
+    const denyOutbox = (await query(
+      `SELECT count(*)::int c FROM mem.notification_outbox WHERE user_id=$1 AND payload->>'kind'='proactive'`,
+      [u.id])).rows[0].c;
+    const denyReply = (await query(
+      `SELECT count(*)::int c FROM mem.conversation_messages WHERE user_id=$1 AND role='assistant'`,
+      [u.id])).rows[0].c;
+    check('6.7b. При запрете policy нет ни проактивного сообщения, ни записи в очереди доставки',
+      denyOutbox === 0 && denyReply === 0, `outbox ${denyOutbox}, реплик ${denyReply}`);
   }
 
   // 6.8. Защита от повторной доставки события (на уровне ограничения уникальности).

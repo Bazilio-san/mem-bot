@@ -9,7 +9,6 @@ import { handleMessage, recordReactionTurn, recordUserReaction } from '../agent.
 import { tick, msUntilDueTask } from '../pipeline/scheduler.js';
 import { checkProactiveTriggers } from '../pipeline/proactive.js';
 import { processEvents } from '../pipeline/events.js';
-import { fireProactiveNow } from '../pipeline/proactive.js';
 import {
   setUserProactivity, getProactivityState, setTrigger,
   saveMessageExternalRef, findMessageByExternalRef, getUserReplyMode,
@@ -138,7 +137,6 @@ const BOT_COMMANDS = [
   { command: 'start', description: 'Запустить бота и показать справку' },
   { command: 'help', description: 'Показать справку и список команд' },
   { command: 'domain', description: 'Сменить домен общения, например work или personal' },
-  { command: 'proactive', description: 'Вручную запустить проактивный триггер' },
 ];
 
 // Русские подписи поводов проактивности для подменю. Технические ключи триггеров остаются в базе и в
@@ -369,8 +367,7 @@ async function handleCommand(chatId, externalId, text) {
   if (text === '/start' || text === '/help') {
     let help = 'Привет! Я чат-бот с долговременной памятью. Просто пишите мне — я запоминаю важное и отвечаю '
       + 'с учётом прошлых разговоров.\n\nКоманды:\n'
-      + '/domain <ключ> — сменить домен общения (например, work или personal);\n'
-      + '/proactive <тип> — вручную запустить проактивный триггер (например, /proactive welcome_back).';
+      + '/domain <ключ> — сменить домен общения (например, work или personal).';
     if (config.proactive.enabled) {
       help += '\n\nПроактивность (бот сам пишет первым по уместному поводу):\n'
         + '/proactivity_on — включить проактивность;\n'
@@ -386,8 +383,7 @@ async function handleCommand(chatId, externalId, text) {
     await sendMessage(chatId, `Домен общения переключён на «${key}».`);
     return true;
   }
-  // Команды управления проактивностью разбираются ДО общей /proactive, иначе её startsWith('/proactive')
-  // перехватил бы и /proactivity_on, и /proactivity.
+  // Команды управления проактивностью: включить, выключить и открыть подменю выбора поводов.
   if (text === '/proactivity_on') {
     if (!config.proactive.enabled) {
       await sendMessage(chatId, 'Проактивность сейчас выключена глобально администратором, включить её нельзя.');
@@ -422,17 +418,6 @@ async function handleCommand(chatId, externalId, text) {
       text: 'Выберите поводы, по которым бот может писать первым (нажатие переключает повод):',
       reply_markup: proactivityKeyboard(state.triggers),
     });
-    return true;
-  }
-  if (text === '/proactive' || text.startsWith('/proactive ')) {
-    const type = text.slice(10).trim() || 'welcome_back';
-    const r = await fireProactiveNow(externalId, type);
-    if (!r.ok) {
-      await sendMessage(chatId,
-        `Проактивный триггер «${type}» не сработал: ${r.reason || 'сообщение не сформировано'}. `
-        + 'Возможно, проактивный контур выключен или для этого чата ещё нет триггеров — сначала напишите боту.');
-    }
-    // При успехе сообщение уйдёт само через очередь доставки на следующем проходе воркера.
     return true;
   }
   return false;

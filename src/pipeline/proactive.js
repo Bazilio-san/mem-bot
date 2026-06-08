@@ -121,23 +121,3 @@ export async function checkProactiveTriggers() {
   }
   return { fired };
 }
-
-// Принудительный запуск конкретного триггера (для команды чата и тестов).
-// external_id — внешний идентификатор пользователя (Telegram ID и т.п.); внутри работаем по user.id (UUID).
-export async function fireProactiveNow(externalId, triggerType) {
-  const { rows } = await query(
-    `SELECT u.id AS user_id, u.external_id, u.timezone,
-            pt.id AS trigger_id, pt.trigger_type, pt.config, pt.last_fired_at
-       FROM mem.proactive_triggers pt
-       JOIN mem.users u ON u.id = pt.user_id
-      WHERE u.external_id = $1 AND pt.trigger_type = $2`, [externalId, triggerType]);
-  if (!rows.length) return { ok: false, reason: 'Триггер не найден.' };
-  const r = rows[0];
-  const trigger = {
-    id: r.trigger_id, user_id: r.user_id, trigger_type: r.trigger_type,
-    config: r.config, last_fired_at: r.last_fired_at,
-  };
-  const user = { id: r.user_id, external_id: r.external_id, timezone: r.timezone };
-  const ok = await fire(trigger, user);
-  return { ok };
-}

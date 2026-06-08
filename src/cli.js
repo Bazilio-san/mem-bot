@@ -3,7 +3,6 @@
 import readline from 'node:readline';
 import { handleMessage } from './agent.js';
 import { tick } from './pipeline/scheduler.js';
-import { fireProactiveNow } from './pipeline/proactive.js';
 import { closePool } from './db.js';
 import { ensureUser } from './repo.js';
 import { isAdmin } from './pipeline/admin.js';
@@ -19,8 +18,7 @@ const rl = readline.createInterface({ input: process.stdin, output: process.stdo
 const ask = (q) => new Promise((res) => rl.question(q, res));
 
 console.log(`Чат-бот с памятью. Пользователь: ${externalId}, домен: ${domainKey}.`);
-console.log('Команды: /domain <key> — сменить домен, /tick — прогнать планировщик, '
-  + '/proactive <тип> — запустить проактивный триггер вручную (например, /proactive welcome_back), /exit — выход.');
+console.log('Команды: /domain <key> — сменить домен, /tick — прогнать планировщик, /exit — выход.');
 console.log('Глобальная память (запись — только администратору): /fact-add <текст>, /fact-list, /fact-del <id>, '
   + '/kb-add <текст>, /kb-find <запрос>, /kb-del <id>.\n');
 
@@ -49,13 +47,6 @@ async function main() {
     if (input === '/exit') break;
     if (input.startsWith('/domain ')) { domainKey = input.slice(8).trim() || 'general'; console.log(`Домен: ${domainKey}`); continue; }
     if (input === '/tick') { const r = await tick(); console.log(`Выполнено задач: ${r.processed}`); continue; }
-    if (input.startsWith('/proactive ')) {
-      const type = input.slice(11).trim() || 'welcome_back';
-      const r = await fireProactiveNow(externalId, type);
-      if (r.ok) console.log(`Проактивный триггер «${type}» сработал — сообщение появилось в истории диалога.`);
-      else console.log(`Проактивный триггер «${type}» не сработал: ${r.reason || 'сообщение не сформировано'}.`);
-      continue;
-    }
 
     // --- Глобальные факты (всегда-включённые, общие для всех; запись только администратору) ---
     if (input.startsWith('/fact-add ')) {
