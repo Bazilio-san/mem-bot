@@ -21,6 +21,8 @@ export const ENTITY_KEY_MODES = ['fixed_vocab', 'slug'];
 export const MEMORY_KINDS = [
   'fact', 'preference', 'constraint', 'goal', 'history', 'state',
   'progress', 'instruction', 'relationship', 'reminder', 'secure_reference',
+  'emotional_pattern', 'activity_rhythm', 'communication_style',
+  'open_loop', 'topic_energy', 'discovery_seed',
 ];
 
 // Мета-схема: какой должна быть форма объекта definition.

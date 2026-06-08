@@ -7,7 +7,8 @@
 `005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `006_domain_schemas.sql` — таблица-реестр
 схем `data` под домен; `007_proactivity_flag.sql` — колонка `proactivity_enabled` в `mem.users`;
 `008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах доставки; `009_reply_mode.sql` —
-колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа). Все миграции идемпотентны
+колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа); `013_companion_memory_kinds.sql` — виды памяти
+режима собеседника. Все миграции идемпотентны
 (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
@@ -29,7 +30,8 @@ CREATE TYPE mem.memory_status     AS ENUM ('active','archived','deleted','pendin
 CREATE TYPE mem.sensitivity_level AS ENUM ('public','low','normal','high','secret');
 CREATE TYPE mem.memory_kind       AS ENUM
   ('fact','preference','constraint','goal','history','state','progress','instruction','relationship',
-   'reminder','secure_reference');
+   'reminder','secure_reference','emotional_pattern','activity_rhythm','communication_style','open_loop',
+   'topic_energy','discovery_seed');
 CREATE TYPE mem.task_status        AS ENUM ('active','paused','completed','cancelled','failed');
 CREATE TYPE mem.task_schedule_kind AS ENUM ('one_time','interval','cron','rrule');
 CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed','skipped');

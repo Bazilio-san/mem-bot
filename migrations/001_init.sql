@@ -17,7 +17,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE TYPE mem.memory_kind AS ENUM
-    ('fact','preference','constraint','goal','history','state','progress','instruction','relationship','reminder','secure_reference');
+    ('fact','preference','constraint','goal','history','state','progress','instruction','relationship','reminder',
+     'secure_reference','emotional_pattern','activity_rhythm','communication_style','open_loop','topic_energy',
+     'discovery_seed');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN

@@ -93,7 +93,11 @@ const SCHEMA = {
           'importance', 'confidence', 'sensitivity', 'ttl_days', 'requires_confirmation', 'reason'],
         properties: {
           scope: { type: 'string', enum: ['profile', 'domain', 'dialog', 'system'] },
-          memory_kind: { type: 'string', enum: ['fact', 'preference', 'constraint', 'goal', 'history', 'state', 'progress', 'instruction', 'relationship', 'reminder', 'secure_reference'] },
+          memory_kind: { type: 'string', enum: [
+            'fact', 'preference', 'constraint', 'goal', 'history', 'state', 'progress', 'instruction',
+            'relationship', 'reminder', 'secure_reference', 'emotional_pattern', 'activity_rhythm',
+            'communication_style', 'open_loop', 'topic_energy', 'discovery_seed',
+          ] },
           entity_type: { type: ['string', 'null'] },
           entity_key: { type: ['string', 'null'] },
           memory_text: { type: 'string' },
@@ -113,9 +117,11 @@ const SCHEMA = {
 const SYSTEM = `Ты извлекаешь кандидаты в долговременную память из диалога.
 Сохраняй только то, что будет полезно в будущих диалогах:
 устойчивые предпочтения, стиль общения, важные цели и ограничения, предметные факты домена,
-прогресс пользователя, долгосрочные задачи, важные отношения сущностей.
+прогресс пользователя, долгосрочные задачи, важные отношения сущностей, а также факты режима собеседника.
 НЕ сохраняй: случайные эмоции без будущей пользы; одноразовые детали; очевидные вещи;
 неподтверждённые догадки с низкой уверенностью; секретные данные как обычный текст.
+Фиксируй ПАТТЕРНЫ, а не разовые состояния. Не делай психологических диагнозов и ярлыков.
+Не используй слова «всегда» и «никогда» в memory_text. Если уверенность низкая — снижай confidence.
 Чувствительные данные (паспорт, телефон, адрес, дата рождения, платёжные, медицинские):
 ставь sensitivity = high или secret и requires_confirmation = true, а memory_text делай безопасным
 резюме без полного значения.
@@ -125,9 +131,22 @@ const SYSTEM = `Ты извлекаешь кандидаты в долговре
 можно сохранить предпочтение «Пользователь любит торты». Если реакция может быть просто вежливостью, настроением
 или разовым одобрением без будущей пользы — верни {"candidates": []}.
 
+Виды памяти для режима собеседника:
+- emotional_pattern — повторяющиеся эмоциональные паттерны, например «часто устаёт вечером».
+- activity_rhythm — ритм активности, например «чаще активен поздно вечером».
+- communication_style — стиль общения, например «отвечает коротко» или «не любит много вопросов».
+- open_loop — незакрытые линии: планы, события, проблемы или самочувствие без последующего апдейта.
+- topic_energy — темы, где пользователь оживляется или явно теряет интерес.
+- discovery_seed — темы, которые пользователь хотел бы попробовать или изучить. Извлекай из фраз вроде
+  «хочу попробовать», «интересно было бы», «давно думаю о».
+
 Примеры:
 Сообщение «Я не люблю длинные ответы, пиши коротко» →
   candidates:[{scope:"profile",memory_kind:"preference",memory_text:"Пользователь предпочитает короткие ответы",importance:0.8,confidence:0.9,sensitivity:"low",requires_confirmation:false,...}]
+Сообщение «Давно думаю попробовать йогу, но всё откладываю» →
+  candidates:[{scope:"profile",memory_kind:"discovery_seed",memory_text:"Пользователь давно думает попробовать йогу",importance:0.7,confidence:0.8,sensitivity:"low",requires_confirmation:false,...}]
+Сообщение «Завтра пойду к врачу с пальцем, потом расскажу» →
+  candidates:[{scope:"dialog",memory_kind:"open_loop",memory_text:"Пользователь собирался к врачу с пальцем и обещал рассказать результат",importance:0.75,confidence:0.85,sensitivity:"normal",requires_confirmation:false,...}]
 Сообщение «Я плохо понимаю квадратные уравнения» (домен math_tutor) →
   candidates:[{scope:"domain",memory_kind:"progress",entity_type:"topic",entity_key:"quadratic_equations",memory_text:"Пользователь слабо понимает квадратные уравнения",importance:0.8,confidence:0.85,sensitivity:"normal",...}]
 Сообщение «Ок» / «Хаха» / «Сегодня плохая погода» → candidates:[]
@@ -179,9 +198,25 @@ const TOPICS_SCHEMA = {
   },
 };
 
-const TOPICS_SYSTEM = `Ты выделяешь темы из диалога. Верни короткие стабильные ключи тем латиницей в snake_case
-и оценку вовлечённости пользователя в каждую тему от 0 до 1 (высокая — пользователь активно отвечает и развивает тему,
-низкая — отвечает односложно или уходит). Если тем нет — верни {"topics": []}.`;
+const TOPICS_SYSTEM = `Ты — модуль анализа тем в диалоге.
+
+Твоя задача — определить, какие ТЕМЫ затрагивались в диалоге,
+и оценить вовлечённость пользователя в каждую тему.
+
+Правила извлечения тем:
+- Тема — это конкретная область разговора (fitness, work_stress, sleep, family, hobbies)
+- Используй короткие snake_case ключи на английском
+- Не создавай слишком общих тем (life, things, stuff)
+- Не создавай слишком узких тем (каждое предложение не является новой темой)
+- Объединяй близкие темы в одну
+
+Оценка вовлечённости (user_engagement от 0 до 1):
+- 0.1-0.3: пользователь отвечал коротко, односложно, без интереса
+- 0.4-0.6: нейтральные ответы, средняя вовлечённость
+- 0.7-0.9: пользователь развивал тему, задавал вопросы, делился деталями
+- 1.0: максимальная вовлечённость, явный энтузиазм
+
+Если тем нет или диалог слишком короткий — верни {"topics": []}.`;
 
 export async function extractTopics({ recentMessages }) {
   try {
