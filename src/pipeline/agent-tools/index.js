@@ -1,5 +1,6 @@
 import { memorySearchTool } from './memory/memory-search.js';
-import { schedulerCreateTaskTool } from './scheduler-create-task.js';
+import { schedulerCreateTaskTool } from './scheduler/scheduler_create_task.js';
+import { schedulerListTasksTool } from './scheduler/scheduler_list_tasks.js';
 import { secureRecordGetTool } from './secure-record-get.js';
 import { searchFlightsTool } from './search-flights.js';
 import { memoryListTool } from './memory/memory-list.js';
@@ -16,6 +17,7 @@ import { setReplyModeTool } from './set-reply-mode.js';
 export const allTools = [
   memorySearchTool,
   schedulerCreateTaskTool,
+  schedulerListTasksTool,
   secureRecordGetTool,
   searchFlightsTool,
   memoryListTool,

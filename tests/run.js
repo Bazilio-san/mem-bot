@@ -474,6 +474,17 @@ async function mandatory() {
       && ctx.includes('UTC:')
       && ctx.includes('schedule: cron')
       && ctx.includes('cron: 0 9 * * 1-5'));
+
+    const listedTasks = await executeTool(
+      { userId: u.id, conversationId: conv.id, domainKey: 'general', timezone: 'Europe/Moscow' },
+      'scheduler_list_tasks',
+      { limit: 10 },
+    );
+    check('9e. scheduler_list_tasks показывает время и расписание активной задачи',
+      listedTasks.count === 1
+      && listedTasks.items[0].title === 'Будний отчёт'
+      && listedTasks.items[0].next_run_at_local.includes('Europe/Moscow')
+      && listedTasks.items[0].schedule_description === 'по будням в 09:00');
   }
 
   // 11. Вредная запись в памяти не становится инструкцией.

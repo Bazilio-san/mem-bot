@@ -575,6 +575,7 @@ async function handleUpdate(message) {
         options: {
           editIntervalMs: config.streaming.editIntervalMs,
           minEditChars: config.streaming.minEditChars,
+          minFirstDraftChars: config.streaming.minFirstDraftChars,
           maxLen: TG_MAX_LEN,
           toolStatuses: config.streaming.toolStatuses,
           splitText,

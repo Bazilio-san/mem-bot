@@ -23,8 +23,9 @@ function defaultSplit(text, limit) {
 }
 
 export function createTelegramProgress({ chatId, tg, startTyping = null, options = {} }) {
-  const editIntervalMs = options.editIntervalMs ?? 900;     // не чаще одного редактирования за это время
+  const editIntervalMs = options.editIntervalMs ?? 500;     // не чаще одного редактирования за это время
   const minEditChars = options.minEditChars ?? 20;          // и не реже, чем накопится столько новых символов
+  const minFirstDraftChars = options.minFirstDraftChars ?? 50; // первый черновик — только когда текста накопилось столько
   const maxLen = options.maxLen ?? 4000;                     // предел длины одного сообщения Telegram
   const toolStatuses = options.toolStatuses !== false;      // показывать ли статус вызова инструмента
   const splitText = options.splitText || defaultSplit;
@@ -102,12 +103,15 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     }
   }
 
-  // Принять очередной фрагмент текста ответа. Первый непустой фрагмент создаёт черновик и гасит индикатор.
+  // Принять очередной фрагмент текста ответа. Черновик создаётся не на первом же символе, а когда накопился
+  // осмысленный объём текста (minFirstDraftChars): иначе пользователь видит мигающий пузырь из одной-двух букв,
+  // который сразу переписывается. Пока порог не достигнут, держим индикатор «печатает…». Короткий ответ, который
+  // завершится не дойдя до порога, доставит целиком метод complete() — отдельного черновика для него не будет.
   async function appendDelta(text) {
     if (!text) return;
     state.buffer += text;
     if (state.draftId === null) {
-      if (!state.buffer.trim()) return;             // ждём первый осмысленный текст
+      if (state.buffer.trim().length < minFirstDraftChars) return;   // ждём, пока накопится осмысленный объём
       stopTyping();
       await clearToolStatus();
       const res = await tg('sendMessage', { chat_id: chatId, text: clip(state.buffer) });

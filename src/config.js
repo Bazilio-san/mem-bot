@@ -147,8 +147,12 @@ export const config = {
   streaming: {
     enabled: flag(env.LLM_STREAMING_ENABLED, true),              // потоковый вызов модели в ядре агента
     telegramEnabled: flag(env.TELEGRAM_STREAMING_ENABLED, true), // редактируемый черновик ответа в Telegram
-    editIntervalMs: Number(env.TELEGRAM_STREAM_EDIT_INTERVAL_MS || 900),  // не чаще одного редактирования за это время
+    editIntervalMs: Number(env.TELEGRAM_STREAM_EDIT_INTERVAL_MS || 500),  // не чаще одного редактирования за это время
     minEditChars: Number(env.TELEGRAM_STREAM_MIN_EDIT_CHARS || 20),       // и не реже, чем накопится столько новых символов
+    // Первый видимый пузырь-черновик создаём только когда накопился осмысленный объём текста. Иначе пользователь
+    // видит мигающий пузырь из одной-двух букв («Я»), который тут же переписывается. Короткий ответ, который
+    // завершится раньше этого порога, доставляется целиком методом complete() — без промежуточного черновика.
+    minFirstDraftChars: Number(env.TELEGRAM_STREAM_MIN_FIRST_DRAFT_CHARS || 50),
     toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true),  // показывать ли «Вызываю инструмент: …»
   },
 
