@@ -18,6 +18,11 @@
 - Tools overview: https://developers.openai.com/api/docs/guides/tools
 - Embeddings guide: https://developers.openai.com/api/docs/guides/embeddings
 
+Протокол подключения внешних инструментов:
+
+- Спецификация Model Context Protocol (MCP): https://modelcontextprotocol.io
+- Транспорт Streamable HTTP (потоковый HTTP): https://modelcontextprotocol.io/docs/concepts/transports
+
 ---
 
 ## Рекомендованная раскладка кода

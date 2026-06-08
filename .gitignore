@@ -32,3 +32,6 @@ playwright.config.js.map
 **/node_modules/
 
 /.playwright-mcp/
+
+# конфигурация MCP-серверов (формат Claude Code), может содержать секреты — у каждого окружения своя
+.mcp.json

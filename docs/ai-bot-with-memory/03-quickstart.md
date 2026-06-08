@@ -134,8 +134,11 @@ src/pipeline/extract.js      извлечение кандидатов в пам
 src/pipeline/merge.js        фильтр приватности, поиск похожих, дедупликация, запись
 src/pipeline/secure.js       защищённая память: шифрование, согласие, маскирование
 src/pipeline/scheduler.js    создание задач, воркер, повторы, перепланирование
-src/pipeline/tools.js        реестр инструментов: сборка definitions, права, журналирование, вызов handler
+src/pipeline/tools.js        реестр инструментов: сборка definitions, права, журналирование, вызов handler, initTools
 src/pipeline/agent-tools/    по одному модулю на инструмент: title, definition и handler
+src/mcp/config.js            чтение и разбор .mcp.json (список внешних MCP-серверов в формате MCP-клиента)
+src/mcp/client.js            подключение к MCP-серверам, обёртка их инструментов под реестр, переподключение
+.mcp.json                    конфигурация внешних MCP-серверов (вне контроля версий; может отсутствовать)
 src/pipeline/admin.js        просмотр и удаление памяти пользователем, проверка прав администратора (isAdmin)
 src/pipeline/global-memory.js  глобальная память: факты (always-on) и общая база знаний (RAG) (критерии 19–21)
 src/pipeline/topics.js       тематический трекинг (критерий 13)
@@ -172,7 +175,8 @@ tests/check-llm.js           проверка доступности и возм
 8. **Инструменты и агент.** Модули `src/pipeline/agent-tools/*`, реестр `src/pipeline/tools.js` и `src/agent.js` —
    см. [04-architecture.md](04-architecture.md). Управление своей памятью пользователю доступно прямо в диалоге:
    инструменты `memory_list`, `memory_forget_entity` и `memory_forget_all` (поверх `src/pipeline/admin.js`) — см.
-   [06-memory.md](06-memory.md).
+   [06-memory.md](06-memory.md). Внешние источники инструментов по протоколу MCP (модули `src/mcp/*`, файл `.mcp.json`,
+   ленивая инициализация `initTools`) — см. [10-operations.md](10-operations.md), раздел `OPS-4a`.
 9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
 10. **Проактивность.** Миграция `002`, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под
     флагами — см. [09-proactivity.md](09-proactivity.md). Код — каталог `src/`.

@@ -3,25 +3,48 @@
 import { config } from '../config.js';
 import { logToolCall } from '../repo.js';
 import { allTools } from './agent-tools/index.js';
+import { loadMcpTools } from '../mcp/client.js';
 
-export const tools = allTools;
-export const toolDefs = allTools.map((tool) => tool.definition);
-export const toolMeta = Object.fromEntries(allTools.map((tool) => [tool.name, { title: tool.title }]));
+// Перезаписываемый реестр: стартует из локальных инструментов, дополняется инструментами MCP в initTools().
+let registry = [...allTools];
 
-const TOOLS_BY_NAME = new Map(allTools.map((tool) => [tool.name, tool]));
+export let tools = registry;
+export let toolDefs = registry.map((tool) => tool.definition);
+export let toolMeta = Object.fromEntries(registry.map((tool) => [tool.name, { title: tool.title }]));
+
+let TOOLS_BY_NAME = new Map(registry.map((tool) => [tool.name, tool]));
 
 export function toolTitle(name) {
   return toolMeta[name]?.title || name;
 }
 
 export function buildToolDefs(ctx = {}) {
-  return allTools
+  return registry
     .filter((tool) => (tool.isEnabled ? tool.isEnabled(ctx, config) : true))
     .map((tool) => tool.definition);
 }
 
 export function getTool(name) {
   return TOOLS_BY_NAME.get(name) || null;
+}
+
+let initPromise = null; // кэш промиса: инициализация выполняется ровно один раз на процесс
+
+// Однократно подключает инструменты MCP и пересобирает реестр. Повторные вызовы возвращают тот же промис,
+// поэтому безопасно вызывать из любой точки входа и при каждом сообщении.
+export function initTools() {
+  if (!initPromise) {
+    initPromise = (async () => {
+      const mcp = await loadMcpTools();
+      if (mcp.length === 0) return;            // нечего добавлять — реестр остаётся прежним
+      registry = [...registry, ...mcp];
+      tools = registry;
+      toolDefs = registry.map((t) => t.definition);
+      toolMeta = Object.fromEntries(registry.map((t) => [t.name, { title: t.title }]));
+      TOOLS_BY_NAME = new Map(registry.map((t) => [t.name, t]));
+    })();
+  }
+  return initPromise;
 }
 
 // Execute a tool by name with uniform access checks, audit logging, and error handling.

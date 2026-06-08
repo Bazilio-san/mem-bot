@@ -107,8 +107,14 @@ export async function handleMessage({
     ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
     { role: 'user', content: userMessage },
   ];
-  // Набор инструментов собирается из модулей src/pipeline/agent-tools/* и зависит от флагов и прав пользователя:
-  // административные инструменты получает только администратор (ctx.isAdmin), см. 10-operations и 14-global-memory.
+  // Реестр инструментов один раз лениво дополняется инструментами внешних MCP-серверов (initTools кэширует
+  // промис, поэтому реальное подключение происходит при первом сообщении и покрывает все точки входа). Сбой или
+  // отсутствие конфигурации MCP не роняет процесс — реестр остаётся на встроенных инструментах (см. [OPS-4a] в
+  // 10-operations).
+  await initTools();
+  // Набор инструментов собирается из встроенных модулей src/pipeline/agent-tools/* и инструментов MCP и зависит от
+  // флагов и прав пользователя: административные инструменты получает только администратор (ctx.isAdmin), см.
+  // 10-operations и 14-global-memory.
   const tools = buildToolDefs(ctx);
   const toolsUsed = [];
   let answer = '';

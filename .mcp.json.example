@@ -1,0 +1,11 @@
+{
+  "_comment": "Формат Claude Code. Скопируйте в .mcp.json (он вне контроля версий). Ключ объекта — alias: попадёт в имена инструментов как <alias>__<имя>. Поддерживается транспорт http/sse (нужен url). Поля title, requiresAdmin, disabled и headers — необязательные.",
+  "mcpServers": {
+    "yafly": {
+      "type": "http",
+      "url": "http://localhost:9047/mcp",
+      "title": "Yafly",
+      "requiresAdmin": false
+    }
+  }
+}

@@ -11,7 +11,7 @@ import { classifyIntent } from './pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext } from './pipeline/retrieve.js';
 import { extractCandidates, extractTopics } from './pipeline/extract.js';
 import { persistCandidates } from './pipeline/merge.js';
-import { buildToolDefs, executeTool, toolTitle } from './pipeline/tools.js';
+import { buildToolDefs, executeTool, toolTitle, initTools } from './pipeline/tools.js';
 import { getChannelProfile } from './pipeline/channels.js';
 import { buildTemporalContext, formatTemporalContext, formatDateTime } from './utils/temporal.js';
 import { getTopicContext, formatTopicContext, upsertTopicMentions } from './pipeline/topics.js';
@@ -113,6 +113,9 @@ export async function handleMessage({
 
   await emit({ type: 'agent.started' });
   try {
+    // Ленивая одноразовая инициализация инструментов MCP. initTools кэширует промис, поэтому реальное
+    // подключение происходит при первом сообщении, а последующие вызовы мгновенно возвращают тот же промис.
+    await initTools();
     return await runAgent();
   } catch (err) {
     await emit({ type: 'agent.failed', error: String(err.message || err) });
