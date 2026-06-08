@@ -12,6 +12,7 @@ import { retrieveMemory, buildMemoryContext } from './pipeline/retrieve.js';
 import { extractCandidates, extractTopics } from './pipeline/extract.js';
 import { persistCandidates } from './pipeline/merge.js';
 import { buildToolDefs, executeTool, toolTitle } from './pipeline/tools.js';
+import { getChannelProfile } from './pipeline/channels.js';
 import { buildTemporalContext, formatTemporalContext, formatDateTime } from './utils/temporal.js';
 import { getTopicContext, formatTopicContext, upsertTopicMentions } from './pipeline/topics.js';
 import { buildHistoryContext } from './pipeline/history-context.js';
@@ -84,6 +85,10 @@ export async function handleMessage({
   externalId,
   userMessage,
   domainKey = 'general',
+  // channel — ключ канала доставки ('telegram', 'html', 'plain'). Определяет, какую инструкцию о
+  // форматировании ответа подмешать в системный промпт. Профиль канала регистрируется самим каналом
+  // на старте (см. src/pipeline/channels.js); для незарегистрированного канала разметки нет.
+  channel = 'plain',
   extractSync = false,
   // onEvent — единственная точка связи ядра с любым каналом вывода (Telegram, командная строка, тесты).
   // Ядро вызывает его по принципу best-effort: ошибка callback не должна ломать ответ агента, а значение
@@ -220,12 +225,18 @@ ${topicsBlock}
   // Набор инструментов зависит от флагов глобальной памяти и прав пользователя (записывающие — только админу).
   const tools = buildToolDefs(ctx);
   const capabilitiesContext = await buildCapabilitiesContext({ ...ctx, userMessage }, tools);
+  // Инструкция о форматировании ответа под канал доставки. Блок постоянен для канала и меняется редко,
+  // поэтому стоит в стабильном префиксе сразу после MAIN_SYSTEM — это не ломает кэширование общего
+  // префикса промпта. Для канала без разметки (например, командной строки) инструкции нет.
+  const channelInstruction = getChannelProfile(channel).instruction;
+  const channelSystem = channelInstruction ? [{ role: 'system', content: channelInstruction }] : [];
   // dateTimeSystem стоит в динамической зоне (последним system-блоком перед диалогом): его содержимое
   // меняется каждую минуту, поэтому держим его ниже стабильного префикса, чтобы не ломать кэширование.
   // GLOBAL_FACTS стоит сразу после стабильного MAIN_SYSTEM: он одинаков для всех пользователей и меняется
   // редко, поэтому держим его в начале, чтобы максимизировать общий кэшируемый префикс.
   const messages = [
     { role: 'system', content: MAIN_SYSTEM },
+    ...channelSystem,
     ...(globalFactsBlock ? [{ role: 'system', content: globalFactsBlock }] : []),
     { role: 'system', content: memoryContext },
     ...(capabilitiesContext ? [{ role: 'system', content: capabilitiesContext }] : []),

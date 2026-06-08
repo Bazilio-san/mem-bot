@@ -28,8 +28,15 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
   const minFirstDraftChars = options.minFirstDraftChars ?? 50; // первый черновик — только когда текста накопилось столько
   const maxLen = options.maxLen ?? 4000;                     // предел длины одного сообщения Telegram
   const toolStatuses = options.toolStatuses !== false;      // показывать ли статус вызова инструмента
-  const splitText = options.splitText || defaultSplit;
   const now = options.now || (() => Date.now());
+
+  // Профиль форматирования финального ответа. Промежуточный черновик и статусы инструментов всегда идут
+  // сырым текстом (parseMode не применяется): незакрытый тег во время инкрементального редактирования
+  // сломал бы отображение. Разметка применяется только к целому финальному тексту в complete().
+  const format = options.format || {};
+  const finalParseMode = format.parseMode || null;          // режим разметки финала ('HTML' или null)
+  const finalPostProcess = format.postProcess || ((t) => t); // санитайзер финального текста
+  const finalSplit = format.split || options.splitText || defaultSplit; // разбивка финала по границам тегов
 
   const state = {
     typingStop: null,     // функция остановки индикатора «печатает…»
@@ -147,33 +154,61 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     }
   }
 
+  // Отправить финальный кусок в разметке канала с откатом на сырой текст при ошибке парсинга разметки.
+  async function sendFinal(text) {
+    if (!finalParseMode) return tg('sendMessage', { chat_id: chatId, text });
+    try {
+      return await tg('sendMessage', { chat_id: chatId, text, parse_mode: finalParseMode });
+    } catch {
+      return tg('sendMessage', { chat_id: chatId, text });        // последний рубеж: без разметки
+    }
+  }
+
+  // Привести черновик к финальному куску редактированием. Возвращает true при успехе. Сначала пробуем
+  // с разметкой, при ошибке парсинга — без неё; если не вышло вовсе, сообщаем неуспех вызывающему.
+  async function editFinal(messageId, text) {
+    if (finalParseMode) {
+      try {
+        await tg('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: finalParseMode });
+        return true;
+      } catch { /* разметка не принята — пробуем без неё ниже */ }
+    }
+    try {
+      await tg('editMessageText', { chat_id: chatId, message_id: messageId, text });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // Принудительно дописать финальный текст: гарантирует, что пользователь получил полный ответ целиком,
-  // включая длинный ответ, который не помещается в одно сообщение.
+  // включая длинный ответ, который не помещается в одно сообщение. Финал — единственное место, где
+  // применяется разметка канала: текст очищается санитайзером и режется по границам тегов.
   async function complete(finalText) {
     state.closed = true;
     stopTyping();
     await clearToolStatus();
-    const parts = splitText(String(finalText ?? ''), maxLen);
+    const clean = finalPostProcess(String(finalText ?? ''));
+    const parts = finalSplit(clean, maxLen);
     const head = parts.length ? parts[0] : '';
     const tail = parts.slice(1);
 
     if (state.draftId === null) {
       // Текстовых фрагментов не было (например, ответ пришёл целиком после инструментов) — шлём заново.
-      const first = await tg('sendMessage', { chat_id: chatId, text: head });
+      const first = await sendFinal(head);
       state.sent = first ? [first] : [];
     } else {
-      // Черновик есть — финальным редактированием приводим его к началу полного ответа.
+      // Черновик есть — финальным редактированием приводим его к началу полного ответа с разметкой.
       state.buffer = head;
-      try {
-        await tg('editMessageText', { chat_id: chatId, message_id: state.draftId, text: head });
-        state.lastEditText = head;
-      } catch {
-        const m = await tg('sendMessage', { chat_id: chatId, text: head });
+      const ok = await editFinal(state.draftId, head);
+      state.lastEditText = head;
+      if (!ok) {
+        const m = await sendFinal(head);
         if (m) state.sent.push(m);
       }
     }
     for (const part of tail) {
-      const m = await tg('sendMessage', { chat_id: chatId, text: part });
+      const m = await sendFinal(part);
       if (m) state.sent.push(m);
     }
     return state.sent;

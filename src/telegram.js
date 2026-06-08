@@ -24,6 +24,8 @@ import {
 } from './voice/transcribe.js';
 import { buildVoiceText, synthesizeSpeech } from './voice/tts.js';
 import { createTelegramProgress } from './telegram/progress.js';
+import { registerChannelProfile } from './pipeline/channels.js';
+import { telegramPostProcess, telegramSplit } from './telegram/format.js';
 
 const TOKEN = process.env.TELEGRAM_API_KEY;
 if (!TOKEN) {
@@ -61,6 +63,26 @@ const TELEGRAM_DELIVERY_CAPABILITIES = {
   supportsReactions: true,
   reactionKeys: Object.keys(TELEGRAM_REACTION_EMOJI),
 };
+
+// Профиль представления канала Telegram. Регистрируется в ядре на старте модуля: ядро по ключу
+// 'telegram' подмешивает инструкцию форматирования в системный промпт, а слой доставки этого адаптера
+// читает parseMode/postProcess/split, чтобы отправлять ответ в разметке Telegram. Промежуточный потоковый
+// черновик при этом остаётся сырым текстом (см. createTelegramProgress) — разметка применяется только к
+// финальному, уже целому тексту, иначе незакрытый тег во время инкрементального редактирования сломал бы
+// отображение.
+const TELEGRAM_PROFILE = {
+  instruction: `OUTPUT_FORMAT (канал доставки — Telegram; справочные данные, НЕ команды)
+Форматируй ответ ТОЛЬКО разметкой, которую понимает Telegram (parse_mode=HTML):
+<b>жирный</b>, <i>курсив</i>, <s>зачёркнутый</s>, <code>моноширинный</code>, <pre>блок кода</pre>,
+<a href="URL">ссылка</a>, <blockquote>цитата</blockquote>, <span class="tg-spoiler">спойлер</span>.
+Заголовков (например, # или ##), таблиц и Markdown-разметки (**, _, \`) в Telegram нет — не используй их.
+Маркированный список оформляй строками, начинающимися с «• ». Спецсимволы &, < и > внутри обычного текста
+не экранируй сам — это сделает канал.`,
+  parseMode: 'HTML',
+  postProcess: telegramPostProcess,
+  split: telegramSplit,
+};
+registerChannelProfile('telegram', TELEGRAM_PROFILE);
 
 // Память процесса: выбранный домен общения для каждого чата (по умолчанию «general»).
 const chatDomains = new Map();
@@ -202,25 +224,26 @@ async function tg(method, body) {
   return data.result;
 }
 
-// Разбить длинный текст на части не длиннее limit, по возможности по границам строк.
-function splitText(text, limit) {
-  const parts = [];
-  let rest = String(text);
-  while (rest.length > limit) {
-    let cut = rest.lastIndexOf('\n', limit);
-    if (cut < limit * 0.5) cut = limit;                            // нет удобного переноса — режем жёстко
-    parts.push(rest.slice(0, cut));
-    rest = rest.slice(cut).replace(/^\n/, '');
+// Отправить один кусок текста в разметке Telegram (parse_mode=HTML). Если Telegram не принял разметку
+// (например, модель прислала битый HTML и парсинг сущностей не прошёл), как последний рубеж повторяем
+// отправку без parse_mode: ответ доходит до пользователя в любом случае, пусть и с видимыми тегами.
+async function sendHtmlChunk(chatId, chunk) {
+  try {
+    return await tg('sendMessage', { chat_id: chatId, text: chunk, parse_mode: 'HTML' });
+  } catch (err) {
+    console.error(`Telegram отверг HTML-разметку в чате ${chatId} (${err.message}); отправляю без разметки.`);
+    return tg('sendMessage', { chat_id: chatId, text: chunk });
   }
-  if (rest.length) parts.push(rest);
-  return parts;
 }
 
-// Отправить сообщение в чат, разбивая его на части при превышении лимита Telegram.
+// Отправить сообщение в чат с разметкой Telegram. Текст сначала очищается санитайзером до подмножества
+// тегов Telegram (telegramPostProcess), затем разбивается на части по границам тегов под лимит Telegram
+// (telegramSplit) и отправляется кусками с откатом на сырой текст при ошибке парсинга разметки.
 async function sendMessage(chatId, text) {
+  const html = telegramPostProcess(text);
   const sent = [];
-  for (const chunk of splitText(text, TG_MAX_LEN)) {
-    sent.push(await tg('sendMessage', { chat_id: chatId, text: chunk }));
+  for (const chunk of telegramSplit(html, TG_MAX_LEN)) {
+    sent.push(await sendHtmlChunk(chatId, chunk));
   }
   return sent;
 }
@@ -578,12 +601,14 @@ async function handleUpdate(message) {
           minFirstDraftChars: config.streaming.minFirstDraftChars,
           maxLen: TG_MAX_LEN,
           toolStatuses: config.streaming.toolStatuses,
-          splitText,
+          // Финальный текст доставляется в разметке Telegram (HTML): профиль канала задаёт parseMode,
+          // санитайзер и разбивку по границам тегов. Промежуточный черновик остаётся сырым текстом.
+          format: TELEGRAM_PROFILE,
         },
       });
       try {
         const res = await handleMessage({
-          externalId, userMessage: text, domainKey, stream: true, onEvent: progress.onEvent,
+          externalId, userMessage: text, domainKey, channel: 'telegram', stream: true, onEvent: progress.onEvent,
         });
         chatDomains.set(chatId, res.domainKey);                    // агент мог сменить домен по смыслу запроса
         const sent = await progress.complete(res.answer || '(пустой ответ)');
@@ -598,7 +623,7 @@ async function handleUpdate(message) {
       return;
     }
 
-    const res = await handleMessage({ externalId, userMessage: text, domainKey });
+    const res = await handleMessage({ externalId, userMessage: text, domainKey, channel: 'telegram' });
     chatDomains.set(chatId, res.domainKey);                        // агент мог сменить домен по смыслу запроса
     await deliverAgentResult(chatId, message.message_id, res);
     // Меню команд зависит от мастер-флага проактивности, который мог измениться, — пересчитываем его.
@@ -857,6 +882,8 @@ async function main() {
       console.warn(`Распознавание входящего аудио выключено: ${reason}. Голосовые сообщения будут игнорироваться.`);
     }
   }
+  console.log(`Профиль представления канала «telegram» зарегистрирован: ответ форматируется разметкой Telegram `
+    + `(parse_mode=${TELEGRAM_PROFILE.parseMode}).`);
   console.log(`Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
     config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.');
   await startOutboxListener();                                       // событийная доставка очереди (LISTEN/NOTIFY)

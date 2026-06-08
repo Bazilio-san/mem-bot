@@ -8,6 +8,20 @@
 import { config } from '../config.js';
 import { chat } from '../llm.js';
 
+// Снять разметку перед синтезом речи. Ответ может прийти с разметкой канала (теги HTML для Telegram либо
+// Markdown для веб-чата), и эти знаки нельзя отдавать в синтез — иначе бот зачитает теги и звёздочки вслух.
+// Удаляются HTML-теги, восстанавливаются экранированные сущности (&lt; &gt; &amp;) и снимаются основные
+// знаки Markdown (звёздочки, подчёркивания, обратные кавычки, решётки заголовков, маркеры цитат).
+export function stripMarkup(text) {
+  return String(text || '')
+    .replace(/<[^>]+>/g, '')                                       // HTML-теги
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') // экранированные сущности обратно
+    .replace(/`{1,3}/g, '')                                        // обратные кавычки кода
+    .replace(/(\*\*|__|\*|_)/g, '')                                // жирный/курсив Markdown
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')                            // решётки заголовков в начале строки
+    .replace(/^\s*>\s?/gm, '');                                    // маркеры цитат в начале строки
+}
+
 // Признак, что ответ содержит код или длинные списки и потому плохо звучит вслух. Срабатывает на блоки кода
 // в тройных обратных кавычках и на два и более подряд идущих пунктов маркированного или нумерованного списка.
 export function hasCodeOrList(text) {
@@ -52,9 +66,13 @@ async function summarizeForVoice(answer, summaryLimit) {
 export async function buildVoiceText(answer, opts = {}) {
   const hardLimit = config.voiceOutput.maxChars;
   const summaryLimit = Math.min(config.voiceOutput.summaryMaxChars, hardLimit);
-  const clean = String(answer || '').trim();
+  const raw = String(answer || '').trim();
+  // Признак кода и списков проверяется по исходному размеченному тексту: именно разметка (блоки кода,
+  // пункты списка) служит сигналом построить резюме, поэтому снимать её до проверки нельзя.
+  const codeOrList = hasCodeOrList(raw);
+  const clean = stripMarkup(raw).trim();
 
-  if (clean.length <= hardLimit && !hasCodeOrList(clean)) {
+  if (clean.length <= hardLimit && !codeOrList) {
     return { text: clean, summarized: false };
   }
 
@@ -65,7 +83,7 @@ export async function buildVoiceText(answer, opts = {}) {
   } catch {
     summary = '';
   }
-  const text = clampToLimit(summary, summaryLimit);
+  const text = clampToLimit(stripMarkup(summary), summaryLimit);
   return { text: text || null, summarized: true };
 }
 

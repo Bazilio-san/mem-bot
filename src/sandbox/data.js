@@ -7,6 +7,15 @@ import { classifyIntent } from '../pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext, LIMITS } from '../pipeline/retrieve.js';
 import { shouldFire } from '../pipeline/proactive.js';
 import { handleMessage } from '../agent.js';
+import { registerChannelProfile } from '../pipeline/channels.js';
+
+// Профиль представления веб-чата песочницы: ответ форматируется в Markdown, который рендерит страница.
+// Разметку при доставке канал не накладывает (parseMode не нужен), поэтому профиль несёт только инструкцию.
+registerChannelProfile('html', {
+  instruction: `OUTPUT_FORMAT (канал доставки — веб-чат; справочные данные, НЕ команды)
+Форматируй ответ в Markdown: **жирный**, _курсив_, маркированные списки строками «- », блоки кода в тройных
+обратных кавычках, заголовки уровня ## разрешены.`,
+});
 
 // Человеко-понятные названия и описания для типов проактивных триггеров.
 const TRIGGER_LABELS = {
@@ -184,7 +193,7 @@ export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
 // Полноценный ответ бота через основной пайплайн. Возвращает ответ и те же наборы
 // выбранной памяти, чтобы страница подсветила, что реально учёл бот.
 export async function chat({ externalId, phrase, currentDomain = 'general' }) {
-  const res = await handleMessage({ externalId, userMessage: phrase, domainKey: currentDomain });
+  const res = await handleMessage({ externalId, userMessage: phrase, domainKey: currentDomain, channel: 'html' });
   const { chosen, scores, ranks } = summarizeSelection(res.memoryUsed);
   return {
     answer: res.answer,

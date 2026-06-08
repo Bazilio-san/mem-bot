@@ -23,6 +23,10 @@
     "test:progress": "node tests/progress.test.mjs",
     "test:voice": "node tests/voice.test.mjs",
     "test:voice-output": "node tests/voice-output.test.mjs",
+    "test:channels": "node tests/channels.test.mjs",
+    "test:telegram-format": "node tests/telegram-format.test.mjs",
+    "test:progress-format": "node tests/progress-format.test.mjs",
+    "test:tts-strip": "node tests/tts-strip.test.mjs",
     "check:llm": "node tests/check-llm.js",
     "check:streaming": "node tests/check-streaming.js",
     "schema:generate": "node src/schema/cli.js generate",
@@ -37,6 +41,7 @@
     "dotenv": "^16.4.7",
     "openai": "^4.77.0",
     "pg": "^8.13.1",
-    "rrule": "^2.8.1"
+    "rrule": "^2.8.1",
+    "sanitize-html": "^2.17.4"
   }
 }
