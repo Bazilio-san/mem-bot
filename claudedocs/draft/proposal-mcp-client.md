@@ -78,8 +78,12 @@ API ниже сверен с документацией пакета (`/modelcon
 - Список инструментов выдаётся **постранично**: `await client.listTools({ cursor })` возвращает
   `{ tools, nextCursor }`. Нужно крутить цикл, пока `nextCursor` не станет пустым, иначе при большом числе
   инструментов часть из них потеряется.
-- Вызов инструмента — `await client.callTool({ name, arguments }, { timeout })`. Результат содержит
-  `content` (массив блоков, у текстовых блоков `type === 'text'` и поле `text`) и признак ошибки `isError`.
+- Вызов инструмента — `await client.callTool({ name, arguments }, undefined, { timeout })`. Сигнатура метода —
+  `callTool(params, resultSchema = CallToolResultSchema, options)`: опции вызова (в том числе тайм-аут) идут
+  **третьим** аргументом, а второй — это схема разбора ответа. Если положить опции вторым аргументом, SDK примет их
+  за схему и попытается провалидировать ответ через `safeParse`, что приводит к ошибке
+  `v3Schema.safeParse is not a function`. Результат содержит `content` (массив блоков, у текстовых блоков
+  `type === 'text'` и поле `text`) и признак ошибки `isError`.
 
 Перед началом работы всё равно сверьте имена один раз с установленной версией, выполнив, например,
 `node -e "import('@modelcontextprotocol/sdk/client/index.js').then(m=>console.log(Object.keys(m)))"`.
@@ -235,12 +239,12 @@ class McpConnection {
   async call(name, args) {
     try {
       const client = await this.ensureConnected();
-      return await client.callTool({ name, arguments: args || {} }, { timeout: CALL_TIMEOUT_MS });
+      return await client.callTool({ name, arguments: args || {} }, undefined, { timeout: CALL_TIMEOUT_MS });
     } catch (err) {
       if (!isConnectionError(err)) throw err;
       await this.reset();
       const client = await this.ensureConnected();
-      return await client.callTool({ name, arguments: args || {} }, { timeout: CALL_TIMEOUT_MS });
+      return await client.callTool({ name, arguments: args || {} }, undefined, { timeout: CALL_TIMEOUT_MS });
     }
   }
 }

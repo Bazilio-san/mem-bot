@@ -78,9 +78,11 @@ class McpConnection {
   }
 
   // Один сетевой вызов инструмента без логики повтора — общая часть для первой попытки и повтора.
+  // Тайм-аут идёт ТРЕТЬИМ аргументом callTool(params, resultSchema, options): второй аргумент — это схема
+  // разбора ответа, и опции вызова туда класть нельзя, иначе SDK примет их за схему и валидация упадёт.
   async invokeOnce(name, args) {
     const client = await this.ensureConnected();
-    return client.callTool({ name, arguments: args || {} }, { timeout: CALL_TIMEOUT_MS });
+    return client.callTool({ name, arguments: args || {} }, undefined, { timeout: CALL_TIMEOUT_MS });
   }
 }
 
