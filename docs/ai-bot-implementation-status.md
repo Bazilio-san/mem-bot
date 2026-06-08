@@ -135,12 +135,15 @@
 
 ### Промпты, прокси, модели — `PROMPT`
 
+Полные координаты runtime-промптов, tool definitions, тестовых и исторических шаблонов вынесены в
+[`prompt-inventory.md`](prompt-inventory.md).
+
 | ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
 |---------------|----------------------|--------|--------------------------|
 | `PROMPT-1` | Клиент LLM и строгий JSON (`chatJSON`) | готово | `src/llm.js` |
 | `PROMPT-2` | Промпт классификатора запроса | готово | `src/pipeline/classify.js` |
 | `PROMPT-3` | Промпт извлечения кандидатов в память (двухпроходный: подсказка сущностей + строгое заполнение по схеме) | готово | `src/pipeline/extract.js` |
-| `PROMPT-4` | Промпт извлечения задачи для планировщика | готово | `src/pipeline/scheduler.js` |
+| `PROMPT-4` | Создание задачи через tool definition `scheduler_create_task` | готово | `src/pipeline/agent-tools/scheduler/scheduler_create_task.js` |
 | `PROMPT-5` | Промпт извлечения тем диалога | готово | `extractTopics` в `src/pipeline/extract.js` |
 | `PROMPT-6` | Промпт суммаризатора истории | готово | `src/pipeline/history-compress.js` |
 | `PROMPT-7` | Опциональная схема решения о слиянии (`MergeDecision`) | нет | конфликт решается правилами `decideMerge`; модельная схема не используется |

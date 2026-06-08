@@ -5,7 +5,6 @@ import cronParser from 'cron-parser';
 import rrulePkg from 'rrule';
 import { config } from '../config.js';
 import { query, notify } from '../db.js';
-import { chatJSON } from '../llm.js';
 import { getDomainId } from '../repo.js';
 import {
   classifyReminderCandidate, evaluateContactPolicy, getContactState, recordProactiveSent,
@@ -19,56 +18,6 @@ class ScheduleError extends Error {
     super(message);
     this.name = 'ScheduleError';
   }
-}
-
-const EXTRACT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['has_task', 'task'],
-  properties: {
-    has_task: { type: 'boolean' },
-    task: {
-      type: ['object', 'null'],
-      additionalProperties: false,
-      required: ['task_type', 'title', 'instruction', 'schedule_kind', 'timezone', 'run_at', 'interval_seconds', 'cron_expr', 'rrule', 'payload', 'requires_confirmation'],
-      properties: {
-        task_type: { type: 'string', enum: ['reminder', 'condition_watch', 'follow_up', 'report', 'memory_cleanup'] },
-        title: { type: 'string' },
-        instruction: { type: 'string' },
-        schedule_kind: { type: 'string', enum: ['one_time', 'interval', 'cron', 'rrule'] },
-        timezone: { type: 'string' },
-        run_at: { type: ['string', 'null'] },
-        interval_seconds: { type: ['integer', 'null'] },
-        cron_expr: { type: ['string', 'null'] },
-        rrule: { type: ['string', 'null'] },
-        payload: { type: 'object', additionalProperties: true },
-        requires_confirmation: { type: 'boolean' },
-      },
-    },
-  },
-};
-
-// Извлечь задачу/напоминание из сообщения пользователя. Создаёт задачу только при явной
-// просьбе напомнить/проверить позже/следить/присылать регулярно.
-export async function extractTask({ userMessage, nowIso, timezone, dialogContext = '' }) {
-  return chatJSON({
-    schema: EXTRACT_SCHEMA,
-    schemaName: 'scheduler_task',
-    system: `Ты извлекаешь задачи, напоминания и фоновые проверки из сообщения пользователя.
-Создавай задачу ТОЛЬКО если пользователь явно попросил: напомнить, проверить позже, следить за условием,
-присылать регулярно или вернуться к теме в будущем. Не создавай задачу из обычного желания без намерения напомнить.
-Для разовой задачи используй schedule_kind="one_time" и вычисли run_at как абсолютную дату-время в ISO 8601.
-Для простого "каждые N минут/часов/дней" используй schedule_kind="interval" и interval_seconds.
-Для календарных регулярностей с конкретным локальным временем используй schedule_kind="cron", например каждый будний
-день в 09:00: cron_expr="0 9 * * 1-5". Для сложных календарных правил используй schedule_kind="rrule" и реальную
-iCalendar RRULE-строку. Не вычисляй run_at для cron/rrule: ближайший запуск посчитает код планировщика.
-Всегда возвращай timezone из часового пояса пользователя, если пользователь явно не указал другой IANA timezone.
-Верни только JSON по схеме.`,
-    user: `Текущая дата и время: ${nowIso}
-Часовой пояс пользователя: ${timezone}
-Сообщение пользователя: ${userMessage}
-Контекст диалога: ${dialogContext || 'нет'}`,
-  });
 }
 
 // Создать задачу в БД.

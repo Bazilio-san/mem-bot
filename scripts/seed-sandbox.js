@@ -89,8 +89,8 @@ async function seedAnna() {
   await saveSecureRecord({ userId: u.id, domainKey: 'math_tutor', recordType: 'phone', displayName: 'телефон', rawValue: '+7 900 000-00-37', consentStatus: 'unknown' });
 
   const genId = await getDomainId('math_tutor');
-  await createTask({ userId: u.id, domainKey: 'math_tutor', task: { task_type: 'reminder', title: 'Решить 10 примеров на квадратные уравнения', instruction: 'Напомнить про практику квадратных уравнений', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(1 * DAY), payload: {} } });
-  await createTask({ userId: u.id, domainKey: 'math_tutor', task: { task_type: 'reminder', title: 'Повторить теорему Виета перед пробником', instruction: 'Напомнить про теорему Виета', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(3 * DAY), payload: {} } });
+  await createTask({ userId: u.id, domainKey: 'math_tutor', task: { task_type: 'reminder', title: 'Решить 10 примеров на квадратные уравнения', instruction: 'Напоминаю, ты хотел порешать примеры на квадратные уравнения', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(1 * DAY), payload: {} } });
+  await createTask({ userId: u.id, domainKey: 'math_tutor', task: { task_type: 'reminder', title: 'Повторить теорему Виета перед пробником', instruction: 'Напоминаю, ты хотел повторить теорему Виета перед пробником', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(3 * DAY), payload: {} } });
 
   await ensureDefaultTriggers(u.id, genId, [
     { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
@@ -123,7 +123,7 @@ async function seedDmitry() {
   await saveSecureRecord({ userId: u.id, domainKey: 'flight_search', recordType: 'passport', displayName: 'паспорт', rawValue: '1234 567812', consentStatus: 'granted' });
 
   const genId = await getDomainId('flight_search');
-  await createTask({ userId: u.id, domainKey: 'flight_search', task: { task_type: 'reminder', title: 'Проверить цены на рейс Казань–Стамбул', instruction: 'Напомнить проверить цены', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(2 * DAY), payload: {} } });
+  await createTask({ userId: u.id, domainKey: 'flight_search', task: { task_type: 'reminder', title: 'Проверить цены на рейс Казань–Стамбул', instruction: 'Напоминаю, ты хотел проверить цены на рейс Казань–Стамбул', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(2 * DAY), payload: {} } });
 
   await ensureDefaultTriggers(u.id, genId, [
     { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },

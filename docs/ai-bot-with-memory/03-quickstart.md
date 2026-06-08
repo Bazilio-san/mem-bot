@@ -133,7 +133,7 @@ src/pipeline/retrieve.js     выборка памяти, ранжировани
 src/pipeline/extract.js      извлечение кандидатов в память и тем после ответа
 src/pipeline/merge.js        фильтр приватности, поиск похожих, дедупликация, запись
 src/pipeline/secure.js       защищённая память: шифрование, согласие, маскирование
-src/pipeline/scheduler.js    извлечение задач, создание, воркер, повторы, перепланирование
+src/pipeline/scheduler.js    создание задач, воркер, повторы, перепланирование
 src/pipeline/tools.js        реестр инструментов: сборка definitions, права, журналирование, вызов handler
 src/pipeline/agent-tools/    по одному модулю на инструмент: title, definition и handler
 src/pipeline/admin.js        просмотр и удаление памяти пользователем, проверка прав администратора (isAdmin)

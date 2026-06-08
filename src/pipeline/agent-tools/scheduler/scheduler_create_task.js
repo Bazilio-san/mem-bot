@@ -7,7 +7,9 @@ export const schedulerCreateTaskTool = {
     type: 'function',
     function: {
       name: 'scheduler_create_task',
-      description: 'Create a reminder, recurring task, follow-up, report, or background condition check. Use one_time with run_at for one-off tasks, interval for simple every-N-seconds schedules, cron for calendar local times such as weekdays at 09:00 (cron_expr="0 9 * * 1-5"), and rrule for complex iCalendar RRULE schedules.',
+      description: `Create a reminder, recurring task, follow-up, report, or background condition check.
+Use one_time with run_at for one-off tasks, interval for simple every-N-seconds schedules, cron for calendar local times 
+such as weekdays at 09:00 (cron_expr="0 9 * * 1-5"), and rrule for complex iCalendar RRULE schedules.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -20,7 +22,13 @@ export const schedulerCreateTaskTool = {
             description: 'Task category.',
           },
           title: { type: 'string', description: 'Short user-facing task title.' },
-          instruction: { type: 'string', description: 'Instruction to execute when the task runs.' },
+          instruction: {
+            type: 'string',
+            description: `The exact reminder text sent to the user when the task fires. 
+It is delivered verbatim, so write it in the user's language as a person speaking directly to the user in second person,
+as a reminder of what they wanted to do, not as a third-person instruction. 
+Prefer "Reminding you, you wanted to call mom" over "Remind the user to call mom".`,
+          },
           schedule_kind: {
             type: 'string',
             enum: ['one_time', 'interval', 'cron', 'rrule'],

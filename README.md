@@ -103,7 +103,7 @@ src/pipeline/retrieve.js    выборка памяти, приватность,
 src/pipeline/extract.js     извлечение кандидатов в память
 src/pipeline/merge.js       дедупликация, обновление, запись фактов
 src/pipeline/secure.js      защищённая память (шифрование, согласие)
-src/pipeline/scheduler.js   извлечение задач, планировщик, повторы
+src/pipeline/scheduler.js   создание задач, планировщик, повторы
 src/pipeline/tools.js       инструменты агента
 src/pipeline/admin.js       просмотр и удаление памяти пользователем
 tests/run.js                комплексная проверка
