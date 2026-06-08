@@ -142,7 +142,7 @@ export async function handleMessage({
 
   // Триггеры проактивности больше НЕ создаются на каждое сообщение: по умолчанию проактивность выключена.
   // Набор триггеров заводится только в момент, когда пользователь сам включает проактивность командой
-  // /proactivity_on (см. setUserProactivity в src/repo.js и обработчик в src/telegram.js).
+  // /proactivity_on (см. setUserProactivity в src/repo.js и обработчик в src/telegram/bot.js).
 
   // Этап 1: классификация.
   await emit({ type: 'stage.started', stage: 'classify', title: 'Определяю намерение' });

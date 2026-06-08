@@ -209,7 +209,7 @@ function layerRegistryAndAdapter() {
   check('6.1. В реестре все пять распознавателей', need.every((p) => p in VOICE_PROVIDERS));
 
   // Развилка распознавания не должна задеть приём нажатий инлайн-кнопок: callback_query остаётся в allowed_updates.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'telegram.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'telegram', 'bot.js'), 'utf8');
   check('6.2. allowed_updates сохраняет callback_query (инлайн-кнопки не сломаны)',
     /allowed_updates:\s*\[[^\]]*'callback_query'[^\]]*\]/.test(src));
   check('6.3. Telegram-адаптер вызывает распознавание вложения',

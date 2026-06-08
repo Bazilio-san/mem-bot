@@ -5,7 +5,7 @@ description: >-
   messages and watching the chat. Use when verifying streaming drafts, tool-call statuses, voice replies, or any
   behaviour that only shows up in the real bot, or when the user says "test the telegram bot", "проверь бота",
   "check streaming in telegram", or asks to drive the bot through the browser.
-allowed-tools: Bash(node scripts/stop-telegram.js), Bash(node src/telegram.js)
+allowed-tools: Bash(node scripts/stop-telegram.js), Bash(node src/telegram/bot.js)
 ---
 
 # Testing the Telegram bot via Playwright
@@ -16,12 +16,12 @@ Playwright must run in persistent-cache mode so the Telegram login survives acro
 
 ## Step 1 — Reload the code first (critical)
 
-The running `node src/telegram.js` process holds the OLD code in memory; your source edits do nothing until you
+The running `node src/telegram/bot.js` process holds the OLD code in memory; your source edits do nothing until you
 restart it. If you skip this, you will "test" the previous version and draw wrong conclusions.
 
 1. Stop the bot gracefully: `node scripts/stop-telegram.js` (sends a soft SIGTERM, then force-kills survivors on
    Windows where background Node processes ignore the soft signal).
-2. Start a fresh instance in the background: `node src/telegram.js`.
+2. Start a fresh instance in the background: `node src/telegram/bot.js`.
 3. Wait for this line in its log before sending anything:
    `Telegram-бот @tinter2_bot запущен. Длинный опрос активен.`
 
@@ -59,7 +59,7 @@ file to inspect the last bubble, instead of dumping the whole bubble tree.
 
 ## Step 5 — Streaming gating rules
 
-In `src/telegram.js` the streaming path activates only when BOTH streaming flags are on
+In `src/telegram/bot.js` the streaming path activates only when BOTH streaming flags are on
 (`config.streaming.enabled` and `config.streaming.telegramEnabled`) AND the user is not in voice mode. When
 `VOICE_OUTPUT_ENABLED=on` globally, only users whose `reply_mode` is `text` get streaming — the bot reads the
 per-user mode via `getUserReplyMode(externalId)` before calling the core, because voice replies need the whole final

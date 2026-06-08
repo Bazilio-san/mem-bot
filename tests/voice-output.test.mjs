@@ -135,7 +135,7 @@ async function layerSynthesize() {
 // ---- 5. Развилка доставки в Telegram-адаптере (проверка исходника) -----------
 function layerAdapterWiring() {
   section('5. Развилка доставки в Telegram-адаптере');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'telegram.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'telegram', 'bot.js'), 'utf8');
 
   // Реакции должны проверяться ДО голоса: ветка реакции стоит в deliverAgentResult раньше голосовой ветки.
   const reactionIdx = src.indexOf("delivery?.kind === 'reaction'");

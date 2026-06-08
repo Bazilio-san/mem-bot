@@ -4,28 +4,27 @@
 // Внешним идентификатором пользователя (external_id) служит идентификатор чата Telegram —
 // благодаря этому проактивные сообщения из очереди доставки находят нужный чат.
 // Запуск: npm run telegram
-import { config } from './config.js';
-import { handleMessage, recordReactionTurn, recordUserReaction } from './agent.js';
-import { tick, msUntilDueTask } from './pipeline/scheduler.js';
-import { checkProactiveTriggers } from './pipeline/proactive.js';
-import { processEvents } from './pipeline/events.js';
-import { fireProactiveNow } from './pipeline/proactive.js';
+import { config } from '../config.js';
+import { handleMessage, recordReactionTurn, recordUserReaction } from '../agent.js';
+import { tick, msUntilDueTask } from '../pipeline/scheduler.js';
+import { checkProactiveTriggers } from '../pipeline/proactive.js';
+import { processEvents } from '../pipeline/events.js';
+import { fireProactiveNow } from '../pipeline/proactive.js';
 import {
   setUserProactivity, getProactivityState, setTrigger,
   saveMessageExternalRef, findMessageByExternalRef, getUserReplyMode,
-} from './repo.js';
-import { query, getPool, closePool } from './db.js';
-import {
-  decideDeliveryIntent, normalizeTelegramReaction, shouldConsiderReaction,
-} from './pipeline/reactions.js';
+} from '../repo.js';
+import { query, getPool, closePool } from '../db.js';
+import { decideDeliveryIntent, shouldConsiderReaction } from '../pipeline/reactions.js';
+import { normalizeTelegramReaction, reactionKeyToEmoji, TELEGRAM_REACTION_KEYS } from './reactions.js';
 import {
   detectAttachment, checkAttachmentLimits, shouldEchoTranscript,
   transcribeTelegramAttachment, isProviderConfigured, providerKeyEnv,
-} from './voice/transcribe.js';
-import { buildVoiceText, synthesizeSpeech } from './voice/tts.js';
-import { createTelegramProgress } from './telegram/progress.js';
-import { registerChannelProfile } from './pipeline/channels.js';
-import { telegramPostProcess, telegramSplit } from './telegram/format.js';
+} from '../voice/transcribe.js';
+import { buildVoiceText, synthesizeSpeech } from '../voice/tts.js';
+import { createTelegramProgress } from './progress.js';
+import { registerChannelProfile } from '../pipeline/channels.js';
+import { telegramPostProcess, telegramSplit } from './format.js';
 
 const TOKEN = process.env.TELEGRAM_API_KEY;
 if (!TOKEN) {
@@ -48,20 +47,10 @@ const OUTBOX_SAFETY_INTERVAL_MS = Number(process.env.OUTBOX_SAFETY_INTERVAL_MS |
 // Предел одновременных тяжёлых обработок входящих сообщений (по сути — одновременных вызовов LLM).
 // Общий по всем чатам: ограничивает только параллелизм, порядок внутри чата гарантируется отдельно.
 const TELEGRAM_MAX_CONCURRENCY = Number(process.env.TELEGRAM_MAX_CONCURRENCY || 5);
-const TELEGRAM_REACTION_EMOJI = {
-  like: '👍',
-  okay: '👌',
-  heart: '❤',
-  laugh: '😁',
-  fire: '🔥',
-  smile: '😊',
-  100: '💯',
-  sad: '😢',
-};
 const TELEGRAM_DELIVERY_CAPABILITIES = {
   channel: 'telegram',
   supportsReactions: true,
-  reactionKeys: Object.keys(TELEGRAM_REACTION_EMOJI),
+  reactionKeys: TELEGRAM_REACTION_KEYS,
 };
 
 // Профиль представления канала Telegram. Регистрируется в ядре на старте модуля: ядро по ключу
@@ -263,7 +252,7 @@ async function saveSentRefs(chatId, sentMessages, conversationMessageId, kind = 
 }
 
 async function sendReaction(chatId, messageId, reactionKey) {
-  const emoji = TELEGRAM_REACTION_EMOJI[reactionKey];
+  const emoji = reactionKeyToEmoji(reactionKey);
   if (!emoji) throw new Error(`Unknown reaction key: ${reactionKey}`);
   await tg('setMessageReaction', {
     chat_id: chatId,

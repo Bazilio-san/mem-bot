@@ -1,8 +1,8 @@
-// Кроссплатформенная остановка Telegram-бота (процесса `node src/telegram.js`).
+// Кроссплатформенная остановка Telegram-бота (процесса `node src/telegram/bot.js`).
 //
 // Скрипт находит все запущенные процессы Node.js, в командной строке которых упоминается
-// `src/telegram.js` (или `telegram.js`), и посылает им сигнал мягкого завершения. В файле
-// src/telegram.js предусмотрена обработка SIGINT/SIGTERM: бот останавливает циклы опроса
+// `src/telegram/bot.js`, и посылает им сигнал мягкого завершения. В файле
+// src/telegram/bot.js предусмотрена обработка SIGINT/SIGTERM: бот останавливает циклы опроса
 // и фонового воркера, закрывает соединение-слушатель и пул соединений с базой и только
 // после этого выходит. Поэтому здесь используется именно мягкое завершение, а не принудительное.
 //
@@ -27,8 +27,10 @@ const isWindows = process.platform === 'win32';
 const softOnly = process.argv.includes('--soft');
 const selfPid = process.pid;
 
-// Подстрока, по которой опознаётся процесс бота в его командной строке.
-const MARKER = 'telegram.js';
+// Образец, по которому опознаётся процесс бота в его командной строке. Точка входа адаптера —
+// файл src/telegram/bot.js, поэтому образец сопоставляет путь «telegram/bot.js» с любым разделителем
+// каталогов: прямой слеш в Unix и обратный слеш в Windows.
+const MARKER = /telegram[\\/]bot\.js/;
 
 // Пауза в миллисекундах между мягким завершением и проверкой/принудительной добивкой.
 const GRACE_MS = 5000;
@@ -46,7 +48,7 @@ function findOnWindows() {
   // Вывод формируется построчно в формате «PID<табуляция>командная строка».
   const ps = [
     "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\"",
-    "| Where-Object { $_.CommandLine -like '*telegram.js*' }",
+    "| Where-Object { $_.CommandLine -like '*bot.js*' }",
     "| ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
   ].join(' ');
   let out;
@@ -76,15 +78,14 @@ function parseLines(out) {
   for (const raw of out.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    if (!line.includes(MARKER)) continue;
+    if (!MARKER.test(line)) continue;
     // Первое «слово» строки — идентификатор процесса, остаток — командная строка.
     const match = line.match(/^(\d+)\s+(.*)$/);
     if (!match) continue;
     const pid = Number(match[1]);
     const commandLine = match[2];
     if (!Number.isInteger(pid) || pid === selfPid) continue;
-    // Исключаем процессы, не являющиеся ботом: команды должны запускать именно telegram.js,
-    // а не, например, этот скрипт остановки (stop-telegram.js тоже содержит подстроку telegram.js).
+    // Подстраховка: исключаем сам скрипт остановки, чтобы он ни при каких условиях не остановил себя.
     if (commandLine.includes('stop-telegram.js')) continue;
     result.push({ pid, commandLine });
   }

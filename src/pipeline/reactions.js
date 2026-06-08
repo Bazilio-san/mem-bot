@@ -11,23 +11,6 @@ export const REACTION_FALLBACK_TEXT = {
   sad: 'Сочувствую.',
 };
 
-const TELEGRAM_EMOJI_TO_KEY = new Map([
-  ['👍', 'like'],
-  ['👌', 'okay'],
-  ['❤', 'heart'],
-  ['❤️', 'heart'],
-  ['🥰', 'heart'],
-  ['😁', 'laugh'],
-  ['🤣', 'laugh'],
-  ['😄', 'laugh'],
-  ['🔥', 'fire'],
-  ['🙂', 'smile'],
-  ['😊', 'smile'],
-  ['💯', '100'],
-  ['😢', 'sad'],
-  ['😭', 'sad'],
-]);
-
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -70,11 +53,6 @@ export function makeReactionDelivery(reactionKey, reason = '') {
     fallbackText: REACTION_FALLBACK_TEXT[key],
     reason,
   };
-}
-
-export function normalizeTelegramReaction(reaction) {
-  if (!reaction || reaction.type !== 'emoji') return null;
-  return TELEGRAM_EMOJI_TO_KEY.get(reaction.emoji) || null;
 }
 
 export function formatReactionToken(reactionKey) {

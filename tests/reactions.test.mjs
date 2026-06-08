@@ -3,9 +3,9 @@ import {
   decideDeliveryIntent,
   formatReactionToken,
   normalizeReactionKey,
-  normalizeTelegramReaction,
   shouldConsiderReaction,
 } from '../src/pipeline/reactions.js';
+import { normalizeTelegramReaction, reactionKeyToEmoji } from '../src/telegram/reactions.js';
 
 assert.equal(normalizeReactionKey(':okay:'), 'okay');
 assert.equal(normalizeReactionKey('100'), '100');
@@ -16,6 +16,10 @@ assert.equal(formatReactionToken('missing'), ':unknown:');
 assert.equal(normalizeTelegramReaction({ type: 'emoji', emoji: '❤' }), 'heart');
 assert.equal(normalizeTelegramReaction({ type: 'emoji', emoji: '🔥' }), 'fire');
 assert.equal(normalizeTelegramReaction({ type: 'custom_emoji', custom_emoji_id: '1' }), null);
+
+assert.equal(reactionKeyToEmoji('heart'), '❤');
+assert.equal(reactionKeyToEmoji('100'), '💯');
+assert.equal(reactionKeyToEmoji('missing'), null);
 
 assert.equal(shouldConsiderReaction('ок, сделай'), true);
 assert.equal(shouldConsiderReaction('/start'), false);
