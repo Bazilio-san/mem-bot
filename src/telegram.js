@@ -6,7 +6,7 @@
 // Запуск: npm run telegram
 import { config } from './config.js';
 import { handleMessage, recordReactionTurn, recordUserReaction } from './agent.js';
-import { tick } from './pipeline/scheduler.js';
+import { tick, msUntilDueTask } from './pipeline/scheduler.js';
 import { checkProactiveTriggers } from './pipeline/proactive.js';
 import { processEvents } from './pipeline/events.js';
 import { fireProactiveNow } from './pipeline/proactive.js';
@@ -33,7 +33,12 @@ if (!TOKEN) {
 
 const API = `https://api.telegram.org/bot${TOKEN}`;
 const POLL_TIMEOUT_SEC = 30;                                         // длительность одного длинного опроса
-const WORKER_INTERVAL_MS = Number(process.env.SCHEDULER_INTERVAL_MS || 5000);
+// Фоновый воркер не опрашивает базу через фиксированный интервал, а спит ровно до момента
+// ближайшей задачи (адаптивный сон) и просыпается мгновенно по уведомлению scheduler_wake при
+// создании новой задачи. Эти две границы ограничивают сон снизу (не частить) и сверху (периодически
+// перепроверять базу, соблюдать интервал проактивности и страховочный слив очереди доставки).
+const WORKER_MIN_SLEEP_MS = Number(process.env.SCHEDULER_MIN_SLEEP_MS || 250);
+const WORKER_MAX_SLEEP_MS = Number(process.env.SCHEDULER_MAX_SLEEP_MS || 30000);
 const TG_MAX_LEN = 4000;                                            // запас под лимит Telegram в 4096 символов
 // Как часто страховочный таймер опустошает очередь доставки. Основной путь — событийный (LISTEN/NOTIFY),
 // а этот редкий проход подстраховывает на случай пропущенного уведомления или простоя слушателя.
@@ -61,6 +66,9 @@ const TELEGRAM_DELIVERY_CAPABILITIES = {
 const chatDomains = new Map();
 let lastProactiveAt = 0;
 let running = true;
+// Функция досрочного пробуждения фонового цикла. Устанавливается на время сна, иначе null.
+// Срабатывает по уведомлению scheduler_wake, когда создаётся новая задача планировщика.
+let wakeWorker = null;
 
 // --- Семафор параллелизма ---------------------------------------------------
 // Счётчик свободных слотов и очередь ожидающих. Захват слота откладывает тяжёлую обработку,
@@ -697,8 +705,13 @@ async function startOutboxListener() {
   try {
     const client = await getPool().connect();
     outboxListener = client;
-    client.on('notification', () => {
-      // Пришло уведомление о новой записи — опустошаем очередь немедленно.
+    client.on('notification', (msg) => {
+      if (msg.channel === 'scheduler_wake') {
+        // Создана новая задача планировщика — будим фоновый цикл, чтобы он не ждал до конца сна.
+        if (wakeWorker) wakeWorker();
+        return;
+      }
+      // Пришло уведомление о новой записи в очереди доставки — опустошаем очередь немедленно.
       drainOutbox().catch((e) => console.error('Ошибка событийного слива очереди доставки:', e.message));
     });
     client.on('error', (e) => {
@@ -706,6 +719,7 @@ async function startOutboxListener() {
       scheduleListenerReconnect();                                   // соединение разорвано — переоткрываем
     });
     await client.query('LISTEN outbox_new');
+    await client.query('LISTEN scheduler_wake');                     // мгновенное пробуждение воркера при новой задаче
     // Уведомления не переживают обрыв соединения: сразу после подписки один раз опустошаем очередь,
     // чтобы забрать всё, что накопилось за время запуска или простоя слушателя.
     await drainOutbox();
@@ -728,10 +742,34 @@ function scheduleListenerReconnect() {
   }, 3000);                                                          // небольшая пауза перед повторной попыткой
 }
 
+// Прерываемый сон фонового цикла: завершается по тайм-ауту или по уведомлению о новой задаче.
+function sleepWorker(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { wakeWorker = null; resolve(); }, ms);
+    wakeWorker = () => { clearTimeout(timer); wakeWorker = null; resolve(); };
+  });
+}
+
+// Сколько спать до следующего прохода фонового цикла. За основу берётся время до ближайшей задачи
+// (или верхняя граница, если задач нет), а затем сон укорачивается так, чтобы не пропустить очередную
+// проверку проактивности и очередной страховочный слив очереди доставки. Итог зажимается в границы.
+function computeWorkerSleepMs(nextTaskMs, lastSafetyDrainAt) {
+  const base = nextTaskMs === null ? WORKER_MAX_SLEEP_MS : nextTaskMs;
+  let ms = Math.max(WORKER_MIN_SLEEP_MS, Math.min(base, WORKER_MAX_SLEEP_MS));
+  if (config.proactive.enabled) {
+    const untilProactive = config.proactive.intervalMs - (Date.now() - lastProactiveAt);
+    ms = Math.min(ms, Math.max(WORKER_MIN_SLEEP_MS, untilProactive));
+  }
+  const untilSafetyDrain = OUTBOX_SAFETY_INTERVAL_MS - (Date.now() - lastSafetyDrainAt);
+  ms = Math.min(ms, Math.max(WORKER_MIN_SLEEP_MS, untilSafetyDrain));
+  return ms;
+}
+
 // Фоновый цикл: планировщик задач, проактивный контур и страховочная доставка из очереди в Telegram.
 async function workerLoop() {
   let lastSafetyDrainAt = 0;
   while (running) {
+    let nextTaskMs = null;
     try {
       await tick();                                                 // выполнить просроченные задачи (напоминания и т.п.)
 
@@ -747,10 +785,13 @@ async function workerLoop() {
         lastSafetyDrainAt = Date.now();
         await drainOutbox();
       }
+
+      // Момент ближайшей задачи узнаём после возможного перепланирования в tick().
+      nextTaskMs = await msUntilDueTask();
     } catch (err) {
       console.error('Ошибка фонового прохода воркера:', err.message);
     }
-    await new Promise((res) => setTimeout(res, WORKER_INTERVAL_MS));
+    await sleepWorker(computeWorkerSleepMs(nextTaskMs, lastSafetyDrainAt));
   }
 }
 

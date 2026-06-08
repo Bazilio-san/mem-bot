@@ -33,17 +33,26 @@ function fakeResponse({ ok = true, status = 200, json = null, text = '', bytes =
 const TELEGRAM_API = 'https://api.telegram.org/bot12345:TESTTOKEN';
 const TELEGRAM_TOKEN = '12345:TESTTOKEN';
 
-// Поставить заглушку global.fetch, маршрутизирующую по адресу запроса. Возвращает журнал вызванных адресов.
+// Поставить заглушку global.fetch, маршрутизирующую по адресу запроса. Возвращает журнал вызовов: для каждого
+// адреса сохраняем сам адрес и — если телом был multipart с полем file — имя отправленного файла. Имя нужно,
+// чтобы проверить нормализацию расширения (Groq принимает формат по расширению имени, а не по MIME-типу).
 function installFetch(routes) {
   const calls = [];
-  globalThis.fetch = async (url) => {
+  const uploadNames = [];
+  globalThis.fetch = async (url, options) => {
     const u = String(url);
     calls.push(u);
+    const body = options?.body;
+    if (body && typeof body.get === 'function') {
+      const file = body.get('file');
+      if (file && typeof file.name === 'string') uploadNames.push(file.name);
+    }
     for (const [needle, response] of routes) {
       if (u.includes(needle)) return response;
     }
     throw new Error(`Заглушка fetch не знает адрес: ${u}`);
   };
+  calls.uploadNames = uploadNames;
   return calls;
 }
 
@@ -138,6 +147,11 @@ async function layerTranscribe() {
     check('5.1. Распознанный текст доходит без искажений', res.text === 'привет мир, как дела' && res.empty === false);
     const usedFileEndpoint = calls.some((c) => c.includes('/file/bot12345:TESTTOKEN/voice/file_1.oga'));
     check('5.1b. Файл скачивается по файловому адресу с токеном (а не отдаётся ссылкой)', usedFileEndpoint);
+    // Telegram отдаёт голос с расширением .oga, которого нет в списке принимаемых Groq форматов. Имя файла в
+    // запросе распознавания должно быть приведено к допустимому расширению .ogg, иначе сервис вернёт HTTP 400.
+    const sentName = calls.uploadNames[0] || '';
+    check('5.1c. Имя файла нормализуется с .oga на .ogg для распознавателя',
+      sentName.endsWith('.ogg') && !sentName.endsWith('.oga'), `отправлено имя: ${sentName}`);
   }
 
   // 5.2. Пустой результат распознавания помечается признаком empty.

@@ -128,6 +128,23 @@ function guessMime(fileName) {
   return map[ext] || 'application/octet-stream';
 }
 
+// OpenAI-совместимые сервисы (Groq) определяют формат файла по расширению в имени, а не по MIME-типу запроса.
+// Telegram отдаёт голосовое сообщение как файл с расширением .oga, которого нет в списке принимаемых Groq
+// форматов, хотя по содержимому это обычный OGG/OPUS. Поэтому имя для отправки приводим к расширению из
+// разрешённого списка: если расширение уже допустимо — оставляем как есть, иначе подбираем по MIME-типу.
+const ACCEPTED_UPLOAD_EXT = new Set(['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'opus', 'wav', 'webm']);
+function safeUploadName(fileName) {
+  const ext = path.extname(fileName || '').slice(1).toLowerCase();
+  if (ACCEPTED_UPLOAD_EXT.has(ext)) return path.basename(fileName);
+  const mimeToExt = {
+    'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+    'audio/wav': 'wav', 'audio/flac': 'flac', 'audio/webm': 'webm', 'video/mp4': 'mp4',
+  };
+  const target = mimeToExt[guessMime(fileName)] || 'ogg';
+  const base = path.basename(fileName || 'audio', path.extname(fileName || '')) || 'audio';
+  return `${base}.${target}`;
+}
+
 // Скачать файл Telegram по file_id в память процесса. Сначала методом getFile получаем относительный путь к
 // файлу на серверах Telegram, затем скачиваем его по файловому адресу. Прямую ссылку наружу не отдаём: она
 // содержит токен бота, поэтому стороннему сервису передаём уже сами байты, а не URL.
@@ -158,7 +175,7 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const form = new FormData();
-      form.append('file', new Blob([fileBuf], { type: guessMime(fileName) }), path.basename(fileName));
+      form.append('file', new Blob([fileBuf], { type: guessMime(fileName) }), safeUploadName(fileName));
       form.append('model', model);
       if (language) form.append('language', language);
       form.append('response_format', 'json');

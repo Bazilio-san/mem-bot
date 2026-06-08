@@ -4,7 +4,7 @@
 import cronParser from 'cron-parser';
 import rrulePkg from 'rrule';
 import { config } from '../config.js';
-import { query } from '../db.js';
+import { query, notify } from '../db.js';
 import { chatJSON } from '../llm.js';
 import { getDomainId } from '../repo.js';
 import {
@@ -87,6 +87,10 @@ export async function createTask({ userId, domainKey = 'general', conversationId
       normalizedTask.run_at || null, normalizedTask.interval_seconds || null, normalizedTask.cron_expr || null,
       normalizedTask.rrule || null, nextRun],
   );
+  // Разбудить воркер планировщика, чтобы он не ждал до конца текущего сна и подхватил задачу сразу.
+  // Сбой уведомления не должен мешать созданию задачи: в худшем случае воркер возьмёт её на ближайшем
+  // плановом пробуждении (не позднее верхней границы сна), поэтому ошибку здесь намеренно поглощаем.
+  await notify('scheduler_wake').catch(() => {});
   return rows[0];
 }
 
@@ -299,6 +303,24 @@ export async function claimDueTasks(limit = 20) {
     [limit, WORKER_ID],
   );
   return rows;
+}
+
+// Сколько миллисекунд осталось до ближайшего запланированного запуска свободной активной задачи.
+// Возвращает 0, если задача уже просрочена и готова к выполнению, и null, если активных задач нет.
+// Задачи, заблокированные другим воркером (`locked_until` в будущем), исключаются, чтобы воркер не
+// крутился вхолостую вокруг чужой задачи. Запрос идёт по индексу `idx_tasks_due (next_run_at, ...)`,
+// поэтому он почти бесплатен и его можно вызывать на каждом проходе цикла.
+export async function msUntilDueTask() {
+  const { rows } = await query(
+    `SELECT next_run_at FROM mem.scheduled_tasks
+      WHERE status = 'active'
+        AND (locked_until IS NULL OR locked_until < now())
+      ORDER BY next_run_at ASC
+      LIMIT 1`,
+  );
+  if (!rows.length) return null;
+  const ms = new Date(rows[0].next_run_at).getTime() - Date.now();
+  return ms > 0 ? ms : 0;
 }
 
 // Выполнить одну задачу: создать запись запуска, положить уведомление в outbox,
