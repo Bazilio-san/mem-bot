@@ -1,9 +1,13 @@
 {
-  "name": "inter-2",
-  "version": "1.0.0",
-  "description": "",
+  "name": "mem-bot",
+  "productName": "MEM BOT",
+  "version": "1.0.1",
+  "description": "Agentic Telegram and CLI chat bot with long-term PostgreSQL memory, reminders, voice support, skills, and MCP tools.",
   "main": "index.js",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "agents:link": "node scripts/claude-2-agents-symlink.js setup",
     "agents:link:status": "node scripts/claude-2-agents-symlink.js status",
@@ -35,7 +39,24 @@
     "skills:list": "node src/pipeline/skills/cli.js list",
     "skills:sync": "node src/pipeline/skills/cli.js sync"
   },
+  "keywords": [
+    "ai-agent",
+    "chatbot",
+    "telegram-bot",
+    "long-term-memory",
+    "postgresql",
+    "llm",
+    "openai",
+    "mcp",
+    "scheduler",
+    "voice"
+  ],
   "private": true,
+  "author": {
+    "name": "Viacheslav Makarov",
+    "email": "github@bazilio.ru"
+  },
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.20.0",
@@ -45,5 +66,9 @@
     "pg": "^8.13.1",
     "rrule": "^2.8.1",
     "sanitize-html": "^2.17.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com:Bazilio-san/mcp-yafly.git"
   }
 }
