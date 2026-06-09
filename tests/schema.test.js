@@ -1,13 +1,12 @@
-// Проверка слоя per-domain схем: мета-валидация, сохранение/версионирование в реестре,
-// валидация и канонизация при записи факта, обратная совместимость и генерация черновика (LLM).
-// Запуск: npm run test:schema. Требует применённой миграции 006 и доступной БД.
-// Базовый прогон npm test этот файл не затрагивает (отдельный файл, отдельная команда).
+// Проверка слоя схем доменной памяти: мета-валидация определения, валидация data и канонизация entity_key
+// при записи факта, интеграция в контур записи и строгий второй проход извлечения по схеме сущности.
+// Источник схемы — реестр skills (skills/<name>/domain-schema.json). Запуск: npm run test:schema.
+// Требует доступной БД; разделы с LLM пропускаются при SCHEMA_SKIP_LLM=1.
 import { query, closePool } from '../src/db.js';
 import { ensureUser } from '../src/repo.js';
 import { validateDefinition } from '../src/schema/meta.js';
-import { saveDomainDefinition, loadDomainDefinition, getEntitySpec, listDomains, invalidateSchemaCache } from '../src/schema/registry.js';
+import { getEntitySpec, loadDomainDefinition } from '../src/schema/registry.js';
 import { validateAndCanonicalize, slugify } from '../src/schema/validate.js';
-import { generateDomainDraft } from '../src/schema/generate.js';
 import { processCandidate } from '../src/pipeline/merge.js';
 import { extractCandidates } from '../src/pipeline/extract.js';
 
@@ -20,14 +19,15 @@ function check(name, cond, detail = '') {
 }
 function section(t) { console.log(`\n=== ${t} ===`); }
 
-const TEST_KEY = 'flights_test';
+// Домен, на котором проверяем валидацию: его схема описана в skills/flight-search/domain-schema.json.
+const DOMAIN = 'flight_search';
 
-// Определение тестового домена по образцу из предложения (раздел 3).
+// Образец определения домена для мета-валидации (форма, которую читает мета-валидатор).
 function buildDefinition() {
   return {
-    domain_key: TEST_KEY,
-    title: 'Поиск и покупка авиабилетов (тест)',
-    description: 'Перелёты, маршруты, предпочтения, поездки.',
+    domain_key: 'flights_meta',
+    title: 'Поиск авиабилетов (мета-проверка)',
+    description: 'Перелёты, маршруты, предпочтения.',
     allowed_memory_kinds: ['preference', 'goal', 'state', 'history'],
     entities: [
       {
@@ -35,37 +35,16 @@ function buildDefinition() {
         description: 'Устойчивые предпочтения по перелётам.',
         entity_key: {
           mode: 'fixed_vocab',
-          vocabulary: ['departure', 'cabin', 'time', 'airline'],
-          synonyms: {
-            departure: ['вылет', 'город вылета', 'откуда'],
-            time: ['время', 'ночные', 'ночные рейсы'],
-          },
+          vocabulary: ['departure', 'cabin'],
+          synonyms: { departure: ['вылет', 'откуда'] },
         },
         data_schema: {
           type: 'object',
           additionalProperties: false,
-          required: ['preferred_departure_city', 'avoid', 'cabin_class'],
+          required: ['avoid', 'cabin_class'],
           properties: {
-            preferred_departure_city: { type: ['string', 'null'] },
-            avoid: { type: 'array', items: { type: 'string', enum: ['night_flights', 'long_layovers', 'connections'] } },
-            cabin_class: { type: ['string', 'null'], enum: ['economy', 'comfort', 'business', null] },
-          },
-        },
-      },
-      {
-        entity_type: 'trip',
-        description: 'Планируемая поездка.',
-        entity_key: { mode: 'slug' },
-        data_schema: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['origin', 'destination', 'date', 'passengers', 'status'],
-          properties: {
-            origin: { type: ['string', 'null'] },
-            destination: { type: 'string' },
-            date: { type: ['string', 'null'] },
-            passengers: { type: 'integer', minimum: 1 },
-            status: { type: 'string', enum: ['searching', 'selected', 'booked', 'cancelled'] },
+            avoid: { type: 'array', items: { type: 'string' } },
+            cabin_class: { type: ['string', 'null'] },
           },
         },
       },
@@ -77,95 +56,61 @@ function buildDefinition() {
 function layerMeta() {
   section('1. Мета-валидация определения домена');
 
-  const good = buildDefinition();
-  check('1.1. Корректное определение проходит валидацию', validateDefinition(good).ok);
+  check('1.1. Корректное определение проходит валидацию', validateDefinition(buildDefinition()).ok);
 
-  // Открытая схема (additionalProperties не false) должна отвергаться.
   const openSchema = buildDefinition();
   openSchema.entities[0].data_schema.additionalProperties = true;
   const r2 = validateDefinition(openSchema);
   check('1.2. Открытая data_schema отвергается', !r2.ok && r2.issues.some((i) => /закрыт/i.test(i)));
 
-  // fixed_vocab без словаря должен отвергаться.
   const noVocab = buildDefinition();
   delete noVocab.entities[0].entity_key.vocabulary;
   const r3 = validateDefinition(noVocab);
   check('1.3. fixed_vocab без словаря отвергается', !r3.ok && r3.issues.some((i) => /vocabulary/i.test(i)));
 
-  // Пустой required отвергается.
   const emptyReq = buildDefinition();
-  emptyReq.entities[1].data_schema.required = [];
+  emptyReq.entities[0].data_schema.required = [];
   check('1.4. Пустой required отвергается', !validateDefinition(emptyReq).ok);
 }
 
-// ---- 2. Сохранение, версионирование, чтение ---------------------------------
-async function layerRegistry() {
-  section('2. Реестр: сохранение, версионирование, чтение');
+// ---- 2. Схема домена доступна из реестра skills -----------------------------
+async function layerSource() {
+  section('2. Схема домена из реестра skills');
 
-  // Чистим прежние прогоны.
-  await query('DELETE FROM mem.domain_schemas WHERE domain_key = $1', [TEST_KEY]);
-  invalidateSchemaCache(TEST_KEY);
+  const def = await loadDomainDefinition(DOMAIN);
+  check('2.1. loadDomainDefinition отдаёт схему из skill', !!def && def.entities.length >= 1, `сущностей: ${def?.entities?.length}`);
 
-  const { version: v1 } = await saveDomainDefinition(buildDefinition(), { createdBy: 'test' });
-  check('2.1. Первое сохранение даёт версию 1', v1 === 1, `version=${v1}`);
+  const spec = await getEntitySpec(DOMAIN, 'city');
+  check('2.2. getEntitySpec даёт схему сущности city', !!spec && spec.entity_key.mode === 'fixed_vocab');
 
-  // Домен заведён в реестре доменов.
-  const { rows: dom } = await query('SELECT 1 FROM mem.agent_domains WHERE domain_key = $1', [TEST_KEY]);
-  check('2.2. Домен заведён в agent_domains', dom.length === 1);
-
-  const { version: v2 } = await saveDomainDefinition(buildDefinition(), { createdBy: 'test' });
-  check('2.3. Повторное сохранение бампит версию до 2', v2 === 2, `version=${v2}`);
-
-  // Активная версия ровно одна.
-  const { rows: act } = await query(
-    `SELECT count(*)::int c FROM mem.domain_schemas WHERE domain_key = $1 AND status = 'active'`, [TEST_KEY]);
-  check('2.4. Активная версия ровно одна', act[0].c === 1, `активных: ${act[0].c}`);
-
-  const def = await loadDomainDefinition(TEST_KEY);
-  check('2.5. loadDomainDefinition возвращает определение', !!def && def.entities.length === 2);
-
-  const spec = await getEntitySpec(TEST_KEY, 'flight_preference');
-  check('2.6. getEntitySpec даёт схему сущности', !!spec && spec.entity_key.mode === 'fixed_vocab');
-
-  const list = await listDomains();
-  check('2.7. listDomains показывает тестовый домен', list.some((d) => d.domain_key === TEST_KEY));
-
-  // Невалидное определение не сохраняется.
-  let rejected = false;
-  const bad = buildDefinition();
-  bad.entities[0].data_schema.additionalProperties = true;
-  try { await saveDomainDefinition(bad, {}); } catch { rejected = true; }
-  check('2.8. Невалидное определение не сохраняется', rejected);
+  const none = await loadDomainDefinition('no_such_domain_xyz');
+  check('2.3. Для домена без skill схемы нет (null)', none === null);
 }
 
-// ---- 3. Валидация и канонизация (без сети) ----------------------------------
+// ---- 3. Валидация data и канонизация entity_key (без сети) -------------------
 async function layerValidate() {
   section('3. Валидация data и канонизация entity_key');
 
-  // slug: транслитерация кириллицы (именно транслит, а не английский экзоним: Стамбул → stambul).
   check('3.1. slugify «Стамбул» → «stambul»', slugify('Стамбул') === 'stambul', slugify('Стамбул'));
   check('3.1b. slugify нормализует регистр и пробелы', slugify('Нижний Новгород') === 'nizhniy-novgorod', slugify('Нижний Новгород'));
 
-  // Валидный data остаётся как есть, ключ из словаря не меняется.
-  const valid = await validateAndCanonicalize(TEST_KEY, {
-    entity_type: 'flight_preference', entity_key: 'departure',
-    data: { preferred_departure_city: 'Казань', avoid: ['night_flights'], cabin_class: null },
-    confidence: 0.9,
+  // Валидный data, ключ из словаря не меняется. Источник схемы — skill, версия помечается маркером 'skill'.
+  const valid = await validateAndCanonicalize(DOMAIN, {
+    entity_type: 'city', entity_key: 'departure',
+    data: { city_name: 'Казань' }, confidence: 0.9,
   });
   check('3.2. Валидный data проходит, ключ словаря не меняется',
-    valid.ok && valid.candidate.entity_key === 'departure' && valid.candidate.data.preferred_departure_city === 'Казань');
-  check('3.3. Проставлена версия схемы', typeof valid.schema_version === 'number');
+    valid.ok && valid.candidate.entity_key === 'departure' && valid.candidate.data.city_name === 'Казань');
+  check('3.3. Проставлен маркер источника схемы', valid.schema_version === 'skill', String(valid.schema_version));
 
   // Синоним приводится к каноническому ключу.
-  const syn = await validateAndCanonicalize(TEST_KEY, {
-    entity_type: 'flight_preference', entity_key: 'откуда',
-    data: { preferred_departure_city: 'Казань', avoid: [], cabin_class: null }, confidence: 0.9,
+  const syn = await validateAndCanonicalize(DOMAIN, {
+    entity_type: 'city', entity_key: 'откуда', data: { city_name: 'Казань' }, confidence: 0.9,
   });
   check('3.4. Синоним «откуда» канонизируется в «departure»', syn.candidate.entity_key === 'departure', syn.candidate.entity_key);
 
-  // Кодовая нормализация: лишний ключ убирается, одиночное значение оборачивается в массив,
-  // строка-число приводится к integer, отсутствующее необязательное поле — null.
-  const fixed = await validateAndCanonicalize(TEST_KEY, {
+  // Кодовая нормализация: лишний ключ убирается, строка-число приводится к integer, отсутствующее поле — null.
+  const fixed = await validateAndCanonicalize(DOMAIN, {
     entity_type: 'trip', entity_key: 'Стамбул',
     data: { origin: 'Казань', destination: 'Стамбул', passengers: '2', status: 'searching', lishnee: 'x' },
     confidence: 0.9,
@@ -176,17 +121,17 @@ async function layerValidate() {
     && !('lishnee' in fixed.candidate.data),
     JSON.stringify(fixed.candidate.data));
 
-  // Неустранимо невалидный data: enum-значение, которого нет. Факт отклоняется (строгий режим).
-  const broken = await validateAndCanonicalize(TEST_KEY, {
+  // Неустранимо невалидный data: тип не сходится. Факт отклоняется (строгий режим).
+  const broken = await validateAndCanonicalize(DOMAIN, {
     entity_type: 'trip', entity_key: 'Сочи',
-    data: { origin: null, destination: 'Сочи', date: null, passengers: 1, status: 'неизвестно' },
+    data: { origin: null, destination: 123, date: null, passengers: 1, status: 'searching' },
     confidence: 0.9,
   });
   check('3.6. Невалидный data отклоняется (ok=false, reason=data_invalid)',
     !broken.ok && broken.reason === 'data_invalid' && broken.issues.length > 0, JSON.stringify(broken.issues));
 
   // Сущность, не объявленная в схеме домена, отклоняется.
-  const unknownEntity = await validateAndCanonicalize(TEST_KEY, {
+  const unknownEntity = await validateAndCanonicalize(DOMAIN, {
     entity_type: 'unknown_entity', entity_key: 'любой', data: { foo: 1 }, confidence: 0.8,
   });
   check('3.7. Сущность вне схемы отклоняется (reason=entity_not_in_schema)',
@@ -214,97 +159,71 @@ async function layerIntegration() {
   await query('DELETE FROM mem.users WHERE external_id = $1', ['tschema']);
   const u = await ensureUser('tschema');
 
-  // Кандидат с синонимом ключа: после записи ключ канонизирован, версия схемы в metadata.
-  const res = await processCandidate(u.id, TEST_KEY, {
-    scope: 'domain', memory_kind: 'preference', entity_type: 'flight_preference', entity_key: 'откуда',
-    memory_text: 'Пользователь вылетает из Казани и не любит ночные рейсы',
-    data: { preferred_departure_city: 'Казань', avoid: ['night_flights'], cabin_class: null },
+  const res = await processCandidate(u.id, DOMAIN, {
+    scope: 'domain', memory_kind: 'preference', entity_type: 'city', entity_key: 'откуда',
+    memory_text: 'Пользователь вылетает из Казани',
+    data: { city_name: 'Казань' },
     importance: 0.8, confidence: 0.9, sensitivity: 'normal', requires_confirmation: false,
   });
   check('4.1. Факт создан', res.action === 'created' && !!res.id);
 
-  const { rows } = await query(
-    `SELECT entity_key, data, metadata FROM mem.memory_items WHERE id = $1`, [res.id]);
+  const { rows } = await query('SELECT entity_key, data, metadata FROM mem.memory_items WHERE id = $1', [res.id]);
   const row = rows[0];
   check('4.2. entity_key канонизирован в «departure»', row.entity_key === 'departure', row.entity_key);
-  check('4.3. metadata.schema_version записан', row.metadata?.schema_version >= 1, JSON.stringify(row.metadata));
-  check('4.4. data сохранён валидным', row.data.preferred_departure_city === 'Казань' && Array.isArray(row.data.avoid));
+  check('4.3. metadata.schema_version помечен источником', row.metadata?.schema_version === 'skill', JSON.stringify(row.metadata));
+  check('4.4. data сохранён валидным', row.data.city_name === 'Казань');
 
-  // Повторный кандидат тем же синонимом обновляет тот же факт (дедуп по каноническому ключу), без дубля.
-  await processCandidate(u.id, TEST_KEY, {
-    scope: 'domain', memory_kind: 'preference', entity_type: 'flight_preference', entity_key: 'город вылета',
-    memory_text: 'Пользователь вылетает из Казани и не любит ночные рейсы',
-    data: { preferred_departure_city: 'Казань', avoid: ['night_flights'], cabin_class: null },
+  // Повторный кандидат другим синонимом обновляет тот же факт (дедуп по каноническому ключу), без дубля.
+  await processCandidate(u.id, DOMAIN, {
+    scope: 'domain', memory_kind: 'preference', entity_type: 'city', entity_key: 'город вылета',
+    memory_text: 'Пользователь вылетает из Казани',
+    data: { city_name: 'Казань' },
     importance: 0.8, confidence: 0.9, sensitivity: 'normal', requires_confirmation: false,
   });
   const { rows: dup } = await query(
-    `SELECT count(*)::int c FROM mem.memory_items WHERE user_id = $1 AND entity_type = 'flight_preference' AND status = 'active'`,
+    `SELECT count(*)::int c FROM mem.memory_items WHERE user_id = $1 AND entity_type = 'city' AND status = 'active'`,
     [u.id]);
   check('4.5. Дедуп по каноническому ключу: дубля нет', dup[0].c === 1, `активных: ${dup[0].c}`);
 }
 
-// ---- 5. Генерация черновика (LLM) -------------------------------------------
-async function layerGenerate() {
-  section('5. Генерация черновика схемы (LLM)');
-  try {
-    const { definition, issues } = await generateDomainDraft({
-      title: 'Поиск и покупка авиабилетов',
-      key: 'flights_gen',
-      description: 'перелёты, маршруты, пассажиры',
-      samples: ['ищу билет из Казани', 'не люблю ночные рейсы'],
-    });
-    check('5.1. Сгенерировано определение с сущностями',
-      !!definition && Array.isArray(definition.entities) && definition.entities.length >= 1,
-      `сущностей: ${definition?.entities?.length}`);
-    check('5.2. Ключ домена проставлен', definition.domain_key === 'flights_gen');
-    // Допускаем вариативность модели: если есть замечания, печатаем их, но это не провал генерации как таковой.
-    if (issues.length) console.log(`     · замечания мета-валидатора (ожидаемо для черновика): ${issues.slice(0, 3).join('; ')}`);
-    check('5.3. У каждой сущности есть закрытая схема data',
-      definition.entities.every((e) => e.data_schema && e.data_schema.additionalProperties === false));
-  } catch (err) {
-    check('5. Генерация черновика (LLM доступна)', false, err.message);
-  }
-}
-
-// ---- 6. Строгий второй проход извлечения (LLM) ------------------------------
+// ---- 5. Строгий второй проход извлечения (LLM) ------------------------------
 async function layerRefine() {
-  section('6. Строгий второй проход извлечения по схеме сущности');
-  // flights_test сохранён в layerRegistry. flight_preference: поля preferred_departure_city, avoid, cabin_class.
+  section('5. Строгий второй проход извлечения по схеме сущности');
   const cands = await extractCandidates({
-    domainKey: TEST_KEY,
+    skillName: 'flight-search',
+    domainKey: DOMAIN,
     recentMessages: 'user: Обычно вылетаю из Казани и не люблю ночные рейсы.',
     assistantResponse: 'Понял, учту при поиске.',
   });
-  const pref = cands.find((c) => c.entity_type === 'flight_preference');
-  if (!pref) {
-    console.log(`     · модель не выделила flight_preference (вариативность); кандидатов: ${cands.length}`);
-    check('6.1. Извлечён предметный кандидат с сущностью из схемы', cands.length > 0, 'нет кандидатов');
+  const subject = cands.find((c) => c.entity_type && ['city', 'flight_preference', 'trip'].includes(c.entity_type));
+  if (!subject) {
+    console.log(`     · модель не выделила предметную сущность (вариативность); кандидатов: ${cands.length}`);
+    check('5.1. Извлечён хотя бы один кандидат', cands.length > 0, 'нет кандидатов');
     return;
   }
-  const allowed = new Set(['preferred_departure_city', 'avoid', 'cabin_class']);
-  const keys = Object.keys(pref.data || {});
-  // Строгий проход даёт закрытый data: только поля схемы, без лишних ключей.
-  check('6.1. data заполнен строго по полям схемы сущности',
-    keys.length > 0 && keys.every((k) => allowed.has(k)), `ключи: ${keys.join(', ')}`);
-  // Полная запись проходит валидацию схемы без замечаний по data.
-  const v = await validateAndCanonicalize(TEST_KEY, pref);
-  check('6.2. Уточнённый кандидат валиден по схеме', v.ok, JSON.stringify(v.issues));
+  const spec = await getEntitySpec(DOMAIN, subject.entity_type);
+  const allowed = new Set(Object.keys(spec.data_schema.properties || {}));
+  const keys = Object.keys(subject.data || {});
+  check('5.1. data заполнен строго по полям схемы сущности',
+    keys.length > 0 && keys.every((k) => allowed.has(k)), `сущность ${subject.entity_type}, ключи: ${keys.join(', ')}`);
+  const v = await validateAndCanonicalize(DOMAIN, subject);
+  check('5.2. Уточнённый кандидат валиден по схеме', v.ok, JSON.stringify(v.issues));
 }
 
 async function main() {
-  console.log('Проверка слоя per-domain схем.\n');
+  console.log('Проверка слоя схем доменной памяти.\n');
   try {
     layerMeta();
-    await layerRegistry();
+    await layerSource();
     await layerValidate();
     await layerIntegration();
-    if (process.env.SCHEMA_SKIP_LLM === '1') console.log('\n(5–6 пропущены: SCHEMA_SKIP_LLM=1.)');
-    else { await layerGenerate(); await layerRefine(); }
+    if (process.env.SCHEMA_SKIP_LLM === '1') console.log('\n(5 пропущен: SCHEMA_SKIP_LLM=1.)');
+    else await layerRefine();
   } catch (err) {
     console.error('\nКритическая ошибка прогона:', err);
     failed++;
   }
-  console.log(`\n================ ИТОГ ================`);
+  console.log('\n================ ИТОГ ================');
   console.log(`Пройдено: ${passed}, провалено: ${failed}`);
   if (failures.length) console.log('Провалены:', failures.join('; '));
   await closePool();

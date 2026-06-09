@@ -14,13 +14,29 @@ export let toolMeta = Object.fromEntries(registry.map((tool) => [tool.name, { ti
 
 let TOOLS_BY_NAME = new Map(registry.map((tool) => [tool.name, tool]));
 
+// Имена базовых (системных) инструментов: память, планировщик, глобальная память, форма ответа, чтение
+// справочников. Они доступны всегда, если разрешены флагами и правами. Предметные инструменты (например,
+// инструменты MCP вроде search_flights) в реестр добавляются динамически и базовыми не считаются.
+const BASE_TOOL_NAMES = new Set(allTools.map((tool) => tool.name));
+
 export function toolTitle(name) {
   return toolMeta[name]?.title || name;
+}
+
+// Разрешён ли инструмент при активном skill. Базовые (системные) инструменты доступны всегда. Предметный
+// инструмент доступен только если он перечислен в tools.allowed активного skill. Если активного skill в
+// контексте нет (служебные вызовы вне ответа агенту), ограничение не применяется.
+function allowedForActiveSkill(toolName, ctx) {
+  if (BASE_TOOL_NAMES.has(toolName)) return true;
+  const skill = ctx.activeSkill;
+  if (!skill) return true;
+  return (skill.tools?.allowed || []).includes(toolName);
 }
 
 export function buildToolDefs(ctx = {}) {
   return registry
     .filter((tool) => (tool.isEnabled ? tool.isEnabled(ctx, config) : true))
+    .filter((tool) => allowedForActiveSkill(tool.name, ctx))
     .map((tool) => tool.definition);
 }
 

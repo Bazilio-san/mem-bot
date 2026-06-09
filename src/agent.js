@@ -19,6 +19,7 @@ import { buildHistoryContext } from './pipeline/history-context.js';
 import { buildGlobalFactsBlock } from './pipeline/global-memory.js';
 import { formatReactionToken } from './pipeline/reactions.js';
 import { recordUserInboundForContactPolicy } from './pipeline/proactiveContactPolicy.js';
+import { getSkill, getSkillByDomain } from './pipeline/skills/registry.js';
 
 const MAIN_SYSTEM = `Ты агентское приложение с инструментами и долговременной памятью.
 Правила:
@@ -364,9 +365,17 @@ export async function handleMessage({
   } catch {
     intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: {} };
   }
-  const effectiveDomain = intent.domain_key || domainKey;
+  // Разрешение активного skill. Источник истины — skill_name классификатора; если он не распознан,
+  // подбираем skill по доменному ключу, иначе берём запасной general. Доменный ключ для адресации памяти
+  // выводится из выбранного skill, а не из ответа модели.
+  const activeSkill = getSkill(intent.skill_name) || getSkillByDomain(intent.domain_key) || getSkill('general');
+  const effectiveDomain = activeSkill ? activeSkill.domain_key : (intent.domain_key || domainKey);
   ctx.domainKey = effectiveDomain;
+  ctx.skillName = activeSkill?.name || null;
+  ctx.activeSkill = activeSkill;
   eventMeta.domainKey = effectiveDomain;
+  // Модель основного ответа может быть переопределена активным skill (поле model.main), иначе глобальная.
+  const mainModel = (activeSkill?.model?.main) || config.llm.mainModel;
 
   // Этап 2: выборка памяти (только если нужна).
   let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
@@ -465,6 +474,19 @@ ${topicsBlock}
   // префикса промпта. Для канала без разметки (например, командной строки) инструкции нет.
   const channelInstruction = getChannelProfile(channel).instruction;
   const channelSystem = channelInstruction ? [{ role: 'system', content: channelInstruction }] : [];
+  // Блок активного skill: его инструкции из «# Skill Prompt». Стоит после стабильного префикса и памяти,
+  // но до истории и текущей реплики. Не заменяет общие правила и приоритет текущего запроса.
+  const activeSkillSystem = (activeSkill && activeSkill.skillPrompt)
+    ? [{
+      role: 'system',
+      content: `ACTIVE_SKILL_CONTEXT (справочные инструкции активного skill; текущий запрос важнее)
+
+Skill: ${activeSkill.name}
+Domain: ${activeSkill.domain_key}
+
+${activeSkill.skillPrompt}`,
+    }]
+    : [];
   // dateTimeSystem стоит в динамической зоне (последним system-блоком перед диалогом): его содержимое
   // меняется каждую минуту, поэтому держим его ниже стабильного префикса, чтобы не ломать кэширование.
   // GLOBAL_FACTS стоит сразу после стабильного MAIN_SYSTEM: он одинаков для всех пользователей и меняется
@@ -475,6 +497,7 @@ ${topicsBlock}
     ...(globalFactsBlock ? [{ role: 'system', content: globalFactsBlock }] : []),
     { role: 'system', content: memoryContext },
     ...(capabilitiesContext ? [{ role: 'system', content: capabilitiesContext }] : []),
+    ...activeSkillSystem,
     ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
     ...extraSystem,
     dateTimeSystem,
@@ -490,7 +513,7 @@ ${topicsBlock}
     await emit({ type: 'stage.started', stage: 'llm', title: 'Готовлю ответ' });
     const msg = await runModelTurn({
       streamingOn,
-      model: config.llm.mainModel,
+      model: mainModel,
       messages,
       tools,
       emit,
@@ -539,7 +562,7 @@ ${topicsBlock}
   const writeJob = (async () => {
     try {
       const candidates = await extractCandidates({
-        domainKey: effectiveDomain, recentMessages: recentText, assistantResponse: answer,
+        skillName: ctx.skillName, domainKey: effectiveDomain, recentMessages: recentText, assistantResponse: answer,
       });
       const result = await persistCandidates(user.id, effectiveDomain, candidates, conversation.id);
       // Извлечение и обновление тем диалога — только в режиме собеседника.

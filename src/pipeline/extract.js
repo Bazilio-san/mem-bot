@@ -4,6 +4,7 @@
 import { chatJSON } from '../llm.js';
 import { config } from '../config.js';
 import { loadDomainDefinition, getEntitySpec } from '../schema/registry.js';
+import { getFactExtractionPrompt, getSkill, getSkillByDomain } from './skills/registry.js';
 
 // Подсказка для первого прохода: если у домена есть схема, перечисляем его сущности и поля data,
 // чтобы модель сразу выбирала правильный entity_type. Для доменов без схемы возвращается пустая строка.
@@ -39,7 +40,7 @@ function buildEntityExtractionSchema(spec) {
 // Второй проход: перезаполнить data и entity_key кандидата строго по схеме его сущности.
 // Кандидат без entity_type или сущность вне схемы домена возвращаются без изменений
 // (на записи такой предметный факт всё равно будет отклонён, если сущности нет в схеме).
-async function refineCandidate(domainKey, candidate, contextText) {
+async function refineCandidate(domainKey, candidate, contextText, model = config.llm.extractModel) {
   if (!candidate.entity_type) return candidate;
   const spec = await getEntitySpec(domainKey, candidate.entity_type);
   if (!spec) return candidate;
@@ -53,7 +54,7 @@ memory_text — короткая человеческая фраза о факт
 
   try {
     const filled = await chatJSON({
-      model: config.llm.extractModel,
+      model,
       schema,
       schemaName: spec.entity_type,
       system,
@@ -73,10 +74,10 @@ memory_text — короткая человеческая фраза о факт
 
 // Прогнать все кандидаты через второй проход. Предметные кандидаты со схемой уточняются параллельно;
 // для домена без схемы список возвращается без изменений (второй проход не запускается).
-async function refineCandidates(domainKey, candidates, contextText) {
+async function refineCandidates(domainKey, candidates, contextText, model = config.llm.extractModel) {
   const def = await loadDomainDefinition(domainKey);
   if (!def) return candidates;
-  return Promise.all(candidates.map((c) => refineCandidate(domainKey, c, contextText)));
+  return Promise.all(candidates.map((c) => refineCandidate(domainKey, c, contextText, model)));
 }
 
 const SCHEMA = {
@@ -156,13 +157,21 @@ const SYSTEM = `Ты извлекаешь кандидаты в долговре
 Сообщение «Мой паспорт 1234 567890» →
   candidates:[{scope:"domain",memory_kind:"secure_reference",memory_text:"У пользователя есть паспорт (полное значение не хранить как обычный факт)",importance:0.7,confidence:0.9,sensitivity:"secret",requires_confirmation:true,...}]`;
 
-export async function extractCandidates({ domainKey, recentMessages, assistantResponse }) {
+export async function extractCandidates({ skillName = null, domainKey, recentMessages, assistantResponse }) {
   const schemaHint = await buildSchemaHint(domainKey);
+  // Дополнение активного skill объясняет, какие факты полезны именно в этом домене; схема ниже задаёт форму.
+  // Skill берётся по имени из роутера, а при его отсутствии (например, путь реакций) — по доменному ключу.
+  const skill = skillName ? getSkill(skillName) : getSkillByDomain(domainKey);
+  const extractModel = skill?.model?.extract || config.llm.extractModel;
+  const skillExtraction = skill ? getFactExtractionPrompt(skill.name) : '';
+  const skillBlock = skillExtraction
+    ? `\n\nACTIVE_SKILL_FACT_EXTRACTION (дополнение активного skill)\n${skillExtraction}`
+    : '';
   const result = await chatJSON({
-    model: config.llm.extractModel,
+    model: extractModel,
     schema: SCHEMA,
     schemaName: 'memory_candidates',
-    system: SYSTEM + schemaHint,
+    system: SYSTEM + skillBlock + schemaHint,
     user: `Домен: ${domainKey}
 
 Последние сообщения:
@@ -173,7 +182,7 @@ ${assistantResponse}`,
   });
   const candidates = result.candidates || [];
   // Второй проход: для предметных кандидатов со схемой перезаполняем data/entity_key строго по схеме сущности.
-  return refineCandidates(domainKey, candidates, `${recentMessages}\n${assistantResponse}`);
+  return refineCandidates(domainKey, candidates, `${recentMessages}\n${assistantResponse}`, extractModel);
 }
 
 // Извлечение тем диалога для тематического трекинга (критерий 13). Возвращает массив тем с оценкой

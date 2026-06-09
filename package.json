@@ -27,12 +27,12 @@
     "test:telegram-format": "node tests/telegram-format.test.mjs",
     "test:progress-format": "node tests/progress-format.test.mjs",
     "test:tts-strip": "node tests/tts-strip.test.mjs",
+    "test:skills": "node tests/skills.test.mjs",
     "check:llm": "node tests/check-llm.js",
     "check:streaming": "node tests/check-streaming.js",
-    "schema:generate": "node src/schema/cli.js generate",
-    "schema:save": "node src/schema/cli.js save",
-    "schema:list": "node src/schema/cli.js list",
-    "schema:show": "node src/schema/cli.js show"
+    "skills:validate": "node src/pipeline/skills/cli.js validate",
+    "skills:list": "node src/pipeline/skills/cli.js list",
+    "skills:sync": "node src/pipeline/skills/cli.js sync"
   },
   "private": true,
   "dependencies": {
