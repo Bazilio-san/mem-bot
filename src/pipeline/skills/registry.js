@@ -136,6 +136,16 @@ export function invalidateSkillsCache() {
   cache = null;
 }
 
+// Разобрать один каталог навыка в полный объект (для инструментария редактирования: пере-разбор одного навыка).
+export function parseSkillDir(dir, name) {
+  return loadOneSkill(dir, name);
+}
+
+// Все навыки реестра полными объектами (для проверок уникальности при создании и редактировании).
+export function getAllSkills() {
+  return [...loadSkills().byName.values()];
+}
+
 // Компактный список для роутера: только поля, нужные классификатору.
 export function listSkillRoutes() {
   const { byName } = loadSkills();

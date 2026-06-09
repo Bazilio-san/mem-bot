@@ -34,6 +34,7 @@
     "test:progress-format": "node tests/progress-format.test.mjs",
     "test:tts-strip": "node tests/tts-strip.test.mjs",
     "test:skills": "node tests/skills.test.mjs",
+    "test:skill-authoring": "node tests/skill-authoring.test.mjs",
     "check:llm": "node tests/check-llm.js",
     "check:streaming": "node tests/check-streaming.js",
     "skills:validate": "node src/pipeline/skills/cli.js validate",

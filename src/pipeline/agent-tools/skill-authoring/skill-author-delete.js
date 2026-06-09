@@ -1,0 +1,26 @@
+import { deleteSkill } from '../../skills/writer.js';
+import { authoringEnabled } from '../../skills/authoring-support.js';
+
+// Удалить каталог навыка целиком (требует подтверждения; general и skill-author защищены).
+export const skillAuthorDeleteTool = {
+  name: 'skill_author_delete',
+  title: 'Удаление навыка',
+  requiresAdmin: true,
+  isEnabled: authoringEnabled,
+  definition: {
+    type: 'function',
+    function: {
+      name: 'skill_author_delete',
+      description: 'Delete a skill directory entirely. Requires confirm=true. The general and skill-author '
+        + 'skills cannot be deleted.',
+      parameters: {
+        type: 'object', additionalProperties: false, required: ['name', 'confirm'],
+        properties: { name: { type: 'string' }, confirm: { type: 'boolean' } },
+      },
+    },
+  },
+  async handler(ctx, args) {
+    if (args.confirm !== true) return { removed: false, error: 'Нужно подтверждение confirm=true.' };
+    return deleteSkill(args.name, { confirm: true });
+  },
+};

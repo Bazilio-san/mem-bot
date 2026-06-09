@@ -105,6 +105,12 @@ export const config = {
     switchThreshold: Number(env.SKILLS_SWITCH_THRESHOLD || 0.65),
     // Предел размера одного справочника, читаемого инструментом skill_read_reference (в байтах).
     referenceMaxBytes: Number(env.SKILL_REFERENCE_MAX_BYTES || 50000),
+    // Инструментарий создания и редактирования навыков моделью. Доступен только администраторам и только при
+    // включённом флаге. Модель генерации пуста по умолчанию — тогда берётся config.llm.mainModel.
+    authoring: {
+      enabled: flag(env.SKILL_AUTHORING_ENABLED, false),
+      model: env.SKILL_AUTHORING_MODEL || null,
+    },
   },
 
   // Жёсткие лимиты минимизации памяти: сколько фактов каждой области попадает в промпт (раздел 10.7 архитектуры).
