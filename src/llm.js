@@ -1,7 +1,7 @@
-// Клиент к LLM через OpenAI-совместимый LiteLLM-прокси.
-// Используется Chat Completions API (а не Responses API), потому что он надёжно
-// поддерживается прокси. Доступны три операции: обычный чат с инструментами,
-// чат со строгим JSON по схеме и получение эмбеддингов.
+// Клиент к LLM через OpenAI SDK. Если OPENAI_BASE_URL задан, SDK работает с OpenAI-совместимым прокси
+// вроде LiteLLM; если не задан, обращается напрямую к OpenAI API.
+// Используется Chat Completions API (а не Responses API), потому что он совместим с обоими режимами.
+// Доступны три операции: обычный чат с инструментами, чат со строгим JSON по схеме и получение эмбеддингов.
 import OpenAI from 'openai';
 import { config, debugEnabled } from './config.js';
 
@@ -96,7 +96,7 @@ export async function chatStream({ model = config.llm.mainModel, messages, tools
 
 // Чат со структурированным выводом по JSON Schema. Возвращает разобранный объект.
 // Используется режим json_object с описанием схемы прямо в промпте: строгий режим
-// json_schema на этом LiteLLM-прокси отклоняет схемы со свободными полями (data, entities),
+// json_schema в strict-режиме отклоняет схемы со свободными полями (data, entities),
 // поэтому надёжнее задавать схему текстом и требовать соответствия ей.
 export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result' }) {
   const schemaText = JSON.stringify(schema);

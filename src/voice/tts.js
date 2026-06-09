@@ -2,7 +2,7 @@
 // Модуль относится к канальному слою: ядро ИИ-бота про него не знает и его не вызывает. Здесь собраны
 // три обязанности голосовой доставки, скрытые от адаптера за простыми функциями:
 //   1) выбор текста для озвучивания (целиком короткий ответ либо краткое резюме длинного/со списками/кодом);
-//   2) сам синтез речи через OpenAI-совместимый прокси (конечная точка audio/speech), возвращающий байты OGG/OPUS;
+//   2) сам синтез речи через OpenAI-compatible audio/speech, возвращающий байты OGG/OPUS;
 //   3) вспомогательные проверки разметки и соблюдение жёсткого лимита длины.
 // Поставщик и модель скрыты внутри: при необходимости их меняют через конфигурацию, не трогая адаптер.
 import { config } from '../config.js';
@@ -88,13 +88,14 @@ export async function buildVoiceText(answer, opts = {}) {
 }
 
 // Синтезировать речь из текста и вернуть байты голосового сообщения в формате OGG/OPUS.
-// Запрос идёт напрямую (fetch) к конечной точке audio/speech того же прокси, что и остальные вызовы модели.
-// Прокси периодически обрывает соединение по тайм-ауту, поэтому делаем несколько повторных попыток. Заголовок
-// content-type ответа у прокси недостоверен (всегда audio/mpeg), поэтому ориентируемся на запрошенный формат.
+// Запрос идёт напрямую (fetch) к конечной точке audio/speech выбранного base URL: OPENAI_BASE_URL для прокси
+// или https://api.openai.com/v1 для прямого OpenAI API. Некоторые прокси периодически обрывают соединение по
+// тайм-ауту, поэтому делаем несколько повторных попыток. Заголовок content-type у прокси может быть
+// недостоверен, поэтому ориентируемся на запрошенный формат.
 // Параметр opts.fetch позволяет подменить сеть в тестах; по умолчанию используется глобальный fetch.
 export async function synthesizeSpeech(text, opts = {}) {
   const fetchImpl = opts.fetch || globalThis.fetch;
-  const baseURL = config.llm.baseURL.replace(/\/$/, '');
+  const baseURL = (config.llm.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
   const url = `${baseURL}/audio/speech`;
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -117,7 +118,7 @@ export async function synthesizeSpeech(text, opts = {}) {
         throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
       }
       const buf = Buffer.from(await res.arrayBuffer());
-      if (!buf.length) throw new Error('прокси вернул пустой аудиоответ');
+      if (!buf.length) throw new Error('провайдер TTS вернул пустой аудиоответ');
       return buf;
     } catch (err) {
       lastErr = err;

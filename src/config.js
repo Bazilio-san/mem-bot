@@ -1,15 +1,18 @@
 // Конфигурация приложения. Значения берутся из .env.
-// Модели соответствуют рекомендациям архитектуры и проверены через LiteLLM-прокси
+// LLM-клиент использует OpenAI API напрямую, если OPENAI_BASE_URL не задан. Если переменная задана, все вызовы
+// идут в OpenAI-совместимый прокси по этому адресу, например в LiteLLM. Модели ниже проверялись на таком прокси
 // скриптом tests/check-llm.js (все отвечают 5/5: чат, JSON, инструменты, эмбеддинги):
 //   основной агент и извлечение фактов : gpt-5.4-mini
 //   классификация запроса              : gpt-5.4-nano
 //   эмбеддинги                         : text-embedding-3-small (1536 измерений)
 // Любую модель можно переопределить переменными окружения MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL/EMBED_MODEL.
-// Замечание по скорости: на этом прокси gpt-5.4-* отвечают за ~5–10 с, а gpt-4o-mini — за ~1.2 с;
-// если нужен максимально быстрый отклик, задайте MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL=gpt-4o-mini.
+// Замечание по скорости относится к проверенному прокси: gpt-5.4-* отвечают за ~5–10 с, а gpt-4o-mini — за
+// ~1.2 с; если нужен максимально быстрый отклик, задайте MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL=gpt-4o-mini.
 import 'dotenv/config';
 
 const env = process.env;
+const openaiBaseURL = env.OPENAI_BASE_URL?.trim() || undefined;
+const defaultVoiceOutputModel = openaiBaseURL ? 'openai/gpt-4o-mini-tts' : 'gpt-4o-mini-tts';
 
 // Чтение булевых флагов из окружения. Включают значения 1/true/on/yes; всё прочее — выключено.
 const flag = (v, d = false) =>
@@ -34,9 +37,9 @@ export const config = {
 
   llm: {
     apiKey: env.OPENAI_API_KEY,
-    // Адрес LLM-провайдера. Если OPENAI_BASE_URL не задан (или закомментирован), прокси не используется:
-    // baseURL остаётся пустым, и клиент OpenAI обращается напрямую к стандартному https://api.openai.com/v1.
-    baseURL: env.OPENAI_BASE_URL?.trim() || undefined,
+    // Адрес LLM-провайдера. Если OPENAI_BASE_URL задан, клиент OpenAI отправляет запросы в этот
+    // OpenAI-совместимый прокси. Если не задан, SDK использует прямой API https://api.openai.com/v1.
+    baseURL: openaiBaseURL,
     // Основной агент: отвечает пользователю и вызывает инструменты.
     mainModel: env.MAIN_MODEL || 'gpt-5.4-mini',
     // Вспомогательная быстрая модель: классификация запроса.
@@ -126,11 +129,11 @@ export const config = {
   // Голосовой ответ бота (текст в речь, TTS). Канальная настройка Telegram-адаптера: ядро лишь хранит и
   // возвращает предпочтение формы ответа, а сам синтез и доставка голосом живут в канале. По умолчанию
   // выключено — при выключенном флаге инструмент set_reply_mode не подключается и бот отвечает текстом.
-  // Синтез идёт через тот же OpenAI-совместимый прокси (конечная точка audio/speech), что подтверждено
-  // практической проверкой: прокси отдаёт модель gpt-4o-mini-tts и формат OGG/OPUS без перекодировки.
+  // Синтез использует тот же OpenAI-compatible base URL: OPENAI_BASE_URL ведёт в прокси, пустое значение —
+  // напрямую в OpenAI API. Проверенный LiteLLM-прокси отдаёт gpt-4o-mini-tts и OGG/OPUS без перекодировки.
   voiceOutput: {
     enabled: flag(env.VOICE_OUTPUT_ENABLED, false),
-    model: env.VOICE_OUTPUT_MODEL || 'openai/gpt-4o-mini-tts',  // модель синтеза речи на прокси
+    model: env.VOICE_OUTPUT_MODEL || defaultVoiceOutputModel,   // модель TTS для выбранного base URL
     voice: env.VOICE_OUTPUT_VOICE || 'alloy',                  // тембр (язык подстраивается под текст ответа)
     format: env.VOICE_OUTPUT_FORMAT || 'opus',                 // OGG/OPUS — прямая отправка в Telegram sendVoice
     // Жёсткий предел длины текста, отправляемого в синтез. Значение по умолчанию и максимум — 500 символов:
