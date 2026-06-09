@@ -8,15 +8,21 @@ import { config, debugEnabled } from './config.js';
 const client = new OpenAI({ apiKey: config.llm.apiKey, baseURL: config.llm.baseURL });
 
 function dbg(...args) {
-  if (debugEnabled('llm')) console.error('[llm]', ...args);
+  if (debugEnabled('llm')) {
+    console.error('[llm]', ...args);
+  }
 }
 
 // Чат с поддержкой инструментов. Возвращает объект message ответа модели
 // (с полями content и tool_calls), чтобы вызывающий код мог отработать цикл инструментов.
 export async function chat({ model = config.llm.mainModel, messages, tools, toolChoice }) {
   const body = { model, messages };
-  if (tools && tools.length) body.tools = tools;
-  if (toolChoice) body.tool_choice = toolChoice;
+  if (tools && tools.length) {
+    body.tools = tools;
+  }
+  if (toolChoice) {
+    body.tool_choice = toolChoice;
+  }
   dbg('chat ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
   const res = await client.chat.completions.create(body);
   const msg = res.choices[0].message;
@@ -38,8 +44,12 @@ export function createDeltaAccumulator() {
 
 // Добавить одну delta (содержимое choices[0].delta из очередного chunk) в аккумулятор.
 export function accumulateChatDelta(acc, delta) {
-  if (!delta) return acc;
-  if (delta.content) acc.content += delta.content;
+  if (!delta) {
+    return acc;
+  }
+  if (delta.content) {
+    acc.content += delta.content;
+  }
   if (Array.isArray(delta.tool_calls)) {
     for (const part of delta.tool_calls) {
       const index = part.index ?? acc.tool_calls.length;
@@ -48,10 +58,18 @@ export function accumulateChatDelta(acc, delta) {
         slot = { id: '', type: 'function', function: { name: '', arguments: '' } };
         acc.tool_calls[index] = slot;
       }
-      if (part.id) slot.id = part.id;
-      if (part.type) slot.type = part.type;
-      if (part.function?.name) slot.function.name += part.function.name;
-      if (part.function?.arguments) slot.function.arguments += part.function.arguments;
+      if (part.id) {
+        slot.id = part.id;
+      }
+      if (part.type) {
+        slot.type = part.type;
+      }
+      if (part.function?.name) {
+        slot.function.name += part.function.name;
+      }
+      if (part.function?.arguments) {
+        slot.function.arguments += part.function.arguments;
+      }
     }
   }
   return acc;
@@ -62,7 +80,9 @@ export function accumulateChatDelta(acc, delta) {
 export function finalizeChatMessage(acc) {
   const message = { role: 'assistant', content: acc.content };
   const calls = acc.tool_calls.filter(Boolean);
-  if (calls.length) message.tool_calls = calls;
+  if (calls.length) {
+    message.tool_calls = calls;
+  }
   return message;
 }
 
@@ -72,8 +92,12 @@ export function finalizeChatMessage(acc) {
 // не разбираются — это делает вызывающий код после получения готового сообщения.
 export async function chatStream({ model = config.llm.mainModel, messages, tools, toolChoice, onDelta }) {
   const body = { model, messages, stream: true };
-  if (tools && tools.length) body.tools = tools;
-  if (toolChoice) body.tool_choice = toolChoice;
+  if (tools && tools.length) {
+    body.tools = tools;
+  }
+  if (toolChoice) {
+    body.tool_choice = toolChoice;
+  }
   dbg('chatStream ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
 
   const stream = await client.chat.completions.create(body);
@@ -83,11 +107,17 @@ export async function chatStream({ model = config.llm.mainModel, messages, tools
   for await (const chunk of stream) {
     chunks++;
     const choice = chunk.choices?.[0];
-    if (!choice) continue;
+    if (!choice) {
+      continue;
+    }
     const delta = choice.delta || {};
-    if (delta.content && onDelta) await onDelta(delta.content);
+    if (delta.content && onDelta) {
+      await onDelta(delta.content);
+    }
     accumulateChatDelta(acc, delta);
-    if (choice.finish_reason) finishReason = choice.finish_reason;
+    if (choice.finish_reason) {
+      finishReason = choice.finish_reason;
+    }
   }
   const message = finalizeChatMessage(acc);
   dbg('chatStream <-', 'chunks:', chunks, 'finish:', finishReason, 'tool_calls:', message.tool_calls?.length || 0);
@@ -115,13 +145,15 @@ ${schemaText}
     ],
     response_format: { type: 'json_object' },
   });
-  const content = res.choices[0].message.content;
+  const { content } = res.choices[0].message;
   try {
     return JSON.parse(content);
   } catch {
     // На случай, если модель всё же обернула JSON в текст — вырезаем первый объект.
     const m = content.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
+    if (m) {
+      return JSON.parse(m[0]);
+    }
     throw new Error('Модель вернула не-JSON: ' + content.slice(0, 200));
   }
 }

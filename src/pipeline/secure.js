@@ -43,8 +43,13 @@ export function redact(recordType, rawValue) {
 // но помечены как требующие подтверждения. consentStatus='granted' ставится только
 // при явном согласии пользователя.
 export async function saveSecureRecord({
-  userId, domainKey = 'general', recordType, subjectKey = null, displayName = null,
-  rawValue, consentStatus = 'unknown',
+  userId,
+  domainKey = 'general',
+  recordType,
+  subjectKey = null,
+  displayName = null,
+  rawValue,
+  consentStatus = 'unknown',
 }) {
   const domainId = await getDomainId(domainKey);
   const encrypted = encrypt(rawValue);
@@ -89,7 +94,9 @@ export async function getSecureValue(secureRecordId, purpose) {
   }
   const { rows } = await query('SELECT * FROM mem.secure_records WHERE id = $1', [secureRecordId]);
   const rec = rows[0];
-  if (!rec) throw new Error('Защищённая запись не найдена.');
+  if (!rec) {
+    throw new Error('Защищённая запись не найдена.');
+  }
   if (rec.consent_status !== 'granted') {
     throw new Error('Нет согласия пользователя на использование этих данных.');
   }

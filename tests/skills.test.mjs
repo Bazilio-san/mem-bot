@@ -5,8 +5,14 @@ import assert from 'node:assert';
 import { config } from '../src/config.js';
 import { parseFrontmatter, splitSkillFile, extractSection, extractJsonBlock } from '../src/pipeline/skills/parse.js';
 import {
-  loadSkills, listSkillRoutes, getSkill, getSkillByDomain,
-  getSkillPrompt, getFactExtractionPrompt, getDomainSchema, getReference,
+  loadSkills,
+  listSkillRoutes,
+  getSkill,
+  getSkillByDomain,
+  getSkillPrompt,
+  getFactExtractionPrompt,
+  getDomainSchema,
+  getReference,
 } from '../src/pipeline/skills/registry.js';
 import { buildToolDefs } from '../src/pipeline/tools.js';
 import { skillReadReferenceTool } from '../src/pipeline/agent-tools/skill-read-reference.js';
@@ -149,7 +155,9 @@ check('skill_read_reference выключен без активного skill', (
 });
 
 check('buildToolDefs включает skill_read_reference для flight-search и прячет для math-tutor', () => {
-  const flightDefs = buildToolDefs({ isAdmin: false, activeSkill: getSkill('flight-search') }).map((d) => d.function.name);
+  const flightDefs = buildToolDefs({ isAdmin: false, activeSkill: getSkill('flight-search') }).map(
+    (d) => d.function.name,
+  );
   const mathDefs = buildToolDefs({ isAdmin: false, activeSkill: getSkill('math-tutor') }).map((d) => d.function.name);
   assert.ok(flightDefs.includes('skill_read_reference'), 'нет skill_read_reference у flight-search');
   assert.ok(!mathDefs.includes('skill_read_reference'), 'лишний skill_read_reference у math-tutor');

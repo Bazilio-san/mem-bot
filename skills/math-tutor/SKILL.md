@@ -2,7 +2,7 @@
 name: math-tutor
 domain_key: math_tutor
 title: Репетитор по математике
-description: Помощь с математикой: объяснение тем, разбор ошибок и отслеживание прогресса ученика.
+description: Помощь с математикой - объяснение тем, разбор ошибок и отслеживание прогресса ученика.
 enabled: true
 classification:
   when_to_use: >

@@ -15,27 +15,39 @@ async function loadFacts(userId, domainId) {
       WHERE user_id = $1 AND status = 'active'
         AND sensitivity IN ('public','low','normal')
         AND (scope = 'profile' OR (scope = 'domain' AND domain_id = $2))
-      ORDER BY importance DESC, updated_at DESC LIMIT 15`, [userId, domainId]);
+      ORDER BY importance DESC, updated_at DESC LIMIT 15`,
+    [userId, domainId],
+  );
   return rows.length ? rows.map((r) => `- (${r.memory_kind}) ${r.memory_text}`).join('\n') : '(фактов почти нет)';
 }
 
 const TASK_BY_TRIGGER = {
   daily_checkin: 'Утренний короткий тёплый чек-ин, чтобы по-доброму начать день.',
   goal_reminder: 'Аккуратно напомни про цель или мягко спроси о прогрессе, без давления.',
-  welcome_back: 'Пользователь вернулся после паузы. Поприветствуй возвращение и предложи ОДНУ интересную тему ' +
+  welcome_back:
+    'Пользователь вернулся после паузы. Поприветствуй возвращение и предложи ОДНУ интересную тему ' +
     'на основе его интересов — не перечисляй всё, что знаешь.',
   inactivity: 'Пользователь давно не писал. Мягко начни разговор без давления и без упрёка за молчание.',
 };
 
 export async function buildProactiveMessage({
-  userId, domainKey, triggerType, timezone, candidate = null, contactMode = 'active',
+  userId,
+  domainKey,
+  triggerType,
+  timezone,
+  candidate = null,
+  contactMode = 'active',
 }) {
   const domainId = await getDomainId(domainKey);
   const facts = await loadFacts(userId, domainId);
   const tctx = buildTemporalContext(timezone, await getLastUserMessageTime(userId));
   const temporal = `${formatDateTime(tctx)}\n${formatTemporalContext(tctx)}`;
   let topics = 'Нет данных о темах.';
-  try { topics = formatTopicContext(await getTopicContext(userId, domainId)); } catch { /* темы опциональны */ }
+  try {
+    topics = formatTopicContext(await getTopicContext(userId, domainId));
+  } catch {
+    /* темы опциональны */
+  }
 
   const system = `# Роль
 
@@ -148,7 +160,10 @@ ${facts}`;
 Задача: ${TASK_BY_TRIGGER[triggerType] || TASK_BY_TRIGGER.inactivity}`;
   const msg = await chat({
     model: config.llm.mainModel,
-    messages: [{ role: 'system', content: system }, { role: 'user', content: userPrompt }],
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: userPrompt },
+    ],
   });
   return msg.content || '';
 }

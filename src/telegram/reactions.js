@@ -41,7 +41,9 @@ export const TELEGRAM_REACTION_KEYS = REACTION_KEYS.filter((key) => key in keyTo
 // Привести входящую реакцию Telegram (объект из обновления message_reaction) к абстрактному ключу.
 // Возвращает null, если это не эмодзи-реакция или эмодзи не отображается ни на один известный ключ.
 export function normalizeTelegramReaction(reaction) {
-  if (!reaction || reaction.type !== 'emoji') return null;
+  if (!reaction || reaction.type !== 'emoji') {
+    return null;
+  }
   return emojiToKey.get(reaction.emoji) || null;
 }
 

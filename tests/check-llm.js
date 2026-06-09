@@ -36,12 +36,18 @@ async function runSuite(provider) {
   const MODEL = provider.model;
   const EMBED_MODEL = provider.embedModel;
 
-  let passed = 0, failed = 0;
+  let passed = 0,
+    failed = 0;
   const timings = [];
 
   function ok(name, cond, detail = '') {
-    if (cond) { passed++; console.log(`  ✅ ${name}`); }
-    else { failed++; console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`); }
+    if (cond) {
+      passed++;
+      console.log(`  ✅ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`);
+    }
   }
 
   // Замер времени одного запроса. Возвращает результат, печатает и копит длительность.
@@ -65,10 +71,12 @@ async function runSuite(provider) {
   async function checkChat() {
     console.log('\n[1] Обычный чат');
     try {
-      const res = await timed('чат', () => client.chat.completions.create({
-        model: MODEL,
-        messages: [{ role: 'user', content: 'Ответь одним словом: привет' }],
-      }));
+      const res = await timed('чат', () =>
+        client.chat.completions.create({
+          model: MODEL,
+          messages: [{ role: 'user', content: 'Ответь одним словом: привет' }],
+        }),
+      );
       const text = res.choices?.[0]?.message?.content || '';
       console.log('     ответ:', JSON.stringify(text).slice(0, 120));
       ok('Чат отвечает', text.length > 0);
@@ -80,14 +88,16 @@ async function runSuite(provider) {
   async function checkJsonObject() {
     console.log('\n[2] Структурный вывод (json_object)');
     try {
-      const res = await timed('json_object', () => client.chat.completions.create({
-        model: MODEL,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: 'Верни строго JSON-объект вида {"city":"...","ok":true}.' },
-          { role: 'user', content: 'Город — Казань.' },
-        ],
-      }));
+      const res = await timed('json_object', () =>
+        client.chat.completions.create({
+          model: MODEL,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: 'Верни строго JSON-объект вида {"city":"...","ok":true}.' },
+            { role: 'user', content: 'Город — Казань.' },
+          ],
+        }),
+      );
       const obj = JSON.parse(res.choices[0].message.content);
       console.log('     объект:', JSON.stringify(obj).slice(0, 160));
       ok('Возвращает валидный JSON-объект', typeof obj === 'object' && obj !== null);
@@ -99,20 +109,25 @@ async function runSuite(provider) {
   async function checkJsonSchema() {
     console.log('\n[3] Строгий json_schema (часто не работает на прокси)');
     try {
-      const res = await timed('json_schema', () => client.chat.completions.create({
-        model: MODEL,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'probe', strict: true,
-            schema: {
-              type: 'object', additionalProperties: false,
-              required: ['answer'], properties: { answer: { type: 'string' } },
+      const res = await timed('json_schema', () =>
+        client.chat.completions.create({
+          model: MODEL,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'probe',
+              strict: true,
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['answer'],
+                properties: { answer: { type: 'string' } },
+              },
             },
           },
-        },
-        messages: [{ role: 'user', content: 'Скажи слово «тест».' }],
-      }));
+          messages: [{ role: 'user', content: 'Скажи слово «тест».' }],
+        }),
+      );
       const obj = JSON.parse(res.choices[0].message.content);
       ok('json_schema strict поддержан', typeof obj.answer === 'string');
     } catch (err) {
@@ -127,24 +142,28 @@ async function runSuite(provider) {
     // Проверяем конкретное утверждение: строгий режим отвергает схемы, где у вложенного
     // объекта additionalProperties=true (как у наших полей data/entities). Ожидаем ошибку.
     try {
-      const res = await timed('json_schema_freeform', () => client.chat.completions.create({
-        model: MODEL,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'freeform', strict: true,
-            schema: {
-              type: 'object', additionalProperties: false,
-              required: ['data'],
-              properties: {
-                // Свободное поле: произвольные ключи. Несовместимо со strict-режимом OpenAI.
-                data: { type: 'object', additionalProperties: true },
+      const res = await timed('json_schema_freeform', () =>
+        client.chat.completions.create({
+          model: MODEL,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'freeform',
+              strict: true,
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['data'],
+                properties: {
+                  // Свободное поле: произвольные ключи. Несовместимо со strict-режимом OpenAI.
+                  data: { type: 'object', additionalProperties: true },
+                },
               },
             },
           },
-        },
-        messages: [{ role: 'user', content: 'Верни любой объект в поле data.' }],
-      }));
+          messages: [{ role: 'user', content: 'Верни любой объект в поле data.' }],
+        }),
+      );
       JSON.parse(res.choices[0].message.content);
       // Если прошло — значит свободные поля в strict ДОПУСТИМЫ (утверждение неверно).
       console.log('     свободное поле принято — strict со свободными полями работает');
@@ -159,23 +178,30 @@ async function runSuite(provider) {
   async function checkTool() {
     console.log('\n[4] Вызов инструмента (function calling)');
     try {
-      const res = await timed('инструмент', () => client.chat.completions.create({
-        model: MODEL,
-        tools: [{
-          type: 'function',
-          function: {
-            name: 'create_reminder',
-            description: 'Создать напоминание',
-            parameters: {
-              type: 'object', required: ['title', 'when'],
-              properties: { title: { type: 'string' }, when: { type: 'string' } },
+      const res = await timed('инструмент', () =>
+        client.chat.completions.create({
+          model: MODEL,
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'create_reminder',
+                description: 'Создать напоминание',
+                parameters: {
+                  type: 'object',
+                  required: ['title', 'when'],
+                  properties: { title: { type: 'string' }, when: { type: 'string' } },
+                },
+              },
             },
-          },
-        }],
-        messages: [{ role: 'user', content: 'Напомни мне завтра в 10 проверить цены.' }],
-      }));
+          ],
+          messages: [{ role: 'user', content: 'Напомни мне завтра в 10 проверить цены.' }],
+        }),
+      );
       const calls = res.choices[0].message.tool_calls || [];
-      if (calls.length) console.log('     вызов:', calls[0].function.name, calls[0].function.arguments.slice(0, 120));
+      if (calls.length) {
+        console.log('     вызов:', calls[0].function.name, calls[0].function.arguments.slice(0, 120));
+      }
       ok('Модель вызывает инструмент', calls.length >= 1);
     } catch (err) {
       ok('Модель вызывает инструмент', false, err.message);
@@ -189,7 +215,9 @@ async function runSuite(provider) {
     }
     console.log('\n[5] Эмбеддинги');
     try {
-      const res = await timed('эмбеддинги', () => client.embeddings.create({ model: EMBED_MODEL, input: 'тест эмбеддинга' }));
+      const res = await timed('эмбеддинги', () =>
+        client.embeddings.create({ model: EMBED_MODEL, input: 'тест эмбеддинга' }),
+      );
       const dim = res.data?.[0]?.embedding?.length || 0;
       console.log('     размерность вектора:', dim);
       ok(`Эмбеддинги работают (модель ${EMBED_MODEL})`, dim > 0);
@@ -235,7 +263,11 @@ async function main() {
   if (active.length) {
     const labels = [];
     for (const r of active) {
-      for (const t of r.timings) if (!labels.includes(t.label)) labels.push(t.label);
+      for (const t of r.timings) {
+        if (!labels.includes(t.label)) {
+          labels.push(t.label);
+        }
+      }
     }
 
     console.log(`\n============ СРАВНЕНИЕ СКОРОСТИ (мс) ============`);

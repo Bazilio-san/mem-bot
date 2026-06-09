@@ -58,10 +58,10 @@ export async function deleteGlobalFact(id) {
 
 // Включить или выключить факт без удаления.
 export async function setGlobalFactEnabled(id, enabled) {
-  const { rowCount } = await query(
-    'UPDATE mem.global_facts SET enabled = $2, updated_at = now() WHERE id = $1',
-    [id, enabled],
-  );
+  const { rowCount } = await query('UPDATE mem.global_facts SET enabled = $2, updated_at = now() WHERE id = $1', [
+    id,
+    enabled,
+  ]);
   return rowCount > 0;
 }
 
@@ -69,9 +69,13 @@ export async function setGlobalFactEnabled(id, enabled) {
 // или подходящих фактов нет. Источник доверенный (только администратор), поэтому факты подаются как
 // авторитетные общие сведения и политика — без обёртки «это недоверенная справка».
 export async function buildGlobalFactsBlock(domainKey) {
-  if (!config.globalMemory.factsEnabled) return '';
+  if (!config.globalMemory.factsEnabled) {
+    return '';
+  }
   const facts = await getActiveGlobalFacts({ domainKey });
-  if (!facts.length) return '';
+  if (!facts.length) {
+    return '';
+  }
   const lines = facts.map((f) => `- ${f.fact_text}`).join('\n');
   return `GLOBAL_FACTS (общие сведения и политика для всех пользователей)\n\n${lines}`;
 }
@@ -82,7 +86,9 @@ export async function buildGlobalFactsBlock(domainKey) {
 // сигнал. Учитывает домен (текущий или общий) и отсекает слабые совпадения порогом релевантности, чтобы в
 // контекст не попадали посторонние фрагменты.
 export async function searchGlobalKnowledge({
-  domainKey, query: userQuery, limit = config.globalMemory.ragLimit,
+  domainKey,
+  query: userQuery,
+  limit = config.globalMemory.ragLimit,
   minRelevance = config.globalMemory.ragMinRelevance,
 }) {
   const domainId = domainKey ? await getDomainId(domainKey) : null;
@@ -99,7 +105,9 @@ export async function searchGlobalKnowledge({
       [domainId, vectorToSql(vec), limit],
     );
     const strong = rows.filter((r) => Number(r.relevance) >= minRelevance);
-    if (strong.length) return strong;
+    if (strong.length) {
+      return strong;
+    }
     // Если по смыслу ничего сильного не нашлось — пробуем полнотекст ниже.
   }
 
@@ -118,7 +126,13 @@ export async function searchGlobalKnowledge({
 // Добавить текст в общую базу знаний. Считает эмбеддинг (если сервис доступен); при недоступности запись
 // всё равно создаётся и остаётся найденной полнотекстовым поиском.
 export async function addGlobalKnowledge({
-  title = null, content, domainKey = null, tags = [], importance = 0.5, source = null, createdBy = null,
+  title = null,
+  content,
+  domainKey = null,
+  tags = [],
+  importance = 0.5,
+  source = null,
+  createdBy = null,
 }) {
   const domainId = domainKey ? await getDomainId(domainKey) : null;
   const vec = await embed([title, content].filter(Boolean).join('. '));
@@ -144,9 +158,13 @@ export async function deleteGlobalKnowledge(id) {
 // Справочный блок GLOBAL_KNOWLEDGE для промпта. Возвращает пустую строку, если RAG выключен флагом или
 // релевантных фрагментов нет (чтобы не добавлять пустой блок и не делать лишних запросов к эмбеддингам).
 export async function buildGlobalKnowledgeBlock(domainKey, userQuery) {
-  if (!config.globalMemory.ragEnabled) return '';
+  if (!config.globalMemory.ragEnabled) {
+    return '';
+  }
   const hits = await searchGlobalKnowledge({ domainKey, query: userQuery });
-  if (!hits.length) return '';
+  if (!hits.length) {
+    return '';
+  }
   const lines = hits.map((h) => `- ${h.title ? h.title + ': ' : ''}${h.content}`).join('\n');
   return `GLOBAL_KNOWLEDGE (релевантные фрагменты общей базы знаний)\n\n${lines}`;
 }

@@ -27,11 +27,17 @@ function loadOneSkill(dir, name) {
   const { frontmatter: fm, body } = splitSkillFile(raw);
 
   const issues = [];
-  if (!fm.domain_key) issues.push(`skill «${name}»: во фронтматтере не задан domain_key.`);
+  if (!fm.domain_key) {
+    issues.push(`skill «${name}»: во фронтматтере не задан domain_key.`);
+  }
   const whenToUse = fm.classification?.when_to_use;
-  if (!whenToUse) issues.push(`skill «${name}»: не задан classification.when_to_use.`);
+  if (!whenToUse) {
+    issues.push(`skill «${name}»: не задан classification.when_to_use.`);
+  }
   const skillPrompt = extractSection(body, '# Skill Prompt');
-  if (!skillPrompt) issues.push(`skill «${name}»: отсутствует блок «# Skill Prompt».`);
+  if (!skillPrompt) {
+    issues.push(`skill «${name}»: отсутствует блок «# Skill Prompt».`);
+  }
 
   // Схема доменной памяти: из отдельного файла (memory.schema: *.json) или из блока ## Domain Schema.
   // Схема необязательна (домен может быть без предметных сущностей), но если задана — обязана быть валидной.
@@ -53,9 +59,13 @@ function loadOneSkill(dir, name) {
   // сущностей). Валидируем мета-схемой только определения с непустым списком сущностей.
   if (definition && Array.isArray(definition.entities) && definition.entities.length) {
     const { ok, issues: defIssues } = validateDefinition(definition);
-    if (!ok) issues.push(`skill «${name}»: схема домена невалидна:\n  - ${defIssues.join('\n  - ')}`);
+    if (!ok) {
+      issues.push(`skill «${name}»: схема домена невалидна:\n  - ${defIssues.join('\n  - ')}`);
+    }
     if (ok && definition.domain_key !== fm.domain_key) {
-      issues.push(`skill «${name}»: domain_key схемы «${definition.domain_key}» не совпадает с domain_key skill «${fm.domain_key}».`);
+      issues.push(
+        `skill «${name}»: domain_key схемы «${definition.domain_key}» не совпадает с domain_key skill «${fm.domain_key}».`,
+      );
     }
   } else {
     definition = null; // нет предметных сущностей — домен без схемы (свободные факты профиля)
@@ -100,7 +110,9 @@ function loadOneSkill(dir, name) {
 // Загрузить весь реестр skills из каталога. Идемпотентно: повторные вызовы возвращают кэш.
 // Бросает ошибку при дубликатах name/domain_key или при невалидном описании любого skill.
 export function loadSkills({ force = false } = {}) {
-  if (cache && !force) return cache;
+  if (cache && !force) {
+    return cache;
+  }
 
   const dir = skillsDir();
   const byName = new Map();
@@ -117,11 +129,17 @@ export function loadSkills({ force = false } = {}) {
 
   for (const entry of entries) {
     const skillDir = path.join(dir, entry.name);
-    if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) continue;
+    if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
+      continue;
+    }
     const skill = loadOneSkill(skillDir, entry.name);
-    if (byName.has(skill.name)) throw new Error(`Дублирующееся имя skill: «${skill.name}».`);
+    if (byName.has(skill.name)) {
+      throw new Error(`Дублирующееся имя skill: «${skill.name}».`);
+    }
     if (byDomain.has(skill.domain_key)) {
-      throw new Error(`Несколько skills претендуют на domain_key «${skill.domain_key}»: «${byDomain.get(skill.domain_key).name}» и «${skill.name}».`);
+      throw new Error(
+        `Несколько skills претендуют на domain_key «${skill.domain_key}»: «${byDomain.get(skill.domain_key).name}» и «${skill.name}».`,
+      );
     }
     byName.set(skill.name, skill);
     byDomain.set(skill.domain_key, skill);
@@ -149,15 +167,17 @@ export function getAllSkills() {
 // Компактный список для роутера: только поля, нужные классификатору.
 export function listSkillRoutes() {
   const { byName } = loadSkills();
-  return [...byName.values()].filter((s) => s.enabled).map((s) => ({
-    name: s.name,
-    domain_key: s.domain_key,
-    title: s.title,
-    description: s.description,
-    when_to_use: s.classification.when_to_use,
-    positive_signals: s.classification.positive_signals,
-    negative_signals: s.classification.negative_signals,
-  }));
+  return [...byName.values()]
+    .filter((s) => s.enabled)
+    .map((s) => ({
+      name: s.name,
+      domain_key: s.domain_key,
+      title: s.title,
+      description: s.description,
+      when_to_use: s.classification.when_to_use,
+      positive_signals: s.classification.positive_signals,
+      negative_signals: s.classification.negative_signals,
+    }));
 }
 
 // Полное описание skill по имени.
@@ -194,8 +214,12 @@ export function getDomainDefinitionByKey(domainKey) {
 // Возвращает содержимое файла, обрезанное до config.skills.referenceMaxBytes. Бросает ошибку при нарушении.
 export function getReference(name, relPath) {
   const skill = getSkill(name);
-  if (!skill) throw new Error(`Неизвестный skill: «${name}».`);
-  if (!skill.references.allowed) throw new Error(`У skill «${name}» чтение справочников выключено.`);
+  if (!skill) {
+    throw new Error(`Неизвестный skill: «${name}».`);
+  }
+  if (!skill.references.allowed) {
+    throw new Error(`У skill «${name}» чтение справочников выключено.`);
+  }
 
   const rel = String(relPath || '').replace(/\\/g, '/');
   if (!rel || path.isAbsolute(rel) || rel.split('/').includes('..')) {

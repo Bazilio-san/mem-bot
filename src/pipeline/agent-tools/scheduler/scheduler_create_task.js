@@ -13,8 +13,17 @@ such as weekdays at 09:00 (cron_expr="0 9 * * 1-5"), and rrule for complex iCale
       parameters: {
         type: 'object',
         additionalProperties: false,
-        required: ['task_type', 'title', 'instruction', 'schedule_kind', 'timezone', 'run_at', 'interval_seconds',
-          'cron_expr', 'rrule'],
+        required: [
+          'task_type',
+          'title',
+          'instruction',
+          'schedule_kind',
+          'timezone',
+          'run_at',
+          'interval_seconds',
+          'cron_expr',
+          'rrule',
+        ],
         properties: {
           task_type: {
             type: 'string',
@@ -39,11 +48,13 @@ Prefer "Reminding you, you wanted to call mom" over "Remind the user to call mom
           timezone: { type: ['string', 'null'], description: 'User IANA timezone, for example Europe/Moscow.' },
           cron_expr: {
             type: ['string', 'null'],
-            description: 'Cron expression for cron schedules. Weekdays at 09:00: "0 9 * * 1-5"; monthly on day 1 at 10:00: "0 10 1 * *".',
+            description:
+              'Cron expression for cron schedules. Weekdays at 09:00: "0 9 * * 1-5"; monthly on day 1 at 10:00: "0 10 1 * *".',
           },
           rrule: {
             type: ['string', 'null'],
-            description: 'iCalendar RRULE for rrule schedules, for example "RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=10;BYMINUTE=0".',
+            description:
+              'iCalendar RRULE for rrule schedules, for example "RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=10;BYMINUTE=0".',
           },
         },
       },

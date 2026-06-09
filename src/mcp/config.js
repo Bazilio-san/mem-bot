@@ -23,11 +23,11 @@ function normalizeServer(alias, raw) {
     return null;
   }
   return {
-    alias,                                   // короткий префикс, попадёт в имена инструментов модели
-    title: raw.title || alias,               // человекочитаемое имя для журналов и статусов
+    alias, // короткий префикс, попадёт в имена инструментов модели
+    title: raw.title || alias, // человекочитаемое имя для журналов и статусов
     url: raw.url,
-    headers: raw.headers || null,            // заголовки транспорта — место для будущего токена авторизации
-    enabled: raw.disabled !== true,          // совместимо с полем «disabled» из формата Claude Code
+    headers: raw.headers || null, // заголовки транспорта — место для будущего токена авторизации
+    enabled: raw.disabled !== true, // совместимо с полем «disabled» из формата Claude Code
     requiresAdmin: raw.requiresAdmin === true,
   };
 }
@@ -39,7 +39,9 @@ export function loadMcpServers() {
   try {
     text = readFileSync(CONFIG_PATH, 'utf8');
   } catch (err) {
-    if (err.code === 'ENOENT') return [];    // файла нет — это штатная ситуация, не ошибка
+    if (err.code === 'ENOENT') {
+      return [];
+    } // файла нет — это штатная ситуация, не ошибка
     console.error(`MCP: не удалось прочитать ${CONFIG_PATH}: ${err.message}. MCP-серверы отключены.`);
     return [];
   }

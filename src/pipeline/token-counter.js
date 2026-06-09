@@ -7,7 +7,9 @@
 // Заниженная оценка опасна: сжатие запустится слишком поздно, и холодная зона раздуется сверх порога.
 // Для срабатывания порога безопаснее завышать оценку, чем занижать.
 export function estimateTokens(text) {
-  if (!text) return 0;
+  if (!text) {
+    return 0;
+  }
   const chars = String(text).length;
   const hasCyrillic = /[Ѐ-ӿ]/.test(text);
   const charsPerToken = hasCyrillic ? 3 : 4;
@@ -28,8 +30,12 @@ export function sumMessageTokens(messages = []) {
 // Размер уже существующей активной сводки в токенах. Берём сохранённое значение, если оно есть,
 // иначе оцениваем по тексту сводки.
 export function estimateSummaryTokens(summary) {
-  if (!summary) return 0;
+  if (!summary) {
+    return 0;
+  }
   const known = Number(summary.summary_token_count);
-  if (Number.isFinite(known) && known > 0) return known;
+  if (Number.isFinite(known) && known > 0) {
+    return known;
+  }
   return estimateTokens(summary.summary_text || '');
 }

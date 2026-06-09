@@ -26,8 +26,15 @@ let wakeUp = null;
 // Прерываемый сон: завершается либо по тайм-ауту, либо когда пришло уведомление о новой задаче.
 function sleep(ms) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => { wakeUp = null; resolve(); }, ms);
-    wakeUp = () => { clearTimeout(timer); wakeUp = null; resolve(); };
+    const timer = setTimeout(() => {
+      wakeUp = null;
+      resolve();
+    }, ms);
+    wakeUp = () => {
+      clearTimeout(timer);
+      wakeUp = null;
+      resolve();
+    };
   });
 }
 
@@ -52,28 +59,44 @@ async function loop() {
   await initTools();
 
   // Подписка на уведомления о появлении новых задач: вставка задачи будит воркер немедленно.
-  const listener = createListener('scheduler_wake', () => { if (wakeUp) wakeUp(); });
+  const listener = createListener('scheduler_wake', () => {
+    if (wakeUp) {
+      wakeUp();
+    }
+  });
   await listener.ready;
 
-  console.log('Воркер запущен. Адаптивный сон планировщика:', MIN_SLEEP_MS, '…', MAX_SLEEP_MS, 'мс',
+  console.log(
+    'Воркер запущен. Адаптивный сон планировщика:',
+    MIN_SLEEP_MS,
+    '…',
+    MAX_SLEEP_MS,
+    'мс',
     'с мгновенным пробуждением по уведомлению о новой задаче.',
     config.proactive.enabled
       ? `Проактивность включена, интервал ${config.proactive.intervalMs} мс.`
-      : 'Проактивность выключена.');
+      : 'Проактивность выключена.',
+  );
 
   while (true) {
     let nextTaskMs = null;
     try {
       const r = await tick();
-      if (r.processed > 0) console.log(`Выполнено задач планировщика: ${r.processed}.`);
+      if (r.processed > 0) {
+        console.log(`Выполнено задач планировщика: ${r.processed}.`);
+      }
 
       if (config.proactive.enabled && Date.now() - lastProactiveAt >= config.proactive.intervalMs) {
         lastProactiveAt = Date.now();
         const p = await checkProactiveTriggers();
-        if (p.fired > 0) console.log(`Отправлено проактивных сообщений: ${p.fired}.`);
+        if (p.fired > 0) {
+          console.log(`Отправлено проактивных сообщений: ${p.fired}.`);
+        }
         if (config.proactive.events.enabled) {
           const e = await processEvents();
-          if (e.delivered > 0) console.log(`Доставлено сообщений о событиях: ${e.delivered}.`);
+          if (e.delivered > 0) {
+            console.log(`Доставлено сообщений о событиях: ${e.delivered}.`);
+          }
         }
       }
 

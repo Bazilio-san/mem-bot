@@ -13,7 +13,9 @@ export const skillAuthorEnableTool = {
       name: 'skill_author_enable',
       description: 'Enable a skill (set enabled=true) so the router can select it. Writes immediately.',
       parameters: {
-        type: 'object', additionalProperties: false, required: ['name'],
+        type: 'object',
+        additionalProperties: false,
+        required: ['name'],
         properties: { name: { type: 'string' } },
       },
     },

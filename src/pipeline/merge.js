@@ -4,19 +4,21 @@
 import { query, vectorToSql } from '../db.js';
 import { getDomainId } from '../repo.js';
 import { validateAndCanonicalize } from '../schema/validate.js';
-import {
-  buildDedupeIdentity, decideDedupe, embedForDedupe, findDedupeCandidates,
-} from './memory-dedupe.js';
+import { buildDedupeIdentity, decideDedupe, embedForDedupe, findDedupeCandidates } from './memory-dedupe.js';
 
 // Порог автосохранения (раздел 19): важность ≥0.6, уверенность ≥0.7, не чувствительное.
 function passesAutoSave(c) {
-  if (c.requires_confirmation) return false;
-  if (c.sensitivity === 'high' || c.sensitivity === 'secret') return false;
+  if (c.requires_confirmation) {
+    return false;
+  }
+  if (c.sensitivity === 'high' || c.sensitivity === 'secret') {
+    return false;
+  }
   return Number(c.importance) >= 0.6 && Number(c.confidence) >= 0.7;
 }
 
 async function insertMemory(userId, domainId, c, sourceConversationId, extraMeta = null, opts = {}) {
-  const vec = opts.vector ?? await embedForDedupe(c);
+  const vec = opts.vector ?? (await embedForDedupe(c));
   const expiresAt = c.ttl_days ? new Date(Date.now() + c.ttl_days * 86400000) : null;
   const { rows } = await query(
     `INSERT INTO mem.memory_items
@@ -27,17 +29,34 @@ async function insertMemory(userId, domainId, c, sourceConversationId, extraMeta
              CASE WHEN $12 THEN 'pending_confirmation'::mem.memory_status ELSE 'active'::mem.memory_status END,
              $13,$14,$15,$16,$17,COALESCE($18::uuid, gen_random_uuid()),$19)
      RETURNING id, canonical_group_id`,
-    [userId, domainId, c.scope, c.memory_kind, c.entity_type, c.entity_key, c.memory_text, c.data || {},
-      c.importance, c.confidence, c.sensitivity, !!c.requires_confirmation, sourceConversationId, expiresAt,
-      vec ? vectorToSql(vec) : null, extraMeta ? JSON.stringify(extraMeta) : {},
-      opts.dedupeKey || null, opts.canonicalGroupId || null, opts.dedupeStatus || 'canonical'],
+    [
+      userId,
+      domainId,
+      c.scope,
+      c.memory_kind,
+      c.entity_type,
+      c.entity_key,
+      c.memory_text,
+      c.data || {},
+      c.importance,
+      c.confidence,
+      c.sensitivity,
+      !!c.requires_confirmation,
+      sourceConversationId,
+      expiresAt,
+      vec ? vectorToSql(vec) : null,
+      extraMeta ? JSON.stringify(extraMeta) : {},
+      opts.dedupeKey || null,
+      opts.canonicalGroupId || null,
+      opts.dedupeStatus || 'canonical',
+    ],
   );
   return rows[0];
 }
 
 // Обновить существующий факт новым значением, сохранив историю предыдущего значения.
 async function updateMemory(targetId, c, extraMeta = null, opts = {}) {
-  const vec = opts.vector ?? await embedForDedupe(c);
+  const vec = opts.vector ?? (await embedForDedupe(c));
   const { rows: prev } = await query('SELECT memory_text, data FROM mem.memory_items WHERE id = $1', [targetId]);
   const history = prev[0]
     ? { previous_text: prev[0].memory_text, previous_data: prev[0].data, replaced_at: new Date().toISOString() }
@@ -51,9 +70,17 @@ async function updateMemory(targetId, c, extraMeta = null, opts = {}) {
          canonical_group_id = COALESCE(canonical_group_id, $9::uuid, id),
          dedupe_status = 'canonical'
      WHERE id = $1`,
-    [targetId, c.memory_text, c.data || {}, c.importance, c.confidence,
-      vec ? vectorToSql(vec) : null, JSON.stringify({ last_update: history, ...(extraMeta || {}) }),
-      opts.dedupeKey || null, opts.canonicalGroupId || null],
+    [
+      targetId,
+      c.memory_text,
+      c.data || {},
+      c.importance,
+      c.confidence,
+      vec ? vectorToSql(vec) : null,
+      JSON.stringify({ last_update: history, ...extraMeta }),
+      opts.dedupeKey || null,
+      opts.canonicalGroupId || null,
+    ],
   );
   return targetId;
 }
@@ -87,12 +114,15 @@ export async function processCandidate(userId, domainKey, candidate, sourceConve
   if (!v.ok) {
     return { action: 'rejected', reason: v.reason, issues: v.issues, candidate: v.candidate };
   }
-  candidate = v.candidate;
+  ({ candidate } = v);
   // Метаданные схемы (версия и замечания канонизации) кладём в строку факта.
-  const schemaMeta = v.schema_version == null ? null : {
-    schema_version: v.schema_version,
-    ...(v.issues.length ? { schema_issues: v.issues } : {}),
-  };
+  const schemaMeta =
+    v.schema_version == null
+      ? null
+      : {
+          schema_version: v.schema_version,
+          ...(v.issues.length ? { schema_issues: v.issues } : {}),
+        };
 
   const identity = buildDedupeIdentity(domainKey, candidate);
   candidate = { ...candidate, domainKey, dedupeIdentity: identity };
@@ -100,7 +130,7 @@ export async function processCandidate(userId, domainKey, candidate, sourceConve
   const similar = await findDedupeCandidates({ userId, domainKey, candidate, candidateVector: vec });
   const merge = decideDedupe(candidate, similar);
   const dedupeMeta = {
-    ...(schemaMeta || {}),
+    ...schemaMeta,
     dedupe: {
       key: merge.dedupeKey,
       scope_group: merge.scopeGroup,

@@ -11,9 +11,10 @@ export const skillAuthorWritePromptTool = {
     type: 'function',
     function: {
       name: 'skill_author_write_prompt',
-      description: 'Rewrite or improve the skill response prompt (the "# Skill Prompt" block) following an '
-        + 'instruction. Use to change HOW the bot answers in this domain, not what it remembers. Returns a '
-        + 'preview unless apply=true.',
+      description:
+        'Rewrite or improve the skill response prompt (the "# Skill Prompt" block) following an ' +
+        'instruction. Use to change HOW the bot answers in this domain, not what it remembers. Returns a ' +
+        'preview unless apply=true.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -29,8 +30,15 @@ export const skillAuthorWritePromptTool = {
   async handler(ctx, args) {
     const skill = editableOrStaged(ctx, args.name);
     const { text } = await refineBlock({
-      kind: 'skill_prompt', current: skill.skillPrompt, instruction: args.instruction,
-      skillContext: { name: skill.name, domain_key: skill.domain_key, title: skill.title, description: skill.description },
+      kind: 'skill_prompt',
+      current: skill.skillPrompt,
+      instruction: args.instruction,
+      skillContext: {
+        name: skill.name,
+        domain_key: skill.domain_key,
+        title: skill.title,
+        description: skill.description,
+      },
     });
     skill.skillPrompt = text;
     const res = await applyOrStage(ctx, skill, { apply: args.apply === true });

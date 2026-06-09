@@ -31,7 +31,9 @@ Absolute paths and parent traversal are rejected.`,
   },
   async handler(ctx, args) {
     const skillName = ctx.activeSkill?.name || ctx.skillName;
-    if (!skillName) return { error: 'Активный skill не определён.' };
+    if (!skillName) {
+      return { error: 'Активный skill не определён.' };
+    }
     const content = getReference(skillName, args.path);
     return { path: args.path, content };
   },

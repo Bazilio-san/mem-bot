@@ -13,9 +13,10 @@ export const setReplyModeTool = {
     type: 'function',
     function: {
       name: 'set_reply_mode',
-      description: 'Change how the bot replies: by voice or by text. Call this when the user asks to reply with '
-        + 'voice (for example "answer with voice", "dictate the answer") or to switch back to text ("answer with '
-        + 'text", "stop the voice"). The preference is remembered and applies to following messages.',
+      description:
+        'Change how the bot replies: by voice or by text. Call this when the user asks to reply with ' +
+        'voice (for example "answer with voice", "dictate the answer") or to switch back to text ("answer with ' +
+        'text", "stop the voice"). The preference is remembered and applies to following messages.',
       parameters: {
         type: 'object',
         additionalProperties: false,

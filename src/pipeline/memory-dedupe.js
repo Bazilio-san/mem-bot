@@ -29,10 +29,39 @@ const ASSISTANT_NAME_PATTERNS = [
 ];
 
 const CYR = {
-  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
-  й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't',
-  у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y',
-  ь: '', э: 'e', ю: 'yu', я: 'ya',
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'e',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'y',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'h',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'sch',
+  ъ: '',
+  ы: 'y',
+  ь: '',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
 };
 
 export function normalizeMemoryText(value) {
@@ -48,9 +77,13 @@ export function slug(value, fallback = 'item') {
   const lower = normalizeMemoryText(value);
   let out = '';
   for (const ch of lower) {
-    if (Object.prototype.hasOwnProperty.call(CYR, ch)) out += CYR[ch];
-    else if (/[a-z0-9]/.test(ch)) out += ch;
-    else out += '-';
+    if (Object.prototype.hasOwnProperty.call(CYR, ch)) {
+      out += CYR[ch];
+    } else if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+    } else {
+      out += '-';
+    }
   }
   out = out.replace(/-+/g, '-').replace(/^-|-$/g, '');
   return out || fallback;
@@ -58,7 +91,9 @@ export function slug(value, fallback = 'item') {
 
 function matchesAny(text, entries) {
   for (const [key, patterns] of entries) {
-    if (patterns.some((p) => p.test(text))) return key;
+    if (patterns.some((p) => p.test(text))) {
+      return key;
+    }
   }
   return null;
 }
@@ -66,36 +101,59 @@ function matchesAny(text, entries) {
 function detectFeatureKey(text) {
   const hits = [];
   for (const [key, patterns] of FEATURE_KEYS) {
-    if (patterns.some((p) => p.test(text))) hits.push(key);
+    if (patterns.some((p) => p.test(text))) {
+      hits.push(key);
+    }
   }
-  if (hits.includes('assistant_birth_global_memory')) return 'assistant_birth_global_memory';
+  if (hits.includes('assistant_birth_global_memory')) {
+    return 'assistant_birth_global_memory';
+  }
   return hits.length === 1 ? hits[0] : null;
 }
 
 function detectStyleKey(text) {
   const keyed = matchesAny(text, STYLE_KEYS);
-  if (keyed) return keyed;
+  if (keyed) {
+    return keyed;
+  }
   const short = /(коротк|кратк)/i.test(text);
   const direct = /(^| )(прям|сух|без лиш|без церемон|без смягч)/i.test(text);
-  if (short && (direct || /ответ/i.test(text))) return 'short_direct_answers';
+  if (short && (direct || /ответ/i.test(text))) {
+    return 'short_direct_answers';
+  }
   const textMode = /текстов.*формат|ответ.*текст|текст.*ответ|не голос|не устн/i.test(text);
-  if (textMode && !/длинн|подробн|опус/i.test(text)) return 'text_not_voice';
+  if (textMode && !/длинн|подробн|опус/i.test(text)) {
+    return 'text_not_voice';
+  }
   return null;
 }
 
 function includesFeatureIntent(c) {
-  return ['goal', 'reminder', 'constraint', 'instruction', 'open_loop', 'progress'].includes(c.memory_kind)
-    || /feature|task|capability|issue|goal|reminder|note/.test(String(c.entity_type || ''));
+  return (
+    ['goal', 'reminder', 'constraint', 'instruction', 'open_loop', 'progress'].includes(c.memory_kind) ||
+    /feature|task|capability|issue|goal|reminder|note/.test(String(c.entity_type || ''))
+  );
 }
 
 function tripKey(c, text) {
   const data = c.data || {};
   const raw = [
-    data.origin, data.from, data.departure, data.destination, data.to, data.arrival,
-    data.date, data.passengers, data.baggage,
-  ].filter(Boolean).join(' ');
+    data.origin,
+    data.from,
+    data.departure,
+    data.destination,
+    data.to,
+    data.arrival,
+    data.date,
+    data.passengers,
+    data.baggage,
+  ]
+    .filter(Boolean)
+    .join(' ');
   const source = raw || `${c.entity_key || ''} ${text}`;
-  if (!/(trip|flight|ticket|билет|перел[её]т|хошимин|москв|багаж|пассажир)/i.test(source)) return null;
+  if (!/(trip|flight|ticket|билет|перел[её]т|хошимин|москв|багаж|пассажир)/i.test(source)) {
+    return null;
+  }
   return `trip:${slug(source).slice(0, 80)}`;
 }
 
@@ -141,40 +199,66 @@ export function buildDedupeIdentity(domainKey, candidate) {
 
 export function scopeGroupFor(candidate) {
   const c = candidate || {};
-  if (c.memory_kind === 'communication_style' || c.scope === 'profile') return 'profile';
-  if (includesFeatureIntent(c)) return 'feature_request';
-  if (['open_loop', 'progress', 'state'].includes(c.memory_kind)) return 'context';
+  if (c.memory_kind === 'communication_style' || c.scope === 'profile') {
+    return 'profile';
+  }
+  if (includesFeatureIntent(c)) {
+    return 'feature_request';
+  }
+  if (['open_loop', 'progress', 'state'].includes(c.memory_kind)) {
+    return 'context';
+  }
   return c.scope || 'general';
 }
 
 export function compatibleScopeGroups(group) {
-  if (group === 'profile') return ['profile', 'system', 'general'];
-  if (group === 'feature_request') return ['feature_request', 'profile', 'context', 'domain', 'dialog'];
-  if (group === 'trip_context') return ['trip_context', 'context', 'domain', 'dialog'];
+  if (group === 'profile') {
+    return ['profile', 'system', 'general'];
+  }
+  if (group === 'feature_request') {
+    return ['feature_request', 'profile', 'context', 'domain', 'dialog'];
+  }
+  if (group === 'trip_context') {
+    return ['trip_context', 'context', 'domain', 'dialog'];
+  }
   return [group];
 }
 
 function tokenSet(text) {
-  return new Set(normalizeMemoryText(text).split(' ').filter((t) => t.length > 2));
+  return new Set(
+    normalizeMemoryText(text)
+      .split(' ')
+      .filter((t) => t.length > 2),
+  );
 }
 
 function jaccard(a, b) {
   const aa = tokenSet(a);
   const bb = tokenSet(b);
-  if (!aa.size || !bb.size) return 0;
+  if (!aa.size || !bb.size) {
+    return 0;
+  }
   let hit = 0;
-  for (const t of aa) if (bb.has(t)) hit++;
+  for (const t of aa) {
+    if (bb.has(t)) {
+      hit++;
+    }
+  }
   return hit / (aa.size + bb.size - hit);
 }
 
 function dataOverlap(a = {}, b = {}) {
   const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
-  if (!keys.size) return 0;
+  if (!keys.size) {
+    return 0;
+  }
   let same = 0;
   for (const key of keys) {
     const av = a?.[key];
     const bv = b?.[key];
-    if (av !== undefined && bv !== undefined && JSON.stringify(av) === JSON.stringify(bv)) same++;
+    if (av !== undefined && bv !== undefined && JSON.stringify(av) === JSON.stringify(bv)) {
+      same++;
+    }
   }
   return same / keys.size;
 }
@@ -186,8 +270,11 @@ export function scoreSimilarity(candidate, row) {
     scopeGroup: row.metadata?.dedupe?.scope_group || scopeGroupFor(row),
   };
   const sameKey = identity.dedupeKey && rowIdentity.dedupeKey && identity.dedupeKey === rowIdentity.dedupeKey;
-  const sameEntity = candidate.entity_key && row.entity_key
-    && candidate.entity_key === row.entity_key && candidate.entity_type === row.entity_type;
+  const sameEntity =
+    candidate.entity_key &&
+    row.entity_key &&
+    candidate.entity_key === row.entity_key &&
+    candidate.entity_type === row.entity_type;
   const compatible = compatibleScopeGroups(identity.scopeGroup).includes(rowIdentity.scopeGroup);
   const textScore = jaccard(candidate.memory_text, row.memory_text);
   const dataScore = dataOverlap(candidate.data || {}, row.data || {});
@@ -195,11 +282,19 @@ export function scoreSimilarity(candidate, row) {
   const vectorScore = Number(row.vector_relevance || 0);
 
   let score = 0;
-  if (sameKey) score = Math.max(score, 1);
-  if (sameEntity && compatible) score = Math.max(score, 0.95);
-  if (sameEntity) score = Math.max(score, 0.88);
-  score = Math.max(score, textScore * 0.72 + dataScore * 0.12 + kindScore * 0.06 + (compatible ? 0.10 : 0));
-  if (vectorScore > 0) score = Math.max(score, vectorScore * 0.82 + (compatible ? 0.08 : 0) + dataScore * 0.10);
+  if (sameKey) {
+    score = Math.max(score, 1);
+  }
+  if (sameEntity && compatible) {
+    score = Math.max(score, 0.95);
+  }
+  if (sameEntity) {
+    score = Math.max(score, 0.88);
+  }
+  score = Math.max(score, textScore * 0.72 + dataScore * 0.12 + kindScore * 0.06 + (compatible ? 0.1 : 0));
+  if (vectorScore > 0) {
+    score = Math.max(score, vectorScore * 0.82 + (compatible ? 0.08 : 0) + dataScore * 0.1);
+  }
 
   return {
     score: Math.min(1, score),
@@ -225,11 +320,13 @@ export function canonicalScore(row) {
   const updated = row.updated_at ? new Date(row.updated_at).getTime() : 0;
   const ageDays = updated ? Math.max(0, (Date.now() - updated) / 86400000) : 30;
   const recency = Math.max(0, 1 - ageDays / 90);
-  return Number(row.importance || 0.5) * 0.35
-    + Number(row.confidence || 0.7) * 0.25
-    + recency * 0.15
-    + specificity(row) * 0.15
-    + Math.min(Number(row.usage_count || 0) / 10, 1) * 0.10;
+  return (
+    Number(row.importance || 0.5) * 0.35 +
+    Number(row.confidence || 0.7) * 0.25 +
+    recency * 0.15 +
+    specificity(row) * 0.15 +
+    Math.min(Number(row.usage_count || 0) / 10, 1) * 0.1
+  );
 }
 
 export function chooseCanonical(rows) {
@@ -240,8 +337,14 @@ export async function findDedupeCandidates({ userId, domainKey, candidate, candi
   const identity = buildDedupeIdentity(domainKey, candidate);
   const domainId = await getDomainId(domainKey);
   const params = [
-    userId, identity.dedupeKey, candidate.entity_type, candidate.entity_key, candidate.memory_text, limit,
-    candidateVector ? vectorToSql(candidateVector) : null, domainId,
+    userId,
+    identity.dedupeKey,
+    candidate.entity_type,
+    candidate.entity_key,
+    candidate.memory_text,
+    limit,
+    candidateVector ? vectorToSql(candidateVector) : null,
+    domainId,
   ];
   let vectorSelect = '0::float AS vector_relevance';
   let vectorClause = '';
@@ -283,8 +386,10 @@ export async function findDedupeCandidates({ userId, domainKey, candidate, candi
 export function decideDedupe(candidate, similar) {
   const best = similar[0];
   const identity = candidate.dedupeIdentity || buildDedupeIdentity(candidate.domainKey || 'general', candidate);
-  if (!best) return { decision: 'create_new', score: 0, dedupeKey: identity.dedupeKey, scopeGroup: identity.scopeGroup };
-  const score = best.dedupe.score;
+  if (!best) {
+    return { decision: 'create_new', score: 0, dedupeKey: identity.dedupeKey, scopeGroup: identity.scopeGroup };
+  }
+  const { score } = best.dedupe;
   if (score >= 0.92) {
     const sameText = normalizeMemoryText(best.memory_text) === normalizeMemoryText(candidate.memory_text);
     return {
@@ -329,12 +434,16 @@ export async function buildDedupeGroups({ userId, limit = 500 }) {
   for (const row of rows) {
     const identity = buildDedupeIdentity(row.domain_key || 'general', row);
     const key = row.dedupe_key || identity.dedupeKey;
-    if (!buckets.has(key)) buckets.set(key, []);
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+    }
     buckets.get(key).push({ ...row, dedupe_key: key, scope_group: identity.scopeGroup });
   }
   const groups = [];
   for (const [dedupeKey, items] of buckets.entries()) {
-    if (items.length < 2) continue;
+    if (items.length < 2) {
+      continue;
+    }
     const canonical = chooseCanonical(items);
     const duplicates = items.filter((item) => item.id !== canonical.id);
     groups.push({ dedupeKey, canonical, duplicates, items });
@@ -350,9 +459,14 @@ export async function applyDedupeGroup({ group, source = 'maintenance' }) {
         SET dedupe_key=$2, canonical_group_id=$3, dedupe_status='canonical',
             metadata = metadata || $4::jsonb, updated_at=now()
       WHERE id=$1`,
-    [group.canonical.id, group.dedupeKey, canonicalGroupId, JSON.stringify({
-      dedupe: { role: 'canonical', source, dedupe_key: group.dedupeKey, at },
-    })],
+    [
+      group.canonical.id,
+      group.dedupeKey,
+      canonicalGroupId,
+      JSON.stringify({
+        dedupe: { role: 'canonical', source, dedupe_key: group.dedupeKey, at },
+      }),
+    ],
   );
   for (const duplicate of group.duplicates) {
     await query(
@@ -360,17 +474,22 @@ export async function applyDedupeGroup({ group, source = 'maintenance' }) {
           SET status='archived', dedupe_key=$2, canonical_group_id=$3, dedupe_status='duplicate',
               metadata = metadata || $4::jsonb, updated_at=now()
         WHERE id=$1 AND status='active'`,
-      [duplicate.id, group.dedupeKey, canonicalGroupId, JSON.stringify({
-        replaced_by: group.canonical.id,
-        dedupe: {
-          role: 'duplicate',
-          source,
-          dedupe_key: group.dedupeKey,
+      [
+        duplicate.id,
+        group.dedupeKey,
+        canonicalGroupId,
+        JSON.stringify({
           replaced_by: group.canonical.id,
-          score: canonicalScore(duplicate),
-          at,
-        },
-      })],
+          dedupe: {
+            role: 'duplicate',
+            source,
+            dedupe_key: group.dedupeKey,
+            replaced_by: group.canonical.id,
+            score: canonicalScore(duplicate),
+            at,
+          },
+        }),
+      ],
     );
   }
   return { canonicalId: group.canonical.id, archived: group.duplicates.map((d) => d.id) };

@@ -26,15 +26,18 @@ ${JSON.stringify(stateJson || {}, null, 2)}`;
 }
 
 // Собрать HISTORY_CONTEXT. Возвращает строку system-блока или '' (если функция выключена или сводки нет).
-// Параметр maxTokens оставлен для совместимости со скелетом требования: фактический целевой размер
-// дайджеста берётся из config.historyCompression.shrinkTokens внутри maybeCompressHistory.
-export async function buildHistoryContext({ userId, conversationId, domainKey, memory, maxTokens } = {}) {
-  if (!config.historyCompression.enabled) return '';
+// Целевой размер дайджеста берётся из config.historyCompression.shrinkTokens внутри maybeCompressHistory.
+export async function buildHistoryContext({ userId, conversationId, domainKey, memory } = {}) {
+  if (!config.historyCompression.enabled) {
+    return '';
+  }
 
   await maybeCompressHistory({ userId, conversationId, domainKey, memory });
 
   const summary = await getActiveConversationSummary(conversationId);
-  if (!summary) return '';
+  if (!summary) {
+    return '';
+  }
 
   return formatHistoryContext(summary.summary_text, summary.state_json);
 }

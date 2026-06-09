@@ -14,11 +14,12 @@ export const skillAuthorReloadTool = {
       description: 'Reload the skills registry from disk. Use after files were edited outside the bot.',
       parameters: {
         type: 'object',
-        additionalProperties: false, properties: {},
+        additionalProperties: false,
+        properties: {},
       },
     },
   },
-  async handler () {
+  async handler() {
     invalidateSkillsCache();
     loadSkills({ force: true });
     return { reloaded: true, skills: getAllSkills().map((s) => s.name) };

@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
@@ -9,6 +9,12 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --check .",
+    "format:fix": "oxfmt .",
+    "quality": "npm run lint && npm run format",
+    "quality:fix": "npm run lint:fix && npm run format:fix",
     "agents:link": "node scripts/claude-2-agents-symlink.js setup",
     "agents:link:status": "node scripts/claude-2-agents-symlink.js status",
     "agents:link:remove": "node scripts/claude-2-agents-symlink.js remove",
@@ -68,6 +74,10 @@
     "pg": "^8.13.1",
     "rrule": "^2.8.1",
     "sanitize-html": "^2.17.4"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.48.0",
+    "oxlint": "^1.63.0"
   },
   "repository": {
     "type": "git",

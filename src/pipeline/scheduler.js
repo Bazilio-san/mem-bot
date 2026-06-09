@@ -2,12 +2,17 @@
 // создание задачи, воркер с безопасным захватом задач (FOR UPDATE SKIP LOCKED),
 // однократным выполнением разовых задач, перепланированием регулярных и повторами при ошибке.
 import cronParser from 'cron-parser';
+// rrule — CommonJS-модуль: rrulestr доступен только через default-экспорт, именованного экспорта нет.
+// eslint-disable-next-line import/default
 import rrulePkg from 'rrule';
 import { config } from '../config.js';
 import { query, notify } from '../db.js';
 import { getDomainId } from '../repo.js';
 import {
-  classifyReminderCandidate, evaluateContactPolicy, getContactState, recordProactiveSent,
+  classifyReminderCandidate,
+  evaluateContactPolicy,
+  getContactState,
+  recordProactiveSent,
 } from './proactiveContactPolicy.js';
 import { runMemoryDedupe } from './memory-dedupe.js';
 
@@ -32,10 +37,22 @@ export async function createTask({ userId, domainKey = 'general', conversationId
         schedule_kind, timezone, run_at, interval_seconds, cron_expr, rrule, next_run_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
-    [userId, domainId, conversationId, normalizedTask.task_type, normalizedTask.title, normalizedTask.instruction,
-      normalizedTask.payload || {}, normalizedTask.schedule_kind, normalizedTask.timezone,
-      normalizedTask.run_at || null, normalizedTask.interval_seconds || null, normalizedTask.cron_expr || null,
-      normalizedTask.rrule || null, nextRun],
+    [
+      userId,
+      domainId,
+      conversationId,
+      normalizedTask.task_type,
+      normalizedTask.title,
+      normalizedTask.instruction,
+      normalizedTask.payload || {},
+      normalizedTask.schedule_kind,
+      normalizedTask.timezone,
+      normalizedTask.run_at || null,
+      normalizedTask.interval_seconds || null,
+      normalizedTask.cron_expr || null,
+      normalizedTask.rrule || null,
+      nextRun,
+    ],
   );
   // Разбудить воркер планировщика, чтобы он не ждал до конца текущего сна и подхватил задачу сразу.
   // Сбой уведомления не должен мешать созданию задачи: в худшем случае воркер возьмёт её на ближайшем
@@ -46,7 +63,9 @@ export async function createTask({ userId, domainKey = 'general', conversationId
 
 export function normalizeTimezone(timezone, fallback = config.timezone || 'Europe/Moscow') {
   for (const candidate of [timezone, fallback, 'Europe/Moscow']) {
-    if (!candidate) continue;
+    if (!candidate) {
+      continue;
+    }
     try {
       new Intl.DateTimeFormat('en-US', { timeZone: candidate }).format(new Date());
       return candidate;
@@ -59,7 +78,9 @@ export function normalizeTimezone(timezone, fallback = config.timezone || 'Europ
 
 export function formatLocalDateTime(dateLike, timezone) {
   const date = new Date(dateLike);
-  if (Number.isNaN(date.getTime())) return null;
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
   const normalizedTimezone = normalizeTimezone(timezone);
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: normalizedTimezone,
@@ -72,7 +93,10 @@ export function formatLocalDateTime(dateLike, timezone) {
     second: '2-digit',
   });
   const parts = Object.fromEntries(
-    fmt.formatToParts(date).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    fmt
+      .formatToParts(date)
+      .filter((p) => p.type !== 'literal')
+      .map((p) => [p.type, p.value]),
   );
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} ${normalizedTimezone}`;
 }
@@ -96,7 +120,10 @@ function offsetMsForTimezone(timezone, date) {
     second: '2-digit',
   });
   const parts = Object.fromEntries(
-    fmt.formatToParts(date).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    fmt
+      .formatToParts(date)
+      .filter((p) => p.type !== 'literal')
+      .map((p) => [p.type, p.value]),
   );
   const asUTC = Date.UTC(
     Number(parts.year),
@@ -136,35 +163,46 @@ function utcToZonedFloatingDate(date, timezone) {
     second: '2-digit',
   });
   const parts = Object.fromEntries(
-    fmt.formatToParts(date).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    fmt
+      .formatToParts(date)
+      .filter((p) => p.type !== 'literal')
+      .map((p) => [p.type, p.value]),
   );
-  return new Date(Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-    date.getUTCMilliseconds(),
-  ));
+  return new Date(
+    Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second),
+      date.getUTCMilliseconds(),
+    ),
+  );
 }
 
 function parseFloatingDtstart(rruleText) {
   const match = rruleText.match(/^DTSTART(?:;TZID=[^:\n]+)?:([0-9]{8}T[0-9]{6})$/im);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   const value = match[1];
-  return new Date(Date.UTC(
-    Number(value.slice(0, 4)),
-    Number(value.slice(4, 6)) - 1,
-    Number(value.slice(6, 8)),
-    Number(value.slice(9, 11)),
-    Number(value.slice(11, 13)),
-    Number(value.slice(13, 15)),
-  ));
+  return new Date(
+    Date.UTC(
+      Number(value.slice(0, 4)),
+      Number(value.slice(4, 6)) - 1,
+      Number(value.slice(6, 8)),
+      Number(value.slice(9, 11)),
+      Number(value.slice(11, 13)),
+      Number(value.slice(13, 15)),
+    ),
+  );
 }
 
 export function nextCronRun(task, afterDate = new Date()) {
-  if (!task.cron_expr) throw new ScheduleError('Для cron-задачи не задан cron_expr');
+  if (!task.cron_expr) {
+    throw new ScheduleError('Для cron-задачи не задан cron_expr');
+  }
   const timezone = normalizeTimezone(task.timezone);
   try {
     const interval = cronParser.CronExpressionParser.parse(task.cron_expr, {
@@ -178,7 +216,9 @@ export function nextCronRun(task, afterDate = new Date()) {
 }
 
 export function nextRRuleRun(task, afterDate = new Date()) {
-  if (!task.rrule) throw new ScheduleError('Для rrule-задачи не задан rrule');
+  if (!task.rrule) {
+    throw new ScheduleError('Для rrule-задачи не задан rrule');
+  }
   const dtstartTzid = task.rrule.match(/^DTSTART;TZID=([^:\n]+):/im)?.[1];
   const timezone = normalizeTimezone(dtstartTzid || task.timezone);
   const after = assertValidDate(new Date(afterDate), 'afterDate');
@@ -194,10 +234,14 @@ export function nextRRuleRun(task, afterDate = new Date()) {
     let floatingNext = rule.after(floatingAfter, false);
     for (let i = 0; floatingNext && i < 5; i++) {
       const next = assertValidDate(zonedLocalPartsToUtc(floatingNext, timezone), `rrule=${task.rrule}`);
-      if (next > after) return next;
+      if (next > after) {
+        return next;
+      }
       floatingNext = rule.after(floatingNext, false);
     }
-    if (!floatingNext) return null;
+    if (!floatingNext) {
+      return null;
+    }
     throw new ScheduleError(`RRULE-расписание "${task.rrule}" не дало будущий запуск`);
   } catch (err) {
     throw new ScheduleError(`Некорректное RRULE-расписание "${task.rrule}": ${err.message || err}`);
@@ -207,19 +251,27 @@ export function nextRRuleRun(task, afterDate = new Date()) {
 export function computeNextRun(task, afterDate = new Date()) {
   const after = assertValidDate(new Date(afterDate), 'afterDate');
   if (task.schedule_kind === 'one_time') {
-    if (!task.run_at) throw new ScheduleError('Для разовой задачи не задан run_at');
+    if (!task.run_at) {
+      throw new ScheduleError('Для разовой задачи не задан run_at');
+    }
     return assertValidDate(new Date(task.run_at), `run_at=${task.run_at}`);
   }
   if (task.schedule_kind === 'interval' && task.interval_seconds) {
     return new Date(after.getTime() + task.interval_seconds * 1000);
   }
-  if (task.schedule_kind === 'cron') return nextCronRun(task, after);
-  if (task.schedule_kind === 'rrule') return nextRRuleRun(task, after);
+  if (task.schedule_kind === 'cron') {
+    return nextCronRun(task, after);
+  }
+  if (task.schedule_kind === 'rrule') {
+    return nextRRuleRun(task, after);
+  }
   throw new ScheduleError(`Неподдерживаемый тип расписания: ${task.schedule_kind}`);
 }
 
 export function computeFirstRun(task, afterDate = new Date()) {
-  if (task.schedule_kind === 'one_time') return computeNextRun(task, afterDate);
+  if (task.schedule_kind === 'one_time') {
+    return computeNextRun(task, afterDate);
+  }
   if (task.schedule_kind === 'interval') {
     if (!task.interval_seconds || task.interval_seconds <= 0) {
       throw new ScheduleError('Для interval-задачи нужен положительный interval_seconds');
@@ -231,7 +283,9 @@ export function computeFirstRun(task, afterDate = new Date()) {
 
 // Вычислить следующий запуск после выполнения. Для разовых задач — null (завершить).
 export function calculateNextRun(task, afterDate = new Date()) {
-  if (task.schedule_kind === 'one_time') return null;
+  if (task.schedule_kind === 'one_time') {
+    return null;
+  }
   return computeNextRun(task, afterDate);
 }
 
@@ -268,7 +322,9 @@ export async function msUntilDueTask() {
       ORDER BY next_run_at ASC
       LIMIT 1`,
   );
-  if (!rows.length) return null;
+  if (!rows.length) {
+    return null;
+  }
   const ms = new Date(rows[0].next_run_at).getTime() - Date.now();
   return ms > 0 ? ms : 0;
 }
@@ -299,10 +355,13 @@ export async function runTask(task, { onReminder } = {}) {
                  metadata = metadata || $2::jsonb,
                  updated_at = now()
              WHERE id = $1`,
-            [task.id, JSON.stringify({
-              last_contact_policy_denial: decision.reason,
-              last_contact_policy_denied_at: new Date().toISOString(),
-            })],
+            [
+              task.id,
+              JSON.stringify({
+                last_contact_policy_denial: decision.reason,
+                last_contact_policy_denied_at: new Date().toISOString(),
+              }),
+            ],
           );
           await query(
             `UPDATE mem.scheduled_task_runs
@@ -321,7 +380,9 @@ export async function runTask(task, { onReminder } = {}) {
       if (reminderCandidate) {
         await recordProactiveSent({ userId: task.user_id, candidate: reminderCandidate });
       }
-      if (onReminder) await onReminder(task);
+      if (onReminder) {
+        await onReminder(task);
+      }
     } else if (task.task_type === 'memory_cleanup') {
       await query(
         `UPDATE mem.memory_items SET status='archived', updated_at=now()
@@ -368,10 +429,10 @@ export async function runTask(task, { onReminder } = {}) {
          WHERE id=$1`,
         [task.id],
       );
-      await query(
-        `UPDATE mem.scheduled_task_runs SET status='failed', finished_at=now(), error_text=$2 WHERE id=$1`,
-        [runId, String(err.message || err)],
-      );
+      await query(`UPDATE mem.scheduled_task_runs SET status='failed', finished_at=now(), error_text=$2 WHERE id=$1`, [
+        runId,
+        String(err.message || err),
+      ]);
       return { ok: false, error: String(err.message || err) };
     }
     // Ошибка не теряется: увеличиваем попытки, при исчерпании — статус failed,
@@ -386,10 +447,10 @@ export async function runTask(task, { onReminder } = {}) {
        WHERE id=$1`,
       [task.id],
     );
-    await query(
-      `UPDATE mem.scheduled_task_runs SET status='failed', finished_at=now(), error_text=$2 WHERE id=$1`,
-      [runId, String(err.message || err)],
-    );
+    await query(`UPDATE mem.scheduled_task_runs SET status='failed', finished_at=now(), error_text=$2 WHERE id=$1`, [
+      runId,
+      String(err.message || err),
+    ]);
     return { ok: false, error: String(err.message || err) };
   }
 }
@@ -398,6 +459,8 @@ export async function runTask(task, { onReminder } = {}) {
 export async function tick(opts = {}) {
   const tasks = await claimDueTasks(opts.limit || 20);
   const results = [];
-  for (const t of tasks) results.push(await runTask(t, opts));
+  for (const t of tasks) {
+    results.push(await runTask(t, opts));
+  }
   return { processed: tasks.length, results };
 }

@@ -5,12 +5,19 @@
 // попадают (защита от дублей). Устойчивые факты выносятся в долговременную память обычным контуром.
 import { chatJSON } from '../llm.js';
 import { config, debugEnabled } from '../config.js';
-import { getRecentMessages, getActiveConversationSummary, getColdPendingMessages, saveConversationSummary } from '../repo.js';
+import {
+  getRecentMessages,
+  getActiveConversationSummary,
+  getColdPendingMessages,
+  saveConversationSummary,
+} from '../repo.js';
 import { persistCandidates } from './merge.js';
 import { estimateTokens, sumMessageTokens, estimateSummaryTokens } from './token-counter.js';
 
 function dbg(...args) {
-  if (debugEnabled('llm:summarizer')) console.error('[summarizer]', ...args);
+  if (debugEnabled('llm:summarizer')) {
+    console.error('[summarizer]', ...args);
+  }
 }
 
 // Заголовки зон в итоговом дайджесте. Порядок фиксирован: ближняя → средняя → дальняя.
@@ -24,7 +31,13 @@ const ZONE_HEADERS = {
 const SUMMARY_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary_text', 'state_json', 'facts_to_memory', 'dropped_because_in_memory', 'sensitive_mentions_redacted'],
+  required: [
+    'summary_text',
+    'state_json',
+    'facts_to_memory',
+    'dropped_because_in_memory',
+    'sensitive_mentions_redacted',
+  ],
   properties: {
     summary_text: { type: 'string' },
     state_json: {
@@ -75,12 +88,22 @@ ${ZONE_HEADERS.far}
 
 // Плоский список текстов активной памяти (для передачи суммаризатору и код-стороны дедупликации).
 function activeMemoryTexts(memory) {
-  if (!memory) return [];
+  if (!memory) {
+    return [];
+  }
   const out = [];
   for (const key of ['profile', 'dialog', 'domain']) {
-    for (const it of memory[key] || []) if (it?.memory_text) out.push(it.memory_text);
+    for (const it of memory[key] || []) {
+      if (it?.memory_text) {
+        out.push(it.memory_text);
+      }
+    }
   }
-  for (const s of memory.secure || []) if (s?.redacted_summary) out.push(s.redacted_summary);
+  for (const s of memory.secure || []) {
+    if (s?.redacted_summary) {
+      out.push(s.redacted_summary);
+    }
+  }
   return out;
 }
 
@@ -89,14 +112,18 @@ function activeMemoryTexts(memory) {
 function splitZones(messages) {
   const total = sumMessageTokens(messages) || 1;
   const farLimit = total * 0.25;
-  const middleLimit = total * 0.60; // 0.25 + 0.35
+  const middleLimit = total * 0.6; // 0.25 + 0.35
   const zones = { far: [], middle: [], near: [] };
   let acc = 0;
   for (const m of messages) {
     const t = Number(m.token_count) || estimateTokens(m.content || '');
-    if (acc < farLimit) zones.far.push(m);
-    else if (acc < middleLimit) zones.middle.push(m);
-    else zones.near.push(m);
+    if (acc < farLimit) {
+      zones.far.push(m);
+    } else if (acc < middleLimit) {
+      zones.middle.push(m);
+    } else {
+      zones.near.push(m);
+    }
     acc += t;
   }
   return zones;
@@ -108,7 +135,11 @@ function renderZone(messages) {
 
 function normalizeWords(s) {
   return new Set(
-    String(s).toLowerCase().replace(/[^a-zа-я0-9 ]/gi, ' ').split(/\s+/).filter((w) => w.length >= 3),
+    String(s)
+      .toLowerCase()
+      .replace(/[^a-zа-я0-9 ]/gi, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3),
   );
 }
 
@@ -116,14 +147,24 @@ function normalizeWords(s) {
 // гарантированно убирала из дайджеста факты, уже сохранённые в долговременной памяти.
 function similarToMemory(line, memTexts) {
   const lw = normalizeWords(line);
-  if (lw.size === 0) return false;
+  if (lw.size === 0) {
+    return false;
+  }
   for (const mt of memTexts) {
     const mw = normalizeWords(mt);
-    if (mw.size === 0) continue;
+    if (mw.size === 0) {
+      continue;
+    }
     let inter = 0;
-    for (const w of lw) if (mw.has(w)) inter++;
+    for (const w of lw) {
+      if (mw.has(w)) {
+        inter++;
+      }
+    }
     const union = lw.size + mw.size - inter;
-    if (union > 0 && inter / union >= 0.5) return true;
+    if (union > 0 && inter / union >= 0.5) {
+      return true;
+    }
   }
   return false;
 }
@@ -138,7 +179,9 @@ function redactSecrets(text) {
 // Оставить из набора строк столько, чтобы уложиться в бюджет токенов (обрезаем с конца — наименее важное).
 function trimLinesToTokens(lines, budget) {
   const out = [...lines];
-  while (out.length && estimateTokens(out.join('\n')) > budget) out.pop();
+  while (out.length && estimateTokens(out.join('\n')) > budget) {
+    out.pop();
+  }
   return out;
 }
 
@@ -148,10 +191,21 @@ function parseZones(summaryText) {
   let current = 'near';
   for (const raw of String(summaryText || '').split('\n')) {
     const line = raw.trim();
-    if (!line) continue;
-    if (line.startsWith(ZONE_HEADERS.near)) { current = 'near'; continue; }
-    if (line.startsWith(ZONE_HEADERS.middle)) { current = 'middle'; continue; }
-    if (line.startsWith(ZONE_HEADERS.far)) { current = 'far'; continue; }
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith(ZONE_HEADERS.near)) {
+      current = 'near';
+      continue;
+    }
+    if (line.startsWith(ZONE_HEADERS.middle)) {
+      current = 'middle';
+      continue;
+    }
+    if (line.startsWith(ZONE_HEADERS.far)) {
+      current = 'far';
+      continue;
+    }
     zones[current].push(line.startsWith('-') ? line : `- ${line}`);
   }
   return zones;
@@ -165,7 +219,10 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
   const dropped = [];
   for (const key of ['near', 'middle', 'far']) {
     zones[key] = zones[key].filter((line) => {
-      if (similarToMemory(line, memTexts)) { dropped.push(line.replace(/^-\s*/, '')); return false; }
+      if (similarToMemory(line, memTexts)) {
+        dropped.push(line.replace(/^-\s*/, ''));
+        return false;
+      }
       return true;
     });
   }
@@ -178,37 +235,50 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
   const parts = [];
   for (const key of ['near', 'middle', 'far']) {
     const lines = trimLinesToTokens(zones[key], budgets[key]);
-    if (lines.length) parts.push(`${ZONE_HEADERS[key]}\n${lines.join('\n')}`);
+    if (lines.length) {
+      parts.push(`${ZONE_HEADERS[key]}\n${lines.join('\n')}`);
+    }
   }
   let text = parts.join('\n\n');
   // Финальная страховка по общему размеру (если суммарно всё же больше цели — режем с конца).
   const allLines = text.split('\n');
-  if (estimateTokens(text) > targetTokens) text = trimLinesToTokens(allLines, targetTokens).join('\n');
+  if (estimateTokens(text) > targetTokens) {
+    text = trimLinesToTokens(allLines, targetTokens).join('\n');
+  }
   return { text, dropped };
 }
 
 // Привести факты суммаризатора к форме кандидатов памяти и провести их обычным контуром persistCandidates
 // (порог важности → проверка чувствительности → дедупликация → обновление вместо дублей).
 function factsToCandidates(facts = []) {
-  return facts.map((f) => ({
-    scope: f.scope || 'profile',
-    memory_kind: f.memory_kind || 'fact',
-    entity_type: f.entity_type ?? null,
-    entity_key: f.entity_key ?? null,
-    memory_text: f.memory_text || '',
-    data: f.data || {},
-    importance: Number(f.importance ?? 0.6),
-    confidence: Number(f.confidence ?? 0.7),
-    sensitivity: f.sensitivity || 'normal',
-    ttl_days: f.ttl_days ?? null,
-    requires_confirmation: !!f.requires_confirmation,
-    reason: f.reason || 'вынесено из истории диалога',
-  })).filter((c) => c.memory_text);
+  return facts
+    .map((f) => ({
+      scope: f.scope || 'profile',
+      memory_kind: f.memory_kind || 'fact',
+      entity_type: f.entity_type ?? null,
+      entity_key: f.entity_key ?? null,
+      memory_text: f.memory_text || '',
+      data: f.data || {},
+      importance: Number(f.importance ?? 0.6),
+      confidence: Number(f.confidence ?? 0.7),
+      sensitivity: f.sensitivity || 'normal',
+      ttl_days: f.ttl_days ?? null,
+      requires_confirmation: !!f.requires_confirmation,
+      reason: f.reason || 'вынесено из истории диалога',
+    }))
+    .filter((c) => c.memory_text);
 }
 
 // Сжать холодную зону: разбить на зоны, вызвать суммаризатор, собрать итоговый дайджест с гарантиями
 // размера, градиента, дедупликации и затирания секретов. Возвращает поля для сохранения сводки.
-export async function summarizeColdHistory({ activeSummary, coldPending, memory, targetTokens, zoneWeights, domainKey }) {
+export async function summarizeColdHistory({
+  activeSummary,
+  coldPending,
+  memory,
+  targetTokens,
+  zoneWeights,
+  domainKey,
+}) {
   const memTexts = activeMemoryTexts(memory);
   const zones = splitZones(coldPending);
   const previousDigest = activeSummary?.summary_text
@@ -263,7 +333,7 @@ ${renderZone(zones.far) || '(нет сообщений)'}`;
 // Проверить размер холодной зоны и при превышении порога пересобрать дайджест и сохранить его.
 // Вызывается перед сборкой контекста ответа: к моменту ответа HISTORY_CONTEXT уже готов.
 export async function maybeCompressHistory({ userId, conversationId, domainKey, memory }) {
-  const hotWindow = config.historyCompression.hotWindow;
+  const { hotWindow } = config.historyCompression;
   const activeSummary = await getActiveConversationSummary(conversationId);
   const hotMessages = await getRecentMessages(conversationId, hotWindow);
 
@@ -294,7 +364,9 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
     zoneWeights: config.historyCompression.zoneWeights,
     domainKey,
   });
-  if (!result) return { compressed: false, reason: 'summarizer_failed', coldSize };
+  if (!result) {
+    return { compressed: false, reason: 'summarizer_failed', coldSize };
+  }
 
   const first = coldPending[0];
   const last = coldPending[coldPending.length - 1];
@@ -315,17 +387,23 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
 
   // Устойчивые факты из истории — в долговременную память обычным контуром (пороги, чувствительность, дедуп).
   if (result.factsToMemory.length) {
-    try { await persistCandidates(userId, domainKey, result.factsToMemory, conversationId); }
-    catch (err) { dbg('запись facts_to_memory не удалась:', err.message); }
+    try {
+      await persistCandidates(userId, domainKey, result.factsToMemory, conversationId);
+    } catch (err) {
+      dbg('запись facts_to_memory не удалась:', err.message);
+    }
   }
 
-  dbg('история сжата:', JSON.stringify({
-    source_token_count: coldSize,
-    summary_token_count: result.summaryTokenCount,
-    compression_ratio: Number((result.summaryTokenCount / coldSize).toFixed(2)),
-    facts_dropped_because_in_memory: result.droppedBecauseInMemory.length,
-    facts_to_memory: result.factsToMemory.length,
-  }));
+  dbg(
+    'история сжата:',
+    JSON.stringify({
+      source_token_count: coldSize,
+      summary_token_count: result.summaryTokenCount,
+      compression_ratio: Number((result.summaryTokenCount / coldSize).toFixed(2)),
+      facts_dropped_because_in_memory: result.droppedBecauseInMemory.length,
+      facts_to_memory: result.factsToMemory.length,
+    }),
+  );
 
   return { compressed: true, coldSize, summaryTokens: result.summaryTokenCount };
 }

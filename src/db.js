@@ -48,9 +48,15 @@ export function createListener(channel, onNotification) {
 
   // Переподключиться с небольшой задержкой, чтобы не зациклиться на мгновенно повторяющихся сбоях.
   function scheduleReconnect() {
-    if (stopped || reconnecting) return;
+    if (stopped || reconnecting) {
+      return;
+    }
     reconnecting = true;
-    setTimeout(() => { if (!stopped) connect().catch(scheduleReconnect); }, 1000);
+    setTimeout(() => {
+      if (!stopped) {
+        connect().catch(scheduleReconnect);
+      }
+    }, 1000);
   }
 
   const ready = connect().catch(scheduleReconnect);
@@ -59,7 +65,9 @@ export function createListener(channel, onNotification) {
     ready,
     async close() {
       stopped = true;
-      if (client) await client.end().catch(() => {});
+      if (client) {
+        await client.end().catch(() => {});
+      }
     },
   };
 }

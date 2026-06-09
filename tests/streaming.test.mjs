@@ -19,13 +19,17 @@ import { createDeltaAccumulator, accumulateChatDelta, finalizeChatMessage } from
 // 2. Один вызов инструмента, собранный из нескольких фрагментов имени и аргументов.
 {
   const acc = createDeltaAccumulator();
-  accumulateChatDelta(acc, { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'memory_', arguments: '' } }] });
+  accumulateChatDelta(acc, {
+    tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'memory_', arguments: '' } }],
+  });
   accumulateChatDelta(acc, { tool_calls: [{ index: 0, function: { name: 'search', arguments: '{"query":' } }] });
   accumulateChatDelta(acc, { tool_calls: [{ index: 0, function: { arguments: '"билеты"}' } }] });
   const msg = finalizeChatMessage(acc);
   assert.equal(msg.tool_calls.length, 1);
   assert.deepEqual(msg.tool_calls[0], {
-    id: 'call_1', type: 'function', function: { name: 'memory_search', arguments: '{"query":"билеты"}' },
+    id: 'call_1',
+    type: 'function',
+    function: { name: 'memory_search', arguments: '{"query":"билеты"}' },
   });
   assert.deepEqual(JSON.parse(msg.tool_calls[0].function.arguments), { query: 'билеты' });
 }
@@ -33,8 +37,12 @@ import { createDeltaAccumulator, accumulateChatDelta, finalizeChatMessage } from
 // 3. Два разных вызова инструментов по разным index.
 {
   const acc = createDeltaAccumulator();
-  accumulateChatDelta(acc, { tool_calls: [{ index: 0, id: 'a', type: 'function', function: { name: 'first', arguments: '{}' } }] });
-  accumulateChatDelta(acc, { tool_calls: [{ index: 1, id: 'b', type: 'function', function: { name: 'second', arguments: '{}' } }] });
+  accumulateChatDelta(acc, {
+    tool_calls: [{ index: 0, id: 'a', type: 'function', function: { name: 'first', arguments: '{}' } }],
+  });
+  accumulateChatDelta(acc, {
+    tool_calls: [{ index: 1, id: 'b', type: 'function', function: { name: 'second', arguments: '{}' } }],
+  });
   const msg = finalizeChatMessage(acc);
   assert.equal(msg.tool_calls.length, 2);
   assert.equal(msg.tool_calls[0].function.name, 'first');
@@ -66,11 +74,13 @@ import { createDeltaAccumulator, accumulateChatDelta, finalizeChatMessage } from
       return {
         role: 'assistant',
         content: 'Сейчас проверю. ',
-        tool_calls: [{
-          id: 'call_1',
-          type: 'function',
-          function: { name: 'memory_search', arguments: '{"query":"test"}' },
-        }],
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'memory_search', arguments: '{"query":"test"}' },
+          },
+        ],
       };
     },
     chatFn: async () => {

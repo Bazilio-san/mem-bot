@@ -10,15 +10,23 @@ import { tick, msUntilDueTask } from '../pipeline/scheduler.js';
 import { checkProactiveTriggers } from '../pipeline/proactive.js';
 import { processEvents } from '../pipeline/events.js';
 import {
-  setUserProactivity, getProactivityState, setTrigger,
-  saveMessageExternalRef, findMessageByExternalRef, getUserReplyMode,
+  setUserProactivity,
+  getProactivityState,
+  setTrigger,
+  saveMessageExternalRef,
+  findMessageByExternalRef,
+  getUserReplyMode,
 } from '../repo.js';
 import { query, getPool, closePool } from '../db.js';
 import { decideDeliveryIntent, shouldConsiderReaction } from '../pipeline/reactions.js';
 import { normalizeTelegramReaction, reactionKeyToEmoji, TELEGRAM_REACTION_KEYS } from './reactions.js';
 import {
-  detectAttachment, checkAttachmentLimits, shouldEchoTranscript,
-  transcribeTelegramAttachment, isProviderConfigured, providerKeyEnv,
+  detectAttachment,
+  checkAttachmentLimits,
+  shouldEchoTranscript,
+  transcribeTelegramAttachment,
+  isProviderConfigured,
+  providerKeyEnv,
 } from '../voice/transcribe.js';
 import { buildVoiceText, synthesizeSpeech } from '../voice/tts.js';
 import { createTelegramProgress } from './progress.js';
@@ -33,14 +41,14 @@ if (!TOKEN) {
 }
 
 const API = `https://api.telegram.org/bot${TOKEN}`;
-const POLL_TIMEOUT_SEC = 30;                                         // длительность одного длинного опроса
+const POLL_TIMEOUT_SEC = 30; // длительность одного длинного опроса
 // Фоновый воркер не опрашивает базу через фиксированный интервал, а спит ровно до момента
 // ближайшей задачи (адаптивный сон) и просыпается мгновенно по уведомлению scheduler_wake при
 // создании новой задачи. Эти две границы ограничивают сон снизу (не частить) и сверху (периодически
 // перепроверять базу, соблюдать интервал проактивности и страховочный слив очереди доставки).
 const WORKER_MIN_SLEEP_MS = Number(process.env.SCHEDULER_MIN_SLEEP_MS || 250);
 const WORKER_MAX_SLEEP_MS = Number(process.env.SCHEDULER_MAX_SLEEP_MS || 30000);
-const TG_MAX_LEN = 4000;                                            // запас под лимит Telegram в 4096 символов
+const TG_MAX_LEN = 4000; // запас под лимит Telegram в 4096 символов
 // Как часто страховочный таймер опустошает очередь доставки. Основной путь — событийный (LISTEN/NOTIFY),
 // а этот редкий проход подстраховывает на случай пропущенного уведомления или простоя слушателя.
 const OUTBOX_SAFETY_INTERVAL_MS = Number(process.env.OUTBOX_SAFETY_INTERVAL_MS || 30000);
@@ -98,8 +106,12 @@ function acquireSlot() {
 
 function releaseSlot() {
   const next = concurrencyWaiters.shift();
-  if (next) next();                                                  // передаём слот ожидающему, счётчик не трогаем
-  else concurrencyFree += 1;                                         // ожидающих нет — возвращаем слот в пул
+  if (next) {
+    next();
+  } // передаём слот ожидающему, счётчик не трогаем
+  else {
+    concurrencyFree += 1;
+  } // ожидающих нет — возвращаем слот в пул
 }
 
 // --- Очередь-цепочка обработки на каждый чат --------------------------------
@@ -107,7 +119,7 @@ function releaseSlot() {
 // подвешивается за хвост и начинает обрабатываться только после завершения предыдущего сообщения
 // того же чата — но независимо от других чатов. Так разные чаты идут параллельно, а внутри
 // одного чата сохраняются порядок обработки и порядок ответов.
-const chatChains = new Map();                                        // chatId -> Promise (хвост цепочки чата)
+const chatChains = new Map(); // chatId -> Promise (хвост цепочки чата)
 
 function enqueueUpdate(message) {
   const chatId = message.chat.id;
@@ -118,7 +130,13 @@ function enqueueUpdate(message) {
   // Когда это звено завершилось и осталось последним в цепочке — убираем ключ, чтобы Map не рос.
   // Глотаем ошибку звена в ветке очистки, иначе отклонение последнего звена цепочки осталось бы
   // необработанным (unhandled rejection): сам next в pollLoop не дожидается и не обрабатывается.
-  next.catch(() => {}).finally(() => { if (chatChains.get(chatId) === next) chatChains.delete(chatId); });
+  next
+    .catch(() => {})
+    .finally(() => {
+      if (chatChains.get(chatId) === next) {
+        chatChains.delete(chatId);
+      }
+    });
 }
 
 function enqueueReactionUpdate(reactionUpdate) {
@@ -126,7 +144,13 @@ function enqueueReactionUpdate(reactionUpdate) {
   const prev = chatChains.get(chatId) || Promise.resolve();
   const next = prev.catch(() => {}).then(() => handleReactionUpdate(reactionUpdate));
   chatChains.set(chatId, next);
-  next.catch(() => {}).finally(() => { if (chatChains.get(chatId) === next) chatChains.delete(chatId); });
+  next
+    .catch(() => {})
+    .finally(() => {
+      if (chatChains.get(chatId) === next) {
+        chatChains.delete(chatId);
+      }
+    });
 }
 
 // Базовый список команд для меню бота (кнопка «Меню» рядом с полем ввода и подсказки при наборе «/»).
@@ -153,7 +177,9 @@ const TRIGGER_LABELS = {
 // Глобально выключено — только базовые команды. Глобально включено: если мастер-флаг пользователя выключен,
 // предлагаем включить проактивность; если включён — предлагаем выключить и открыть настройку поводов.
 function buildCommands(masterEnabled) {
-  if (!config.proactive.enabled) return BOT_COMMANDS;
+  if (!config.proactive.enabled) {
+    return BOT_COMMANDS;
+  }
   if (masterEnabled) {
     return [
       ...BOT_COMMANDS,
@@ -167,10 +193,12 @@ function buildCommands(masterEnabled) {
 // Инлайн-клавиатура подменю проактивности: по кнопке на каждый повод (нажатие переключает его) и отдельная
 // кнопка выключения всей проактивности. Галочка отражает текущее состояние повода.
 function proactivityKeyboard(triggers) {
-  const rows = triggers.map((t) => [{
-    text: `${t.enabled ? '✅' : '⬜'} ${TRIGGER_LABELS[t.trigger_type] || t.trigger_type}`,
-    callback_data: `pa:t:${t.trigger_type}`,
-  }]);
+  const rows = triggers.map((t) => [
+    {
+      text: `${t.enabled ? '✅' : '⬜'} ${TRIGGER_LABELS[t.trigger_type] || t.trigger_type}`,
+      callback_data: `pa:t:${t.trigger_type}`,
+    },
+  ]);
   rows.push([{ text: '🚫 Выключить проактивность', callback_data: 'pa:off' }]);
   return { inline_keyboard: rows };
 }
@@ -191,7 +219,9 @@ async function updateChatMenu(chatId, masterEnabled) {
 // Пересчитать меню чата после обычного сообщения: набор команд зависит от мастер-флага пользователя,
 // который мог измениться. Делаем это только при глобально включённой проактивности.
 async function refreshChatMenu(chatId, externalId) {
-  if (!config.proactive.enabled) return;
+  if (!config.proactive.enabled) {
+    return;
+  }
   try {
     const state = await getProactivityState(externalId);
     await updateChatMenu(chatId, state?.enabled === true);
@@ -208,7 +238,9 @@ async function tg(method, body) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!data.ok) throw new Error(`Telegram ${method}: ${data.description || res.status}`);
+  if (!data.ok) {
+    throw new Error(`Telegram ${method}: ${data.description || res.status}`);
+  }
   return data.result;
 }
 
@@ -237,9 +269,13 @@ async function sendMessage(chatId, text) {
 }
 
 async function saveSentRefs(chatId, sentMessages, conversationMessageId, kind = 'text') {
-  if (!conversationMessageId) return;
+  if (!conversationMessageId) {
+    return;
+  }
   for (const msg of sentMessages || []) {
-    if (!msg?.message_id) continue;
+    if (!msg?.message_id) {
+      continue;
+    }
     await saveMessageExternalRef({
       conversationMessageId,
       channel: 'telegram',
@@ -252,7 +288,9 @@ async function saveSentRefs(chatId, sentMessages, conversationMessageId, kind = 
 
 async function sendReaction(chatId, messageId, reactionKey) {
   const emoji = reactionKeyToEmoji(reactionKey);
-  if (!emoji) throw new Error(`Unknown reaction key: ${reactionKey}`);
+  if (!emoji) {
+    throw new Error(`Unknown reaction key: ${reactionKey}`);
+  }
   await tg('setMessageReaction', {
     chat_id: chatId,
     message_id: messageId,
@@ -269,15 +307,20 @@ async function sendVoice(chatId, audioBuffer) {
   form.append('voice', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg');
   const res = await fetch(`${API}/sendVoice`, { method: 'POST', body: form });
   const data = await res.json();
-  if (!data.ok) throw new Error(`Telegram sendVoice: ${data.description || res.status}`);
+  if (!data.ok) {
+    throw new Error(`Telegram sendVoice: ${data.description || res.status}`);
+  }
   return data.result;
 }
 
 // Показать индикатор «записывает голосовое сообщение…», пока идёт синтез речи — чтобы ожидание выглядело
 // осмысленно. Индикатор необязателен, поэтому ошибку молча проглатываем.
 async function sendVoiceAction(chatId) {
-  try { await tg('sendChatAction', { chat_id: chatId, action: 'record_voice' }); }
-  catch { /* индикатор необязателен */ }
+  try {
+    await tg('sendChatAction', { chat_id: chatId, action: 'record_voice' });
+  } catch {
+    /* индикатор необязателен */
+  }
 }
 
 // Доставить содержательный ответ агента голосом. Короткий ответ без кода и списков озвучивается целиком; для
@@ -288,7 +331,9 @@ async function sendVoiceAction(chatId) {
 async function deliverVoice(chatId, result, state) {
   const answer = result.answer || '(пустой ответ)';
   const { text, summarized } = await buildVoiceText(answer);
-  if (!text) throw new Error('не удалось подготовить текст для синтеза (пустое резюме)');
+  if (!text) {
+    throw new Error('не удалось подготовить текст для синтеза (пустое резюме)');
+  }
 
   // Если озвучивается резюме, полный ответ отправляем текстом заранее: даже если синтез потом упадёт, ответ
   // у пользователя уже есть и повторно слать его не нужно.
@@ -324,10 +369,10 @@ async function deliverAgentResult(chatId, sourceMessageId, result) {
       await deliverVoice(chatId, result, state);
       return;
     } catch (err) {
-      console.error(
-        `Не удалось отправить голосовой ответ в чат ${chatId}: ${err.message}. Отправляю ответ текстом.`,
-      );
-      if (state.fullTextSent) return;                              // полный ответ уже ушёл текстом при сбое синтеза
+      console.error(`Не удалось отправить голосовой ответ в чат ${chatId}: ${err.message}. Отправляю ответ текстом.`);
+      if (state.fullTextSent) {
+        return;
+      } // полный ответ уже ушёл текстом при сбое синтеза
     }
   }
   const sent = await sendMessage(chatId, result.answer || '(пустой ответ)');
@@ -336,8 +381,11 @@ async function deliverAgentResult(chatId, sourceMessageId, result) {
 
 // Показать индикатор «печатает…», пока агент думает над ответом.
 async function sendTyping(chatId) {
-  try { await tg('sendChatAction', { chat_id: chatId, action: 'typing' }); }
-  catch { /* индикатор необязателен */ }
+  try {
+    await tg('sendChatAction', { chat_id: chatId, action: 'typing' });
+  } catch {
+    /* индикатор необязателен */
+  }
 }
 
 // Показывать индикатор «печатает…» непрерывно, пока идёт длительная обработка (скачивание и распознавание речи).
@@ -366,14 +414,16 @@ function voiceLimitMessage(reason) {
 // Обработка служебных команд. Возвращает true, если сообщение было командой и уже обработано.
 async function handleCommand(chatId, externalId, text) {
   if (text === '/start' || text === '/help') {
-    let help = 'Привет! Я чат-бот с долговременной памятью. Просто пишите мне — я запоминаю важное и отвечаю '
-      + 'с учётом прошлых разговоров.\n\nКоманды:\n'
-      + '/domain <ключ> — сменить домен общения (например, work или personal).';
+    let help =
+      'Привет! Я чат-бот с долговременной памятью. Просто пишите мне — я запоминаю важное и отвечаю ' +
+      'с учётом прошлых разговоров.\n\nКоманды:\n' +
+      '/domain <ключ> — сменить домен общения (например, work или personal).';
     if (config.proactive.enabled) {
-      help += '\n\nПроактивность (бот сам пишет первым по уместному поводу):\n'
-        + '/proactivity_on — включить проактивность;\n'
-        + '/proactivity_off — выключить проактивность;\n'
-        + '/proactivity — выбрать, по каким поводам бот может писать первым.';
+      help +=
+        '\n\nПроактивность (бот сам пишет первым по уместному поводу):\n' +
+        '/proactivity_on — включить проактивность;\n' +
+        '/proactivity_off — выключить проактивность;\n' +
+        '/proactivity — выбрать, по каким поводам бот может писать первым.';
     }
     await sendMessage(chatId, help);
     return true;
@@ -392,9 +442,11 @@ async function handleCommand(chatId, externalId, text) {
     }
     await setUserProactivity(externalId, true);
     await updateChatMenu(chatId, true);
-    await sendMessage(chatId,
-      'Проактивность включена. Пока ни один повод не активирован, поэтому бот ещё ничего сам не пришлёт. '
-      + 'Откройте команду /proactivity и выберите поводы, по которым бот может писать первым.');
+    await sendMessage(
+      chatId,
+      'Проактивность включена. Пока ни один повод не активирован, поэтому бот ещё ничего сам не пришлёт. ' +
+        'Откройте команду /proactivity и выберите поводы, по которым бот может писать первым.',
+    );
     return true;
   }
   if (text === '/proactivity_off') {
@@ -410,8 +462,10 @@ async function handleCommand(chatId, externalId, text) {
     }
     const state = await getProactivityState(externalId);
     if (!state || !state.enabled) {
-      await sendMessage(chatId,
-        'Проактивность у вас выключена. Сначала включите её командой /proactivity_on, затем настройте поводы.');
+      await sendMessage(
+        chatId,
+        'Проактивность у вас выключена. Сначала включите её командой /proactivity_on, затем настройте поводы.',
+      );
       return true;
     }
     await tg('sendMessage', {
@@ -437,9 +491,11 @@ async function handleCallback(cq) {
       await updateChatMenu(chatId, false);
       await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Проактивность выключена.' });
       await tg('editMessageText', {
-        chat_id: chatId, message_id: messageId,
-        text: 'Проактивность выключена. Бот больше не будет писать первым. '
-          + 'Чтобы снова включить — команда /proactivity_on.',
+        chat_id: chatId,
+        message_id: messageId,
+        text:
+          'Проактивность выключена. Бот больше не будет писать первым. ' +
+          'Чтобы снова включить — команда /proactivity_on.',
       });
       return;
     }
@@ -456,7 +512,8 @@ async function handleCallback(cq) {
         text: `${label}: ${next ? 'повод включён' : 'повод выключен'}.`,
       });
       await tg('editMessageReplyMarkup', {
-        chat_id: chatId, message_id: messageId,
+        chat_id: chatId,
+        message_id: messageId,
         reply_markup: proactivityKeyboard(updated ? updated.triggers : []),
       });
       return;
@@ -465,8 +522,11 @@ async function handleCallback(cq) {
     await tg('answerCallbackQuery', { callback_query_id: cq.id });
   } catch (err) {
     console.error(`Ошибка обработки нажатия кнопки в чате ${chatId}:`, err.message);
-    try { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Не получилось, попробуйте ещё раз.' }); }
-    catch { /* «часики» закроются сами по тайм-ауту */ }
+    try {
+      await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Не получилось, попробуйте ещё раз.' });
+    } catch {
+      /* «часики» закроются сами по тайм-ауту */
+    }
   }
 }
 
@@ -477,17 +537,23 @@ async function handleUpdate(message) {
   let text = (message.text || '').trim();
 
   // Текстовые команды разбираются до распознавания речи.
-  if (text.startsWith('/') && await handleCommand(chatId, externalId, text)) return;
+  if (text.startsWith('/') && (await handleCommand(chatId, externalId, text))) {
+    return;
+  }
 
   // Если текста нет, пробуем распознать вложение с речью (голос, кружок, аудио- или видеофайл).
   // При выключенном или неготовом контуре распознавания такое сообщение, как и раньше, игнорируется.
-  const attachment = (!text && voiceReady) ? detectAttachment(message) : null;
-  if (!text && !attachment) return;
+  const attachment = !text && voiceReady ? detectAttachment(message) : null;
+  if (!text && !attachment) {
+    return;
+  }
 
   const domainKey = chatDomains.get(chatId) || 'general';
   // Реакции применяем только к чистому тексту; на голос всегда отвечаем по сути.
   const reactionCandidate = !attachment && shouldConsiderReaction(text);
-  if (!reactionCandidate) await sendTyping(chatId);
+  if (!reactionCandidate) {
+    await sendTyping(chatId);
+  }
   // Захватываем слот семафора на весь тяжёлый участок: для голоса это скачивание файла, распознавание и
   // последующий вызов агента, для текста — только вызов агента. Слот ограничивает нагрузку на прокси и STT.
   await acquireSlot();
@@ -496,7 +562,8 @@ async function handleUpdate(message) {
     if (attachment) {
       // Проверяем лимиты до скачивания: слишком длинные или слишком большие вложения отклоняем сразу.
       const limit = checkAttachmentLimits(attachment, {
-        maxSeconds: config.voiceInput.maxSeconds, maxBytes: config.voiceInput.maxBytes,
+        maxSeconds: config.voiceInput.maxSeconds,
+        maxBytes: config.voiceInput.maxBytes,
       });
       if (!limit.ok) {
         await sendMessage(chatId, voiceLimitMessage(limit.reason));
@@ -507,8 +574,11 @@ async function handleUpdate(message) {
       let stt;
       try {
         stt = await transcribeTelegramAttachment({
-          attachment, telegramApiBase: API, botToken: TOKEN,
-          provider: config.voiceInput.provider, language: config.voiceInput.language,
+          attachment,
+          telegramApiBase: API,
+          botToken: TOKEN,
+          provider: config.voiceInput.provider,
+          language: config.voiceInput.language,
         });
       } catch (err) {
         console.error(`Не удалось распознать аудио в чате ${chatId}:`, err.message);
@@ -516,12 +586,14 @@ async function handleUpdate(message) {
         return;
       }
       if (stt.empty) {
-        await sendMessage(chatId,
-          'Не удалось распознать речь — возможно, в записи нет голоса или она слишком тихая. '
-          + 'Попробуйте записать ещё раз.');
+        await sendMessage(
+          chatId,
+          'Не удалось распознать речь — возможно, в записи нет голоса или она слишком тихая. ' +
+            'Попробуйте записать ещё раз.',
+        );
         return;
       }
-      text = stt.text;
+      ({ text } = stt);
       // Для присланных аудио- и видеофайлов показываем распознанный текст, для голоса и кружков — нет.
       if (shouldEchoTranscript(attachment.kind)) {
         await sendMessage(chatId, `Распознанный текст: ${text}`);
@@ -561,8 +633,11 @@ async function handleUpdate(message) {
     // неточным — это приемлемо, потому что смена режима происходит нечасто, не на каждом сообщении.
     let userReplyMode = 'text';
     if (config.voiceOutput.enabled) {
-      try { userReplyMode = await getUserReplyMode(externalId); }
-      catch { userReplyMode = 'text'; }   // при сбое чтения безопаснее считать текстовым (стриминг разрешён)
+      try {
+        userReplyMode = await getUserReplyMode(externalId);
+      } catch {
+        userReplyMode = 'text';
+      } // при сбое чтения безопаснее считать текстовым (стриминг разрешён)
     }
     const useStream = config.streaming.enabled && config.streaming.telegramEnabled && userReplyMode !== 'voice';
     if (useStream) {
@@ -583,15 +658,20 @@ async function handleUpdate(message) {
       });
       try {
         const res = await handleMessage({
-          externalId, userMessage: text, domainKey, channel: 'telegram', stream: true, onEvent: progress.onEvent,
+          externalId,
+          userMessage: text,
+          domainKey,
+          channel: 'telegram',
+          stream: true,
+          onEvent: progress.onEvent,
         });
-        chatDomains.set(chatId, res.domainKey);                    // агент мог сменить домен по смыслу запроса
+        chatDomains.set(chatId, res.domainKey); // агент мог сменить домен по смыслу запроса
         const sent = await progress.complete(res.answer || '(пустой ответ)');
         await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
         await refreshChatMenu(chatId, externalId);
       } catch (err) {
         await progress.fail(err);
-        throw err;                                                 // общий обработчик ниже отправит текст сбоя
+        throw err; // общий обработчик ниже отправит текст сбоя
       } finally {
         progress.finish();
       }
@@ -599,7 +679,7 @@ async function handleUpdate(message) {
     }
 
     const res = await handleMessage({ externalId, userMessage: text, domainKey, channel: 'telegram' });
-    chatDomains.set(chatId, res.domainKey);                        // агент мог сменить домен по смыслу запроса
+    chatDomains.set(chatId, res.domainKey); // агент мог сменить домен по смыслу запроса
     await deliverAgentResult(chatId, message.message_id, res);
     // Меню команд зависит от мастер-флага проактивности, который мог измениться, — пересчитываем его.
     await refreshChatMenu(chatId, externalId);
@@ -607,7 +687,9 @@ async function handleUpdate(message) {
     console.error(`Ошибка обработки сообщения чата ${chatId}:`, err.message);
     await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте ещё раз чуть позже.');
   } finally {
-    if (stopTyping) stopTyping();
+    if (stopTyping) {
+      stopTyping();
+    }
     releaseSlot();
   }
 }
@@ -615,12 +697,16 @@ async function handleUpdate(message) {
 async function handleReactionUpdate(reactionUpdate) {
   const chatId = reactionUpdate.chat.id;
   const externalId = String(chatId);
-  if (reactionUpdate.user?.is_bot) return;
+  if (reactionUpdate.user?.is_bot) {
+    return;
+  }
   const newReaction = Array.isArray(reactionUpdate.new_reaction) ? reactionUpdate.new_reaction[0] : null;
   const oldReaction = Array.isArray(reactionUpdate.old_reaction) ? reactionUpdate.old_reaction[0] : null;
   const reactionKey = normalizeTelegramReaction(newReaction);
   const oldReactionKey = normalizeTelegramReaction(oldReaction);
-  if (!reactionKey && !oldReactionKey) return;
+  if (!reactionKey && !oldReactionKey) {
+    return;
+  }
 
   await acquireSlot();
   try {
@@ -652,12 +738,14 @@ async function handleReactionUpdate(reactionUpdate) {
 
 // Слив очереди доставки mem.notification_outbox в Telegram.
 // Получатель определяется по external_id пользователя — это идентификатор чата Telegram.
-let draining = false;                                                // флаг «слив очереди уже идёт»
+let draining = false; // флаг «слив очереди уже идёт»
 
 async function drainOutbox() {
   // Событие LISTEN/NOTIFY и страховочный таймер могут позвать слив одновременно.
   // Флаг не даёт двум проходам отправить одни и те же сообщения дважды в рамках процесса.
-  if (draining) return 0;
+  if (draining) {
+    return 0;
+  }
   draining = true;
   try {
     return await drainOutboxOnce();
@@ -673,14 +761,17 @@ async function drainOutboxOnce() {
        JOIN mem.users u ON u.id = o.user_id
       WHERE o.status = 'pending' AND o.next_attempt_at <= now()
       ORDER BY o.created_at ASC
-      LIMIT 20`);
+      LIMIT 20`,
+  );
   for (const row of rows) {
     const chatId = Number(row.external_id);
     if (!Number.isFinite(chatId)) {
       // Пользователь не из Telegram (например, тестовый cli-user) — этот канал не для него, пропускаем.
       await query(
         `UPDATE mem.notification_outbox SET status = 'cancelled', error_text = 'recipient is not a telegram chat'
-          WHERE id = $1`, [row.id]);
+          WHERE id = $1`,
+        [row.id],
+      );
       continue;
     }
     try {
@@ -688,9 +779,10 @@ async function drainOutboxOnce() {
       if (row.payload?.conversation_message_id) {
         await saveSentRefs(chatId, sent, row.payload.conversation_message_id, row.payload.kind || 'outbox');
       }
-      await query(
-        `UPDATE mem.notification_outbox SET status = 'sent', sent_at = now(), recipient = $2 WHERE id = $1`,
-        [row.id, String(chatId)]);
+      await query(`UPDATE mem.notification_outbox SET status = 'sent', sent_at = now(), recipient = $2 WHERE id = $1`, [
+        row.id,
+        String(chatId),
+      ]);
     } catch (err) {
       // Откладываем повторную попытку на минуту; после 5 неудач помечаем как проваленную.
       await query(
@@ -699,7 +791,9 @@ async function drainOutboxOnce() {
                 next_attempt_at = now() + interval '1 minute',
                 error_text = $2,
                 status = CASE WHEN attempts + 1 >= 5 THEN 'failed' ELSE 'pending' END
-          WHERE id = $1`, [row.id, String(err.message || err)]);
+          WHERE id = $1`,
+        [row.id, String(err.message || err)],
+      );
       console.error(`Не удалось доставить сообщение в чат ${chatId}:`, err.message);
     }
   }
@@ -709,8 +803,8 @@ async function drainOutboxOnce() {
 // --- Событийная доставка очереди через LISTEN/NOTIFY ------------------------
 // Выделенное соединение-слушатель канала «outbox_new». Уведомления приходят на конкретное
 // соединение, а не через пул, поэтому общий хелпер query из db.js здесь не подходит.
-let outboxListener = null;                                           // активный клиент-слушатель (или null)
-let listenerReconnectTimer = null;                                   // таймер запланированного переподключения
+let outboxListener = null; // активный клиент-слушатель (или null)
+let listenerReconnectTimer = null; // таймер запланированного переподключения
 
 async function startOutboxListener() {
   try {
@@ -719,7 +813,9 @@ async function startOutboxListener() {
     client.on('notification', (msg) => {
       if (msg.channel === 'scheduler_wake') {
         // Создана новая задача планировщика — будим фоновый цикл, чтобы он не ждал до конца сна.
-        if (wakeWorker) wakeWorker();
+        if (wakeWorker) {
+          wakeWorker();
+        }
         return;
       }
       // Пришло уведомление о новой записи в очереди доставки — опустошаем очередь немедленно.
@@ -727,10 +823,10 @@ async function startOutboxListener() {
     });
     client.on('error', (e) => {
       console.error('Ошибка соединения-слушателя очереди доставки:', e.message);
-      scheduleListenerReconnect();                                   // соединение разорвано — переоткрываем
+      scheduleListenerReconnect(); // соединение разорвано — переоткрываем
     });
     await client.query('LISTEN outbox_new');
-    await client.query('LISTEN scheduler_wake');                     // мгновенное пробуждение воркера при новой задаче
+    await client.query('LISTEN scheduler_wake'); // мгновенное пробуждение воркера при новой задаче
     // Уведомления не переживают обрыв соединения: сразу после подписки один раз опустошаем очередь,
     // чтобы забрать всё, что накопилось за время запуска или простоя слушателя.
     await drainOutbox();
@@ -741,23 +837,38 @@ async function startOutboxListener() {
 }
 
 function scheduleListenerReconnect() {
-  if (listenerReconnectTimer || !running) return;                    // переподключение уже запланировано или идёт остановка
+  if (listenerReconnectTimer || !running) {
+    return;
+  } // переподключение уже запланировано или идёт остановка
   // Освобождаем отвалившееся соединение с уничтожением, чтобы не копить «висящих» клиентов в пуле.
   if (outboxListener) {
-    try { outboxListener.release(true); } catch { /* соединение уже разорвано */ }
+    try {
+      outboxListener.release(true);
+    } catch {
+      /* соединение уже разорвано */
+    }
     outboxListener = null;
   }
   listenerReconnectTimer = setTimeout(() => {
     listenerReconnectTimer = null;
-    if (running) startOutboxListener();
-  }, 3000);                                                          // небольшая пауза перед повторной попыткой
+    if (running) {
+      startOutboxListener();
+    }
+  }, 3000); // небольшая пауза перед повторной попыткой
 }
 
 // Прерываемый сон фонового цикла: завершается по тайм-ауту или по уведомлению о новой задаче.
 function sleepWorker(ms) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => { wakeWorker = null; resolve(); }, ms);
-    wakeWorker = () => { clearTimeout(timer); wakeWorker = null; resolve(); };
+    const timer = setTimeout(() => {
+      wakeWorker = null;
+      resolve();
+    }, ms);
+    wakeWorker = () => {
+      clearTimeout(timer);
+      wakeWorker = null;
+      resolve();
+    };
   });
 }
 
@@ -779,15 +890,18 @@ function computeWorkerSleepMs(nextTaskMs, lastSafetyDrainAt) {
 // Фоновый цикл: планировщик задач, проактивный контур и страховочная доставка из очереди в Telegram.
 async function workerLoop() {
   let lastSafetyDrainAt = 0;
+  // eslint-disable-next-line no-unmodified-loop-condition -- running выставляется в false обработчиком завершения между await
   while (running) {
     let nextTaskMs = null;
     try {
-      await tick();                                                 // выполнить просроченные задачи (напоминания и т.п.)
+      await tick(); // выполнить просроченные задачи (напоминания и т.п.)
 
       if (config.proactive.enabled && Date.now() - lastProactiveAt >= config.proactive.intervalMs) {
         lastProactiveAt = Date.now();
         await checkProactiveTriggers();
-        if (config.proactive.events.enabled) await processEvents();
+        if (config.proactive.events.enabled) {
+          await processEvents();
+        }
       }
 
       // Страховочный слив: основная доставка событийная (LISTEN/NOTIFY), а этот редкий проход
@@ -809,40 +923,50 @@ async function workerLoop() {
 // Цикл длинного опроса входящих сообщений.
 async function pollLoop() {
   let offset = 0;
+  // eslint-disable-next-line no-unmodified-loop-condition -- running выставляется в false обработчиком завершения между await
   while (running) {
     let updates;
     try {
       updates = await tg('getUpdates', {
-        offset, timeout: POLL_TIMEOUT_SEC, allowed_updates: ['message', 'callback_query', 'message_reaction'],
+        offset,
+        timeout: POLL_TIMEOUT_SEC,
+        allowed_updates: ['message', 'callback_query', 'message_reaction'],
       });
     } catch (err) {
       console.error('Ошибка длинного опроса getUpdates:', err.message);
-      await new Promise((res) => setTimeout(res, 3000));            // пауза перед повтором после сбоя сети
+      await new Promise((res) => setTimeout(res, 3000)); // пауза перед повтором после сбоя сети
       continue;
     }
     for (const update of updates) {
-      offset = update.update_id + 1;                                // подтверждаем обработку, чтобы не получить повтор
+      offset = update.update_id + 1; // подтверждаем обработку, чтобы не получить повтор
       // Не ждём обработку: ставим сообщение в цепочку его чата и сразу продолжаем опрос.
       // Разные чаты обрабатываются параллельно, внутри чата — строго по порядку.
-      if (update.message) enqueueUpdate(update.message);
-      else if (update.message_reaction) enqueueReactionUpdate(update.message_reaction);
+      if (update.message) {
+        enqueueUpdate(update.message);
+      } else if (update.message_reaction) {
+        enqueueReactionUpdate(update.message_reaction);
+      }
       // Нажатия инлайн-кнопок обрабатываем сразу (без вызова LLM и без семафора): это лёгкие операции
       // с базой и перерисовкой клавиатуры. Ошибку только логируем, чтобы не оборвать опрос.
       else if (update.callback_query) {
-        handleCallback(update.callback_query)
-          .catch((e) => console.error('Ошибка обработки callback_query:', e.message));
+        handleCallback(update.callback_query).catch((e) =>
+          console.error('Ошибка обработки callback_query:', e.message),
+        );
       }
     }
   }
 }
 
 async function main() {
-  const me = await tg('getMe', {});                                 // заодно проверяем валидность токена
+  const me = await tg('getMe', {}); // заодно проверяем валидность токена
   // Регистрируем глобальное меню команд как запасной набор по умолчанию (для чатов без своего меню).
   // При глобально включённой проактивности это базовые команды плюс /proactivity_on; иначе — только базовые.
   // Меню конкретного чата уточняется динамически в updateChatMenu/refreshChatMenu. Сбой не критичен.
-  try { await tg('setMyCommands', { commands: buildCommands(false) }); }
-  catch (err) { console.error('Не удалось зарегистрировать меню команд:', err.message); }
+  try {
+    await tg('setMyCommands', { commands: buildCommands(false) });
+  } catch (err) {
+    console.error('Не удалось зарегистрировать меню команд:', err.message);
+  }
   // Распознавание входящего аудио: включаем только если общий флаг поднят и для распознавателя задан ключ.
   // Иначе пишем понятную причину в журнал и оставляем контур выключенным, не падая на первом голосовом.
   if (config.voiceInput.enabled) {
@@ -857,16 +981,20 @@ async function main() {
       console.warn(`Распознавание входящего аудио выключено: ${reason}. Голосовые сообщения будут игнорироваться.`);
     }
   }
-  console.log(`Профиль представления канала «telegram» зарегистрирован: ответ форматируется разметкой Telegram `
-    + `(parse_mode=${TELEGRAM_PROFILE.parseMode}).`);
+  console.log(
+    `Профиль представления канала «telegram» зарегистрирован: ответ форматируется разметкой Telegram ` +
+      `(parse_mode=${TELEGRAM_PROFILE.parseMode}).`,
+  );
   // Стартовая диагностика внешних MCP-серверов: выводим объявленный список и проверяем подключение к каждому
   // сразу при запуске, а не лениво при первом сообщении. initTools кэширует промис, поэтому позже, при первом
   // обращении агента, повторного подключения не происходит — используется уже собранный реестр инструментов.
   console.log('Проверяю подключение к объявленным MCP-серверам…');
   await initTools();
-  console.log(`Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
-    config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.');
-  await startOutboxListener();                                       // событийная доставка очереди (LISTEN/NOTIFY)
+  console.log(
+    `Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
+    config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.',
+  );
+  await startOutboxListener(); // событийная доставка очереди (LISTEN/NOTIFY)
   await Promise.all([pollLoop(), workerLoop()]);
 }
 
@@ -874,12 +1002,23 @@ async function main() {
 async function shutdown() {
   console.log('\nЗавершение работы Telegram-бота…');
   running = false;
-  if (listenerReconnectTimer) { clearTimeout(listenerReconnectTimer); listenerReconnectTimer = null; }
+  if (listenerReconnectTimer) {
+    clearTimeout(listenerReconnectTimer);
+    listenerReconnectTimer = null;
+  }
   if (outboxListener) {
-    try { outboxListener.release(true); } catch { /* соединение уже разорвано */ }
+    try {
+      outboxListener.release(true);
+    } catch {
+      /* соединение уже разорвано */
+    }
     outboxListener = null;
   }
-  try { await closePool(); } catch { /* пул мог быть не открыт */ }
+  try {
+    await closePool();
+  } catch {
+    /* пул мог быть не открыт */
+  }
   process.exit(0);
 }
 process.on('SIGINT', shutdown);

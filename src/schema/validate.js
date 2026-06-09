@@ -16,21 +16,56 @@ import { embed } from '../llm.js';
 
 // Сопоставление кириллических букв латинским сочетаниям для построения slug.
 const TRANSLIT = {
-  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
-  й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't',
-  у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y',
-  ь: '', э: 'e', ю: 'yu', я: 'ya',
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'e',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'y',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'h',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'sch',
+  ъ: '',
+  ы: 'y',
+  ь: '',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
 };
 
 // Привести произвольную строку к slug: транслитерация кириллицы, нижний регистр,
 // разделение дефисами, без лишних символов. Например «Стамбул» становится «stambul».
 export function slugify(value) {
-  const lower = String(value || '').trim().toLowerCase();
+  const lower = String(value || '')
+    .trim()
+    .toLowerCase();
   let out = '';
   for (const ch of lower) {
-    if (Object.prototype.hasOwnProperty.call(TRANSLIT, ch)) out += TRANSLIT[ch];
-    else if (/[a-z0-9]/.test(ch)) out += ch;
-    else out += '-';
+    if (Object.prototype.hasOwnProperty.call(TRANSLIT, ch)) {
+      out += TRANSLIT[ch];
+    } else if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+    } else {
+      out += '-';
+    }
   }
   // Схлопнуть повторяющиеся дефисы и обрезать их по краям.
   return out.replace(/-+/g, '-').replace(/^-|-$/g, '');
@@ -47,7 +82,9 @@ function cosine(a, b) {
     na += a[i] * a[i];
     nb += b[i] * b[i];
   }
-  if (na === 0 || nb === 0) return 0;
+  if (na === 0 || nb === 0) {
+    return 0;
+  }
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
@@ -56,13 +93,19 @@ function cosine(a, b) {
 // как запасной вариант, когда точное совпадение и синонимы не сработали.
 async function nearestVocabKey(value, vocabulary) {
   const valueVec = await embed(value);
-  if (!valueVec) return null;
+  if (!valueVec) {
+    return null;
+  }
   let best = null;
   for (const key of vocabulary) {
     const keyVec = await embed(key);
-    if (!keyVec) continue;
+    if (!keyVec) {
+      continue;
+    }
     const score = cosine(valueVec, keyVec);
-    if (!best || score > best.score) best = { key, score };
+    if (!best || score > best.score) {
+      best = { key, score };
+    }
   }
   return best;
 }
@@ -73,18 +116,22 @@ async function nearestVocabKey(value, vocabulary) {
 // Возвращает { entity_key, issues }.
 async function canonicalizeKey(rawKey, keySpec) {
   const issues = [];
-  const mode = keySpec.mode;
+  const { mode } = keySpec;
 
   if (mode === 'slug') {
     const slug = slugify(rawKey);
-    if (!slug) issues.push(`entity_key «${rawKey}» после нормализации в slug оказался пустым.`);
+    if (!slug) {
+      issues.push(`entity_key «${rawKey}» после нормализации в slug оказался пустым.`);
+    }
     return { entity_key: slug || rawKey, issues };
   }
 
   // fixed_vocab
   const vocabulary = keySpec.vocabulary || [];
   // 1. Точное совпадение со словарём — ничего менять не нужно.
-  if (vocabulary.includes(rawKey)) return { entity_key: rawKey, issues };
+  if (vocabulary.includes(rawKey)) {
+    return { entity_key: rawKey, issues };
+  }
 
   // 2. Поиск по синонимам: «откуда» приводим к каноническому «departure».
   const lowered = String(rawKey).trim().toLowerCase();
@@ -97,7 +144,9 @@ async function canonicalizeKey(rawKey, keySpec) {
   // 3. Ближайший по смыслу ключ словаря (эмбеддинги), если близость выше порога.
   const nearest = await nearestVocabKey(rawKey, vocabulary);
   if (nearest && nearest.score >= config.schema.keyEmbedThreshold) {
-    issues.push(`entity_key «${rawKey}» канонизирован по смыслу в «${nearest.key}» (близость ${nearest.score.toFixed(2)}).`);
+    issues.push(
+      `entity_key «${rawKey}» канонизирован по смыслу в «${nearest.key}» (близость ${nearest.score.toFixed(2)}).`,
+    );
     return { entity_key: nearest.key, issues };
   }
 
@@ -123,14 +172,16 @@ function normalizeData(data, dataSchema) {
 
     if (value === undefined) {
       // Отсутствующее поле: null, если допустим, иначе пустой массив для массива.
-      value = types.includes('null') ? null : (types.includes('array') ? [] : null);
+      value = types.includes('null') ? null : types.includes('array') ? [] : null;
     } else if (types.includes('array') && !Array.isArray(value) && value !== null) {
       // Одиночное значение там, где ждут массив — оборачиваем в массив.
       value = [value];
     } else if ((types.includes('integer') || types.includes('number')) && typeof value === 'string') {
       // Строка-число — приводим к числу, если получается.
       const num = Number(value);
-      if (!Number.isNaN(num)) value = types.includes('integer') ? Math.trunc(num) : num;
+      if (!Number.isNaN(num)) {
+        value = types.includes('integer') ? Math.trunc(num) : num;
+      }
     }
     out[field] = value;
   }
@@ -157,7 +208,10 @@ export async function validateAndCanonicalize(domainKey, candidate) {
   const definition = await loadDomainDefinition(domainKey);
   if (!definition) {
     return {
-      ok: false, candidate, schema_version: null, reason: 'domain_without_schema',
+      ok: false,
+      candidate,
+      schema_version: null,
+      reason: 'domain_without_schema',
       issues: [`У домена «${domainKey}» нет активной схемы, а факт содержит сущность «${candidate.entity_type}».`],
     };
   }
@@ -165,7 +219,10 @@ export async function validateAndCanonicalize(domainKey, candidate) {
   const spec = await getEntitySpec(domainKey, candidate.entity_type);
   if (!spec) {
     return {
-      ok: false, candidate, schema_version: await getActiveVersion(domainKey), reason: 'entity_not_in_schema',
+      ok: false,
+      candidate,
+      schema_version: await getActiveVersion(domainKey),
+      reason: 'entity_not_in_schema',
       issues: [`Сущность «${candidate.entity_type}» не объявлена в схеме домена «${domainKey}».`],
     };
   }

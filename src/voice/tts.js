@@ -14,19 +14,23 @@ import { chat } from '../llm.js';
 // знаки Markdown (звёздочки, подчёркивания, обратные кавычки, решётки заголовков, маркеры цитат).
 export function stripMarkup(text) {
   return String(text || '')
-    .replace(/<[^>]+>/g, '')                                       // HTML-теги
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') // экранированные сущности обратно
-    .replace(/`{1,3}/g, '')                                        // обратные кавычки кода
-    .replace(/(\*\*|__|\*|_)/g, '')                                // жирный/курсив Markdown
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')                            // решётки заголовков в начале строки
-    .replace(/^\s*>\s?/gm, '');                                    // маркеры цитат в начале строки
+    .replace(/<[^>]+>/g, '') // HTML-теги
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&') // экранированные сущности обратно
+    .replace(/`{1,3}/g, '') // обратные кавычки кода
+    .replace(/(\*\*|__|\*|_)/g, '') // жирный/курсив Markdown
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // решётки заголовков в начале строки
+    .replace(/^\s*>\s?/gm, ''); // маркеры цитат в начале строки
 }
 
 // Признак, что ответ содержит код или длинные списки и потому плохо звучит вслух. Срабатывает на блоки кода
 // в тройных обратных кавычках и на два и более подряд идущих пунктов маркированного или нумерованного списка.
 export function hasCodeOrList(text) {
   const s = String(text || '');
-  if (/```/.test(s)) return true;
+  if (/```/.test(s)) {
+    return true;
+  }
   const listLines = s.split('\n').filter((line) => /^\s*([-*•]|\d+[.)])\s+/.test(line));
   return listLines.length >= 2;
 }
@@ -35,11 +39,15 @@ export function hasCodeOrList(text) {
 // нет (она пришлась бы на самое начало), режем жёстко по лимиту. Результат очищается от крайних пробелов.
 export function clampToLimit(text, limit) {
   const s = String(text || '').trim();
-  if (s.length <= limit) return s;
+  if (s.length <= limit) {
+    return s;
+  }
   const slice = s.slice(0, limit);
   const m = slice.match(/[\s\S]*[.!?…](?:\s|$)/);
   let cut = m ? m[0].length : -1;
-  if (cut < limit * 0.5) cut = limit;                              // удобной границы нет — режем по лимиту
+  if (cut < limit * 0.5) {
+    cut = limit;
+  } // удобной границы нет — режем по лимиту
   return s.slice(0, cut).trim();
 }
 
@@ -118,7 +126,9 @@ export async function synthesizeSpeech(text, opts = {}) {
         throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
       }
       const buf = Buffer.from(await res.arrayBuffer());
-      if (!buf.length) throw new Error('провайдер TTS вернул пустой аудиоответ');
+      if (!buf.length) {
+        throw new Error('провайдер TTS вернул пустой аудиоответ');
+      }
       return buf;
     } catch (err) {
       lastErr = err;

@@ -1,4 +1,3 @@
-
 // https://platform.openai.com/docs/models
 // Цены указаны за 1млн токенов https://openai.com/api/pricing/
 
@@ -24,16 +23,15 @@ export const openAiModelMeta = {
   'gpt-5-nano': { kT: 400, mot: 128, inp: 0.05, out: 0.4, inpB: 0.025, outB: 0.2 },
   'gpt-5-search-api': { kT: 400, mot: 128, inp: 0, out: 0, inpB: 0, outB: 0 },
 
-
-  'gpt-4.1': { kT: 1047, mot: 32, inp: 2.00, out: 8.00, inpB: 1.00, outB: 4.00 },
-  'gpt-4.1-mini': { kT: 1047, mot: 32, inp: 0.40, out: 1.60, inpB: 0.20, outB: 0.80 },
-  'gpt-4.1-nano': { kT: 1047, mot: 32.768, inp: 0.10, out: 0.40, inpB: 0.05, outB: 0.20 },
+  'gpt-4.1': { kT: 1047, mot: 32, inp: 2.0, out: 8.0, inpB: 1.0, outB: 4.0 },
+  'gpt-4.1-mini': { kT: 1047, mot: 32, inp: 0.4, out: 1.6, inpB: 0.2, outB: 0.8 },
+  'gpt-4.1-nano': { kT: 1047, mot: 32.768, inp: 0.1, out: 0.4, inpB: 0.05, outB: 0.2 },
 
   'gpt-4o': { kT: 128, mot: 16.384, inp: 2.5, out: 10, inpB: 1.25, outB: 5.0 },
 
   'gpt-4o-audio-preview': { kT: 128, mot: 16.384, inp: 2.5, out: 10, inpB: 2.5, outB: 10 },
 
-  'gpt-4o-mini': { kT: 128, mot: 16.384, inp: 0.15, out: 0.6, inpB: 0.075, outB: 0.30 },
+  'gpt-4o-mini': { kT: 128, mot: 16.384, inp: 0.15, out: 0.6, inpB: 0.075, outB: 0.3 },
 
   'gpt-4o-mini-audio-preview': { kT: 0, inp: 0, out: 0, inpB: 0, outB: 0 },
   'gpt-4o-mini-realtime-preview': { kT: 0, inp: 0, out: 0, inpB: 0, outB: 0 },
@@ -61,14 +59,30 @@ export const openAiModelMeta = {
   'sora-2': { kT: 999, mot: 999, inp: 0, out: 0, inpB: 0, outB: 0 },
   'sora-2-pro': { kT: 999, mot: 999, inp: 0, out: 0, inpB: 0, outB: 0 },
 
-  'o4-mini': { kT: 200, mot: 100, inp: 1.1, out: 4.4, inpB: 0.55, outB: 2.20 },
+  'o4-mini': { kT: 200, mot: 100, inp: 1.1, out: 4.4, inpB: 0.55, outB: 2.2 },
   'o4-mini-deep-research': { kT: 200, mot: 100, inp: 2, out: 8, inpB: 2, outB: 8 },
-  'codex-mini-latest': { kT: 200, mot: 100, inp: 1.50, out: 6.0, inpB: 1.50, outB: 6.0 },
+  'codex-mini-latest': { kT: 200, mot: 100, inp: 1.5, out: 6.0, inpB: 1.5, outB: 6.0 },
 
   'tts-1': { kT: 1, inp: 15, out: 15, inpB: 15, outB: 15 },
   'tts-1-hd': { kT: 1, inp: 30, out: 30, inpB: 30, outB: 30 },
   'whisper-1': { kT: 1, inp: 0.006, out: 0.006, inpB: 0.006, outB: 0.006 },
 
-  'text-embedding-3-small': { kT: 8.192, inp: 0.02, out: 0.02, inpB: 0.01, outB: 0.01, dimensions: [512, 1536], dimensionsAllowed: true },
-  'text-embedding-3-large': { kT: 8.192, inp: 0.13, out: 0.13, inpB: 0.065, outB: 0.065, dimensions: [256, 1024, 1536, 3072], dimensionsAllowed: true },
+  'text-embedding-3-small': {
+    kT: 8.192,
+    inp: 0.02,
+    out: 0.02,
+    inpB: 0.01,
+    outB: 0.01,
+    dimensions: [512, 1536],
+    dimensionsAllowed: true,
+  },
+  'text-embedding-3-large': {
+    kT: 8.192,
+    inp: 0.13,
+    out: 0.13,
+    inpB: 0.065,
+    outB: 0.065,
+    dimensions: [256, 1024, 1536, 3072],
+    dimensionsAllowed: true,
+  },
 };

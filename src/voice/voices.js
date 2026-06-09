@@ -47,7 +47,9 @@ const GENDER_ALIASES = Object.freeze({
 });
 
 export function normalizeVoiceId(value) {
-  const id = String(value || '').trim().toLowerCase();
+  const id = String(value || '')
+    .trim()
+    .toLowerCase();
   return VOICE_CATALOG[id] ? id : null;
 }
 
@@ -61,7 +63,9 @@ export function genderForVoice(value) {
 }
 
 export function resolveVoicePreference(value) {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!raw) {
     return { ok: false, voice: null, gender: null, reason: 'empty_selection' };
   }
@@ -71,7 +75,10 @@ export function resolveVoicePreference(value) {
     return { ok: true, voice: exact, gender: VOICE_CATALOG[exact].gender, reason: 'voice' };
   }
 
-  const normalizedWords = raw.replace(/[^\p{L}\p{N}_-]+/gu, ' ').split(/\s+/).filter(Boolean);
+  const normalizedWords = raw
+    .replace(/[^\p{L}\p{N}_-]+/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
   for (const word of normalizedWords) {
     const voice = normalizeVoiceId(word);
     if (voice) {

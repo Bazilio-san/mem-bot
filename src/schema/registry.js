@@ -21,8 +21,12 @@ export async function getActiveVersion(domainKey) {
 // Возвращает { entity_type, entity_key, data_schema } или null, если сущности нет в схеме.
 export async function getEntitySpec(domainKey, entityType) {
   const definition = await loadDomainDefinition(domainKey);
-  if (!definition || !entityType) return null;
+  if (!definition || !entityType) {
+    return null;
+  }
   const entity = definition.entities.find((e) => e.entity_type === entityType);
-  if (!entity) return null;
+  if (!entity) {
+    return null;
+  }
   return { entity_type: entity.entity_type, entity_key: entity.entity_key, data_schema: entity.data_schema };
 }

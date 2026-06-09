@@ -12,8 +12,9 @@ export const skillAuthorApplyTool = {
     type: 'function',
     function: {
       name: 'skill_author_apply',
-      description: 'Write the skill prepared in this conversation (created or edited) to disk and hot-reload the '
-        + 'registry. Requires confirm=true. Use after showing the preview to the admin and getting approval.',
+      description:
+        'Write the skill prepared in this conversation (created or edited) to disk and hot-reload the ' +
+        'registry. Requires confirm=true. Use after showing the preview to the admin and getting approval.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -26,11 +27,17 @@ export const skillAuthorApplyTool = {
     },
   },
   async handler(ctx, args) {
-    if (args.confirm !== true) return { applied: false, error: 'Нужно подтверждение confirm=true.' };
+    if (args.confirm !== true) {
+      return { applied: false, error: 'Нужно подтверждение confirm=true.' };
+    }
     const skill = getStaged(ctx, args.name);
-    if (!skill) return { applied: false, error: `Нет подготовленного черновика навыка «${args.name}» в этом диалоге.` };
+    if (!skill) {
+      return { applied: false, error: `Нет подготовленного черновика навыка «${args.name}» в этом диалоге.` };
+    }
     const { ok, issues } = await validateSkill(skill);
-    if (!ok) return { applied: false, issues, error: 'Навык не прошёл валидацию; исправьте и повторите.' };
+    if (!ok) {
+      return { applied: false, issues, error: 'Навык не прошёл валидацию; исправьте и повторите.' };
+    }
     const res = await writeSkill(skill);
     clearStaged(ctx, args.name);
     return { applied: true, path: res.path, summary: summarize(skill) };

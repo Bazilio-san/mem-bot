@@ -26,7 +26,9 @@ The path must be relative inside references/** (no absolute paths or "..").`,
     },
   },
   async handler(ctx, args) {
-    if (args.confirm !== true) return { removed: false, error: 'Нужно подтверждение confirm=true.' };
+    if (args.confirm !== true) {
+      return { removed: false, error: 'Нужно подтверждение confirm=true.' };
+    }
     return removeReference(args.name, args.path, { confirm: true });
   },
 };

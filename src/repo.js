@@ -20,10 +20,14 @@ const domainCache = new Map();
 
 // Получить идентификатор домена по его ключу (с кэшированием).
 export async function getDomainId(domainKey) {
-  if (domainCache.has(domainKey)) return domainCache.get(domainKey);
+  if (domainCache.has(domainKey)) {
+    return domainCache.get(domainKey);
+  }
   const { rows } = await query('SELECT id FROM mem.agent_domains WHERE domain_key = $1', [domainKey]);
   const id = rows[0]?.id ?? null;
-  if (id) domainCache.set(domainKey, id);
+  if (id) {
+    domainCache.set(domainKey, id);
+  }
   return id;
 }
 
@@ -34,11 +38,13 @@ export async function ensureConversation(userId, domainKey = 'general') {
     `SELECT * FROM mem.conversations WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
     [userId],
   );
-  if (existing.rows[0]) return existing.rows[0];
-  const { rows } = await query(
-    `INSERT INTO mem.conversations (user_id, domain_id) VALUES ($1, $2) RETURNING *`,
-    [userId, domainId],
-  );
+  if (existing.rows[0]) {
+    return existing.rows[0];
+  }
+  const { rows } = await query(`INSERT INTO mem.conversations (user_id, domain_id) VALUES ($1, $2) RETURNING *`, [
+    userId,
+    domainId,
+  ]);
   return rows[0];
 }
 
@@ -52,8 +58,16 @@ export async function saveMessage(conversationId, userId, role, content, extra =
        (conversation_id, user_id, role, content, tool_name, tool_call_id, token_count, metadata)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
-    [conversationId, userId, role, content,
-      extra.toolName ?? null, extra.toolCallId ?? null, tokenCount, extra.metadata ?? {}],
+    [
+      conversationId,
+      userId,
+      role,
+      content,
+      extra.toolName ?? null,
+      extra.toolCallId ?? null,
+      tokenCount,
+      extra.metadata ?? {},
+    ],
   );
   await query('UPDATE mem.conversations SET updated_at = now() WHERE id = $1', [conversationId]);
   return rows[0];
@@ -62,7 +76,11 @@ export async function saveMessage(conversationId, userId, role, content, extra =
 // Связать внутреннее сообщение истории с идентификатором сообщения во внешнем канале доставки.
 // Это позволяет обработчику реакций найти, на какое сообщение ассистента отреагировал пользователь.
 export async function saveMessageExternalRef({
-  conversationMessageId, channel, chatExternalId, messageExternalId, metadata = {},
+  conversationMessageId,
+  channel,
+  chatExternalId,
+  messageExternalId,
+  metadata = {},
 }) {
   const { rows } = await query(
     `INSERT INTO mem.message_external_refs
@@ -133,9 +151,19 @@ export async function getColdPendingMessages({ conversationId, beforeCreatedAt, 
 // Сохранить новую активную сводку холодной зоны. Предыдущие активные сводки деактивируются.
 // Размеры в токенах (source_token_count, summary_token_count) приходят посчитанными нашим кодом.
 export async function saveConversationSummary({
-  conversationId, userId, summaryText, stateJson = {}, importance = 0.5,
-  layer = 'full', coveredFromMessageId = null, coveredToMessageId = null, coveredUntil = null,
-  sourceMessageCount = 0, sourceTokenCount = 0, summaryTokenCount = 0, memoryDedupe = {},
+  conversationId,
+  userId,
+  summaryText,
+  stateJson = {},
+  importance = 0.5,
+  layer = 'full',
+  coveredFromMessageId = null,
+  coveredToMessageId = null,
+  coveredUntil = null,
+  sourceMessageCount = 0,
+  sourceTokenCount = 0,
+  summaryTokenCount = 0,
+  memoryDedupe = {},
 }) {
   await markOldSummariesInactive(conversationId);
   const { rows } = await query(
@@ -146,9 +174,21 @@ export async function saveConversationSummary({
        summary_version, is_active)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,true)
      RETURNING *`,
-    [conversationId, userId, summaryText, stateJson, importance,
-      layer, coveredFromMessageId, coveredToMessageId, coveredUntil,
-      sourceMessageCount, sourceTokenCount, summaryTokenCount, memoryDedupe],
+    [
+      conversationId,
+      userId,
+      summaryText,
+      stateJson,
+      importance,
+      layer,
+      coveredFromMessageId,
+      coveredToMessageId,
+      coveredUntil,
+      sourceMessageCount,
+      sourceTokenCount,
+      summaryTokenCount,
+      memoryDedupe,
+    ],
   );
   return rows[0];
 }
@@ -167,11 +207,31 @@ export async function getRecentMessages(conversationId, limit = 10) {
 }
 
 // Записать вызов инструмента в журнал (для отладки и аудита).
-export async function logToolCall({ conversationId, userId, toolName, toolCallId, input, output, status, latencyMs, error }) {
+export async function logToolCall({
+  conversationId,
+  userId,
+  toolName,
+  toolCallId,
+  input,
+  output,
+  status,
+  latencyMs,
+  error,
+}) {
   await query(
     `INSERT INTO mem.tool_calls (conversation_id, user_id, tool_name, tool_call_id, input_json, output_json, status, latency_ms, error_text, finished_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())`,
-    [conversationId, userId, toolName, toolCallId ?? null, input ?? {}, output ?? null, status, latencyMs ?? null, error ?? null],
+    [
+      conversationId,
+      userId,
+      toolName,
+      toolCallId ?? null,
+      input ?? {},
+      output ?? null,
+      status,
+      latencyMs ?? null,
+      error ?? null,
+    ],
   );
 }
 
@@ -229,10 +289,7 @@ export async function ensureDefaultTriggers(userId, domainId, defaults, { enable
 // существование пользователя по внешнему идентификатору (создаёт запись, если её ещё нет).
 export async function setUserProactivity(externalId, enabled) {
   const user = await ensureUser(externalId);
-  await query(
-    'UPDATE mem.users SET proactivity_enabled = $2, updated_at = now() WHERE id = $1',
-    [user.id, enabled],
-  );
+  await query('UPDATE mem.users SET proactivity_enabled = $2, updated_at = now() WHERE id = $1', [user.id, enabled]);
   if (enabled) {
     const generalDomainId = await getDomainId('general');
     await ensureDefaultTriggers(user.id, generalDomainId, defaultProactiveTriggers(), { enabled: false });
@@ -245,10 +302,7 @@ export async function setUserProactivity(externalId, enabled) {
 // сохранённый режим. Недопустимое значение приводится к 'text', чтобы в базе всегда было корректное состояние.
 export async function setReplyMode(userId, mode) {
   const replyMode = mode === 'voice' ? 'voice' : 'text';
-  await query(
-    'UPDATE mem.users SET reply_mode = $2, updated_at = now() WHERE id = $1',
-    [userId, replyMode],
-  );
+  await query('UPDATE mem.users SET reply_mode = $2, updated_at = now() WHERE id = $1', [userId, replyMode]);
   return replyMode;
 }
 
@@ -265,11 +319,10 @@ export async function getUserReplyMode(externalId) {
 // глобальный fallback из конфигурации. Недопустимые значения не записываются.
 export async function setVoicePreference(userId, voice) {
   const normalized = voice == null ? null : normalizeVoiceId(voice);
-  if (voice != null && !normalized) throw new Error(`Недопустимый голос TTS: ${voice}`);
-  await query(
-    'UPDATE mem.users SET voice_output_voice = $2, updated_at = now() WHERE id = $1',
-    [userId, normalized],
-  );
+  if (voice != null && !normalized) {
+    throw new Error(`Недопустимый голос TTS: ${voice}`);
+  }
+  await query('UPDATE mem.users SET voice_output_voice = $2, updated_at = now() WHERE id = $1', [userId, normalized]);
   return normalized;
 }
 
@@ -295,7 +348,9 @@ export async function getProactivityState(externalId) {
       ORDER BY pt.trigger_type`,
     [externalId],
   );
-  if (!rows.length) return null;
+  if (!rows.length) {
+    return null;
+  }
   const enabled = rows[0].proactivity_enabled === true;
   const triggers = rows
     .filter((r) => r.trigger_type)

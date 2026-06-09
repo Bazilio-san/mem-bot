@@ -18,8 +18,8 @@ function scoreItem(it, relevance) {
   return (
     relevance * 0.45 +
     Number(it.importance) * 0.25 +
-    recency * 0.10 +
-    Number(it.confidence) * 0.10 +
+    recency * 0.1 +
+    Number(it.confidence) * 0.1 +
     (it.entity_match ? 1 : 0) * 0.07 +
     Math.min(Number(it.usage_count || 0) / 10, 1) * 0.03
   );
@@ -84,9 +84,13 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     const relevance = Math.max(vecScores.get(it.id) ?? 0, textScores.get(it.id) ?? 0, 0.15);
     it.entity_match = it.entity_key && entityKeys.includes(it.entity_key);
     it.score = scoreItem(it, relevance);
-    if (byScope[it.scope]) byScope[it.scope].push(it);
+    if (byScope[it.scope]) {
+      byScope[it.scope].push(it);
+    }
   }
-  for (const k of Object.keys(byScope)) byScope[k].sort((a, b) => b.score - a.score);
+  for (const k of Object.keys(byScope)) {
+    byScope[k].sort((a, b) => b.score - a.score);
+  }
 
   // Шаг 5. Минимизация: жёсткие лимиты на каждую область.
   const profile = byScope.profile.slice(0, LIMITS.profile);
@@ -151,8 +155,12 @@ function formatReminderLine(r) {
   const utc = new Date(r.next_run_at).toISOString();
   const local = formatLocalDateTime(r.next_run_at, r.timezone);
   const details = [`UTC: ${utc}`, `schedule: ${r.schedule_kind}`];
-  if (r.cron_expr) details.push(`cron: ${r.cron_expr}`);
-  if (r.rrule) details.push(`rrule: ${r.rrule}`);
+  if (r.cron_expr) {
+    details.push(`cron: ${r.cron_expr}`);
+  }
+  if (r.rrule) {
+    details.push(`rrule: ${r.rrule}`);
+  }
   return `- ${r.title} — ${r.instruction}; следующее: ${local}\n  (${details.join('; ')})`;
 }
 

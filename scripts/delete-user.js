@@ -87,10 +87,7 @@ async function findUsers({ ids, externalIds, names, prefixes }) {
   for (const prefix of prefixes) {
     // Экранируем спецсимволы LIKE (% и _), чтобы префикс трактовался буквально.
     const escaped = prefix.replace(/([%_\\])/g, '\\$1');
-    const { rows } = await query(
-      "SELECT * FROM mem.users WHERE external_id LIKE $1 ESCAPE '\\'",
-      [`${escaped}%`],
-    );
+    const { rows } = await query("SELECT * FROM mem.users WHERE external_id LIKE $1 ESCAPE '\\'", [`${escaped}%`]);
     addRows(rows);
   }
 
@@ -100,23 +97,23 @@ async function findUsers({ ids, externalIds, names, prefixes }) {
 // Таблицы, удаляемые каскадно вместе с пользователем. Используются для отчёта;
 // само удаление выполняет каскад на уровне внешних ключей БД.
 const CASCADE_TABLES = [
-  ['mem.conversations',          'диалоги'],
-  ['mem.conversation_messages',  'сообщения диалогов'],
+  ['mem.conversations', 'диалоги'],
+  ['mem.conversation_messages', 'сообщения диалогов'],
   ['mem.conversation_summaries', 'сводки диалогов'],
-  ['mem.memory_items',           'элементы памяти'],
-  ['mem.secure_records',         'защищённые записи'],
-  ['mem.scheduled_tasks',        'задачи планировщика'],
-  ['mem.notification_outbox',    'уведомления в очереди'],
-  ['mem.memory_jobs',            'задания обработки памяти'],
-  ['mem.topic_mentions',         'упоминания тем'],
-  ['mem.proactive_triggers',     'триггеры проактивности'],
-  ['mem.event_deliveries',       'доставленные события'],
+  ['mem.memory_items', 'элементы памяти'],
+  ['mem.secure_records', 'защищённые записи'],
+  ['mem.scheduled_tasks', 'задачи планировщика'],
+  ['mem.notification_outbox', 'уведомления в очереди'],
+  ['mem.memory_jobs', 'задания обработки памяти'],
+  ['mem.topic_mentions', 'упоминания тем'],
+  ['mem.proactive_triggers', 'триггеры проактивности'],
+  ['mem.event_deliveries', 'доставленные события'],
 ];
 
 // Таблицы, где ссылка на пользователя будет обнулена (строки сохранятся).
 const SET_NULL_TABLES = [
-  ['mem.tool_calls',       'user_id',    'вызовы инструментов'],
-  ['mem.global_facts',     'created_by', 'глобальные факты (авторство)'],
+  ['mem.tool_calls', 'user_id', 'вызовы инструментов'],
+  ['mem.global_facts', 'created_by', 'глобальные факты (авторство)'],
   ['mem.global_knowledge', 'created_by', 'глобальная база знаний (авторство)'],
 ];
 
@@ -126,21 +123,31 @@ async function reportRelated(userIds) {
   let totalDeleted = 0;
   for (const [table, label] of CASCADE_TABLES) {
     const { rows } = await query(`SELECT count(*)::int AS n FROM ${table} WHERE user_id = ANY($1::uuid[])`, [userIds]);
-    const n = rows[0].n;
+    const { n } = rows[0];
     totalDeleted += n;
-    if (n > 0) console.log(`  - ${label}: ${n}`);
+    if (n > 0) {
+      console.log(`  - ${label}: ${n}`);
+    }
   }
-  if (totalDeleted === 0) console.log('  (связанных строк нет)');
+  if (totalDeleted === 0) {
+    console.log('  (связанных строк нет)');
+  }
 
   console.log('\nУ следующих сущностей ссылка на пользователя будет обнулена (строки сохранятся):');
   let totalNulled = 0;
   for (const [table, column, label] of SET_NULL_TABLES) {
-    const { rows } = await query(`SELECT count(*)::int AS n FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [userIds]);
-    const n = rows[0].n;
+    const { rows } = await query(`SELECT count(*)::int AS n FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [
+      userIds,
+    ]);
+    const { n } = rows[0];
     totalNulled += n;
-    if (n > 0) console.log(`  - ${label}: ${n}`);
+    if (n > 0) {
+      console.log(`  - ${label}: ${n}`);
+    }
   }
-  if (totalNulled === 0) console.log('  (таких строк нет)');
+  if (totalNulled === 0) {
+    console.log('  (таких строк нет)');
+  }
 }
 
 // Запросить подтверждение в консоли. Возвращает true только при вводе "yes".

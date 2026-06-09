@@ -10,16 +10,29 @@ import sanitizeHtml from 'sanitize-html';
 // текст (режим disallowedTagsMode: 'escape'), поэтому случайный или выдуманный моделью тег не ломает
 // разметку, а показывается буквально. Перечень соответствует поддерживаемым Telegram стилям текста.
 const TELEGRAM_ALLOWED_TAGS = [
-  'b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del',
-  'a', 'code', 'pre', 'blockquote', 'span', 'tg-spoiler',
+  'b',
+  'strong',
+  'i',
+  'em',
+  'u',
+  'ins',
+  's',
+  'strike',
+  'del',
+  'a',
+  'code',
+  'pre',
+  'blockquote',
+  'span',
+  'tg-spoiler',
 ];
 
 const SANITIZE_OPTIONS = {
   allowedTags: TELEGRAM_ALLOWED_TAGS,
   allowedAttributes: {
     a: ['href'],
-    code: ['class'],          // <code class="language-…"> внутри <pre> — подсветка языка в блоке кода
-    span: ['class'],          // <span class="tg-spoiler"> — спойлер
+    code: ['class'], // <code class="language-…"> внутри <pre> — подсветка языка в блоке кода
+    span: ['class'], // <span class="tg-spoiler"> — спойлер
   },
   // Недопустимые теги не выкидываем, а экранируем — так текст вида «1 < 2» или случайный «<div>»
   // доходит до пользователя как написано, а не пропадает.
@@ -50,14 +63,20 @@ export function telegramPostProcess(text) {
 // строки, а при её отсутствии — по пробелу либо жёстко по лимиту.
 export function telegramSplit(text, limit) {
   const s = String(text ?? '');
-  if (s.length <= limit) return [s];
+  if (s.length <= limit) {
+    return [s];
+  }
 
   const tokens = tokenizeHtml(s);
   const parts = [];
-  const open = [];                                    // стек открытых тегов: { name, raw }
+  const open = []; // стек открытых тегов: { name, raw }
   let cur = '';
 
-  const closingMarkup = () => open.map((t) => `</${t.name}>`).reverse().join('');
+  const closingMarkup = () =>
+    open
+      .map((t) => `</${t.name}>`)
+      .reverse()
+      .join('');
   const openingMarkup = () => open.map((t) => t.raw).join('');
 
   // Закрыть текущую часть (дописав закрывающие теги) и начать новую с повторного открытия тех же тегов.
@@ -71,7 +90,9 @@ export function telegramSplit(text, limit) {
 
   for (const tok of tokens) {
     if (tok.type === 'tag') {
-      if (cur.length + tok.value.length + reserve() > limit && cur.length > openingMarkup().length) flush();
+      if (cur.length + tok.value.length + reserve() > limit && cur.length > openingMarkup().length) {
+        flush();
+      }
       cur += tok.value;
       applyTag(open, tok);
       continue;
@@ -80,8 +101,14 @@ export function telegramSplit(text, limit) {
     let rest = tok.value;
     while (rest.length) {
       const room = limit - cur.length - reserve();
-      if (rest.length <= room) { cur += rest; break; }
-      if (room <= 0) { flush(); continue; }
+      if (rest.length <= room) {
+        cur += rest;
+        break;
+      }
+      if (room <= 0) {
+        flush();
+        continue;
+      }
       const cut = chooseCut(rest, room);
       cur += rest.slice(0, cut);
       rest = rest.slice(cut);
@@ -101,23 +128,32 @@ function tokenizeHtml(s) {
   let last = 0;
   let m;
   while ((m = re.exec(s)) !== null) {
-    if (m.index > last) tokens.push({ type: 'text', value: s.slice(last, m.index) });
+    if (m.index > last) {
+      tokens.push({ type: 'text', value: s.slice(last, m.index) });
+    }
     tokens.push({ type: 'tag', value: m[0] });
     last = re.lastIndex;
   }
-  if (last < s.length) tokens.push({ type: 'text', value: s.slice(last) });
+  if (last < s.length) {
+    tokens.push({ type: 'text', value: s.slice(last) });
+  }
   return tokens;
 }
 
 // Обновить стек открытых тегов по очередному тегу: открывающий — кладём в стек, закрывающий — снимаем
 // парный. Самозакрывающихся тегов в разметке Telegram нет, поэтому их не рассматриваем.
 function applyTag(open, tok) {
-  const closing = /^<\//.test(tok.value);
+  const closing = tok.value.startsWith('</');
   const name = (tok.value.match(/^<\/?\s*([A-Za-z][A-Za-z0-9-]*)/) || [])[1];
-  if (!name) return;
+  if (!name) {
+    return;
+  }
   if (closing) {
     for (let i = open.length - 1; i >= 0; i--) {
-      if (open[i].name === name) { open.splice(i, 1); break; }
+      if (open[i].name === name) {
+        open.splice(i, 1);
+        break;
+      }
     }
   } else {
     open.push({ name, raw: tok.value });
@@ -129,8 +165,12 @@ function applyTag(open, tok) {
 function chooseCut(text, room) {
   const slice = text.slice(0, room);
   const nl = slice.lastIndexOf('\n');
-  if (nl >= room * 0.5) return nl + 1;
+  if (nl >= room * 0.5) {
+    return nl + 1;
+  }
   const sp = slice.lastIndexOf(' ');
-  if (sp >= room * 0.5) return sp + 1;
+  if (sp >= room * 0.5) {
+    return sp + 1;
+  }
   return room;
 }

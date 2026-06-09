@@ -47,22 +47,26 @@ export function buildSkillFromDraft(draft) {
 // Загрузить навык для редактирования: глубокая копия редактируемых полей (без вычисляемых dir и т. п.).
 export function loadEditable(name) {
   const s = getSkill(name);
-  if (!s) throw new Error(`Навык «${name}» не найден.`);
-  return JSON.parse(JSON.stringify({
-    name: s.name,
-    domain_key: s.domain_key,
-    title: s.title,
-    description: s.description,
-    enabled: s.enabled,
-    classification: s.classification,
-    memory: s.memory,
-    tools: s.tools,
-    model: s.model,
-    references: s.references,
-    skillPrompt: s.skillPrompt,
-    factExtractionPrompt: s.factExtractionPrompt,
-    definition: s.definition,
-  }));
+  if (!s) {
+    throw new Error(`Навык «${name}» не найден.`);
+  }
+  return JSON.parse(
+    JSON.stringify({
+      name: s.name,
+      domain_key: s.domain_key,
+      title: s.title,
+      description: s.description,
+      enabled: s.enabled,
+      classification: s.classification,
+      memory: s.memory,
+      tools: s.tools,
+      model: s.model,
+      references: s.references,
+      skillPrompt: s.skillPrompt,
+      factExtractionPrompt: s.factExtractionPrompt,
+      definition: s.definition,
+    }),
+  );
 }
 
 // Взять навык для редактирования: сначала подготовленный в этом диалоге, иначе с диска.
@@ -77,13 +81,20 @@ export async function applyOrStage(ctx, skill, { apply } = {}) {
   const { ok, issues } = await validateSkill(skill);
   stageSkill(ctx, skill);
   if (apply === true) {
-    if (!ok) return { applied: false, issues, error: 'Навык не прошёл валидацию; исправьте и повторите.' };
+    if (!ok) {
+      return { applied: false, issues, error: 'Навык не прошёл валидацию; исправьте и повторите.' };
+    }
     const res = await writeSkill(skill);
     clearStaged(ctx, skill.name);
     return { applied: true, path: res.path, summary: summarize(skill) };
   }
-  return { applied: false, ok, issues, summary: summarize(skill),
-    next: 'Покажите изменение админу и вызовите skill_author_apply с confirm=true.' };
+  return {
+    applied: false,
+    ok,
+    issues,
+    summary: summarize(skill),
+    next: 'Покажите изменение админу и вызовите skill_author_apply с confirm=true.',
+  };
 }
 
 // Краткая сводка навыка для ответов инструментов.

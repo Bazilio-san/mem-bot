@@ -16,7 +16,9 @@ function fakeTg({ failHtml = false } = {}) {
     if (failHtml && body.parse_mode && (method === 'sendMessage' || method === 'editMessageText')) {
       throw new Error("can't parse entities");
     }
-    if (method === 'sendMessage') return { message_id: ++nextId };
+    if (method === 'sendMessage') {
+      return { message_id: ++nextId };
+    }
     return {};
   };
   return { tg, calls };
@@ -27,17 +29,21 @@ function fakeTg({ failHtml = false } = {}) {
   const { tg, calls } = fakeTg();
   let clock = 0;
   const progress = createTelegramProgress({
-    chatId: 1, tg, startTyping: () => () => {},
+    chatId: 1,
+    tg,
+    startTyping: () => () => {},
     options: { minFirstDraftChars: 0, editIntervalMs: 0, minEditChars: 0, now: () => clock, format: TELEGRAM_FORMAT },
   });
-  clock += 1; await progress.onEvent({ type: 'assistant.delta', text: 'Привет, ' });
-  clock += 1; await progress.onEvent({ type: 'assistant.delta', text: 'это черновик.' });
+  clock += 1;
+  await progress.onEvent({ type: 'assistant.delta', text: 'Привет, ' });
+  clock += 1;
+  await progress.onEvent({ type: 'assistant.delta', text: 'это черновик.' });
 
   const draftSend = calls.find((c) => c.method === 'sendMessage');
   assert.ok(draftSend && draftSend.body.parse_mode === undefined, 'черновик отправлен сырым текстом, без разметки');
 
   await progress.complete('<b>Готовый</b> ответ');
-  const finalEdit = calls.filter((c) => c.method === 'editMessageText').pop();
+  const finalEdit = calls.findLast((c) => c.method === 'editMessageText');
   assert.equal(finalEdit.body.parse_mode, 'HTML', 'финальное редактирование идёт с parse_mode=HTML');
   assert.equal(finalEdit.body.text, '<b>Готовый</b> ответ', 'финальный текст сохраняет допустимую разметку');
 }
@@ -46,10 +52,12 @@ function fakeTg({ failHtml = false } = {}) {
 {
   const { tg, calls } = fakeTg({ failHtml: true });
   const progress = createTelegramProgress({
-    chatId: 1, tg, startTyping: () => () => {},
-    options: { minFirstDraftChars: 100, now: () => 0, format: TELEGRAM_FORMAT },   // порог высокий — черновика не будет
+    chatId: 1,
+    tg,
+    startTyping: () => () => {},
+    options: { minFirstDraftChars: 100, now: () => 0, format: TELEGRAM_FORMAT }, // порог высокий — черновика не будет
   });
-  await progress.onEvent({ type: 'assistant.delta', text: 'коротко' });            // ниже порога, черновик не создан
+  await progress.onEvent({ type: 'assistant.delta', text: 'коротко' }); // ниже порога, черновик не создан
   const sent = await progress.complete('<b>финал</b>');
 
   const sends = calls.filter((c) => c.method === 'sendMessage');
@@ -63,7 +71,9 @@ function fakeTg({ failHtml = false } = {}) {
 {
   const { tg, calls } = fakeTg();
   const progress = createTelegramProgress({
-    chatId: 1, tg, options: { minFirstDraftChars: 100, now: () => 0 },
+    chatId: 1,
+    tg,
+    options: { minFirstDraftChars: 100, now: () => 0 },
   });
   await progress.complete('обычный текст');
   const send = calls.find((c) => c.method === 'sendMessage');

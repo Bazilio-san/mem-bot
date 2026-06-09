@@ -40,13 +40,18 @@ const SYSTEM = `Ты выбираешь способ доставки корот
 риск неверного тона или пользователь явно ждёт содержательный ответ.`;
 
 export function normalizeReactionKey(key) {
-  const normalized = String(key || '').replace(/^:/, '').replace(/:$/, '').trim();
+  const normalized = String(key || '')
+    .replace(/^:/, '')
+    .replace(/:$/, '')
+    .trim();
   return REACTION_KEYS.includes(normalized) ? normalized : null;
 }
 
 export function makeReactionDelivery(reactionKey, reason = '') {
   const key = normalizeReactionKey(reactionKey);
-  if (!key) return { kind: 'text', text: '', reason: reason || 'unknown reaction' };
+  if (!key) {
+    return { kind: 'text', text: '', reason: reason || 'unknown reaction' };
+  }
   return {
     kind: 'reaction',
     reactionKey: key,
@@ -62,22 +67,34 @@ export function formatReactionToken(reactionKey) {
 
 export function shouldConsiderReaction(userMessage) {
   const text = String(userMessage || '').trim();
-  if (!text || text.length > 120) return false;
-  if (text.startsWith('/')) return false;
-  if (text.includes('\n')) return false;
-  if (/[?？]/.test(text)) return false;
-  if (/(напомни|найди|объясни|расскажи|почему|когда|сколько|сделай список)/i.test(text)) return false;
-  if (/(я люблю|я не люблю|мне нравится|предпочитаю|запомни)/i.test(text)) return false;
+  if (!text || text.length > 120) {
+    return false;
+  }
+  if (text.startsWith('/')) {
+    return false;
+  }
+  if (text.includes('\n')) {
+    return false;
+  }
+  if (/[?？]/.test(text)) {
+    return false;
+  }
+  if (/(напомни|найди|объясни|расскажи|почему|когда|сколько|сделай список)/i.test(text)) {
+    return false;
+  }
+  if (/(я люблю|я не люблю|мне нравится|предпочитаю|запомни)/i.test(text)) {
+    return false;
+  }
   return true;
 }
 
-export async function decideDeliveryIntent({
-  userMessage,
-  deliveryCapabilities = {},
-  classify = null,
-} = {}) {
-  if (!deliveryCapabilities.supportsReactions) return { kind: 'text_needed', reason: 'channel has no reactions' };
-  if (!shouldConsiderReaction(userMessage)) return { kind: 'text_needed', reason: 'message needs text path' };
+export async function decideDeliveryIntent({ userMessage, deliveryCapabilities = {}, classify = null } = {}) {
+  if (!deliveryCapabilities.supportsReactions) {
+    return { kind: 'text_needed', reason: 'channel has no reactions' };
+  }
+  if (!shouldConsiderReaction(userMessage)) {
+    return { kind: 'text_needed', reason: 'message needs text path' };
+  }
 
   let classifier = classify;
   let model;
@@ -99,6 +116,8 @@ export async function decideDeliveryIntent({
     return { kind: 'text_needed', reason: result?.reason || 'model chose text' };
   }
   const delivery = makeReactionDelivery(result.reaction_key, result.reason || '');
-  if (delivery.kind !== 'reaction') return { kind: 'text_needed', reason: 'invalid reaction key' };
+  if (delivery.kind !== 'reaction') {
+    return { kind: 'text_needed', reason: 'invalid reaction key' };
+  }
   return delivery;
 }

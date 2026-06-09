@@ -11,10 +11,11 @@ export const skillAuthorAddReferenceTool = {
     type: 'function',
     function: {
       name: 'skill_author_add_reference',
-      description: 'Create or update a reference file inside a skill references folder and enable references for '
-        + 'the skill. Provide the file content directly. The path must be relative inside references/** (no '
-        + 'absolute paths or ".."). The reference file is written immediately; references.allowed is set on the '
-        + 'skill and persisted on apply.',
+      description:
+        'Create or update a reference file inside a skill references folder and enable references for ' +
+        'the skill. Provide the file content directly. The path must be relative inside references/** (no ' +
+        'absolute paths or ".."). The reference file is written immediately; references.allowed is set on the ' +
+        'skill and persisted on apply.',
       parameters: {
         type: 'object',
         additionalProperties: false,

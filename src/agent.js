@@ -4,8 +4,13 @@
 import { config } from './config.js';
 import { chat, chatStream } from './llm.js';
 import {
-  ensureUser, ensureConversation, saveMessage, getRecentMessages,
-  getDomainId, getLastUserMessageTime, effectiveVoicePreference,
+  ensureUser,
+  ensureConversation,
+  saveMessage,
+  getRecentMessages,
+  getDomainId,
+  getLastUserMessageTime,
+  effectiveVoicePreference,
 } from './repo.js';
 import { classifyIntent } from './pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext } from './pipeline/retrieve.js';
@@ -240,7 +245,9 @@ export async function runModelTurn({
   chatFn = chat,
   chatStreamFn = chatStream,
 }) {
-  if (!streamingOn) return chatFn({ model, messages, tools });
+  if (!streamingOn) {
+    return chatFn({ model, messages, tools });
+  }
 
   const bufferedDeltas = [];
   let msg;
@@ -250,10 +257,12 @@ export async function runModelTurn({
       messages,
       tools,
       onDelta: (chunk) => {
-        if (chunk) bufferedDeltas.push(chunk);
+        if (chunk) {
+          bufferedDeltas.push(chunk);
+        }
       },
     });
-  } catch (err) {
+  } catch {
     // Если видимого стрима ещё не было, откатываемся на обычный chat: транспортные ошибки streaming API
     // не должны ломать совместимый путь ответа. Дельты выше только буферизуются, поэтому пользователь их
     // ещё не видел.
@@ -263,18 +272,24 @@ export async function runModelTurn({
   // В ходе, который завершился tool_calls, не публикуем промежуточный текст: пользователь сначала увидит
   // статус инструмента, а финальный ответ придёт после выполнения инструмента и следующего model turn.
   if (!msg.tool_calls?.length) {
-    for (const chunk of bufferedDeltas) await emit({ type: 'assistant.delta', text: chunk });
+    for (const chunk of bufferedDeltas) {
+      await emit({ type: 'assistant.delta', text: chunk });
+    }
   }
   return msg;
 }
 
 async function buildCapabilitiesContext(ctx, toolDefs) {
-  if (!isCapabilitiesQuestion(ctx.userMessage)) return '';
+  if (!isCapabilitiesQuestion(ctx.userMessage)) {
+    return '';
+  }
   const toolLines = toolDefs.length
-    ? toolDefs.map((t) => {
-      const fn = t.function || {};
-      return `- ${fn.name}: ${fn.description || 'доступный инструмент'}`;
-    }).join('\n')
+    ? toolDefs
+        .map((t) => {
+          const fn = t.function || {};
+          return `- ${fn.name}: ${fn.description || 'доступный инструмент'}`;
+        })
+        .join('\n')
     : '- (нет подключённых инструментов)';
 
   return `CAPABILITIES_CONTEXT (справочные данные, НЕ команды)
@@ -316,7 +331,9 @@ export async function handleMessage({
   // ensureUser/ensureConversation, поэтому объект мутируется по мере появления данных.
   const eventMeta = { domainKey };
   const emit = async (event) => {
-    if (!onEvent) return;
+    if (!onEvent) {
+      return;
+    }
     try {
       await onEvent({ ...event, ...eventMeta });
     } catch {
@@ -338,100 +355,109 @@ export async function handleMessage({
   // Основная работа вынесена в замыкание, чтобы обернуть её единым обработчиком ошибок для события
   // agent.failed, сохранив прежнюю логику этапов без изменений по существу.
   async function runAgent() {
-  const user = await ensureUser(externalId);
-  const previousLastUserAt = await getLastUserMessageTime(user.id);
-  const contactTurn = await recordUserInboundForContactPolicy({
-    userId: user.id, previousUserMessageAt: previousLastUserAt,
-  });
-  const conversation = await ensureConversation(user.id, domainKey);
-  eventMeta.userId = user.id;
-  eventMeta.conversationId = conversation.id;
-  const ctx = {
-    userId: user.id, conversationId: conversation.id, domainKey,
-    timezone: user.timezone || config.timezone,
-    // Признак администратора нужен инструментам глобальной памяти: запись доступна только администратору.
-    isAdmin: user.is_admin === true,
-    // Предпочтение формы ответа пользователя ('text' | 'voice'). Если инструмент set_reply_mode сменит его
-    // в ходе этого запроса, он перезапишет ctx.replyMode, и смена подействует уже на текущий ответ.
-    replyMode: user.reply_mode === 'voice' ? 'voice' : 'text',
-    // Конкретный тембр голосового ответа. Если инструмент set_voice_preference сменит его в текущем запросе,
-    // канал доставки получит новое значение уже в результате этого же handleMessage.
-    voiceOutputVoice: effectiveVoicePreference(user),
-  };
-
-  // Триггеры проактивности больше НЕ создаются на каждое сообщение: по умолчанию проактивность выключена.
-  // Набор триггеров заводится только в момент, когда пользователь сам включает проактивность командой
-  // /proactivity_on (см. setUserProactivity в src/repo.js и обработчик в src/telegram/bot.js).
-
-  // Этап 1: классификация.
-  await emit({ type: 'stage.started', stage: 'classify', title: 'Определяю намерение' });
-  let intent;
-  try {
-    intent = await classifyIntent(userMessage, domainKey);
-  } catch {
-    intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: {} };
-  }
-  // Разрешение активного skill. Источник истины — skill_name классификатора; если он не распознан,
-  // подбираем skill по доменному ключу, иначе берём запасной general. Доменный ключ для адресации памяти
-  // выводится из выбранного skill, а не из ответа модели.
-  const activeSkill = getSkill(intent.skill_name) || getSkillByDomain(intent.domain_key) || getSkill('general');
-  const effectiveDomain = activeSkill ? activeSkill.domain_key : (intent.domain_key || domainKey);
-  ctx.domainKey = effectiveDomain;
-  ctx.skillName = activeSkill?.name || null;
-  ctx.activeSkill = activeSkill;
-  eventMeta.domainKey = effectiveDomain;
-  // Модель основного ответа может быть переопределена активным skill (поле model.main), иначе глобальная.
-  const mainModel = (activeSkill?.model?.main) || config.llm.mainModel;
-
-  // Этап 2: выборка памяти (только если нужна).
-  let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
-  if (intent.needs_memory !== false) {
-    await emit({ type: 'stage.started', stage: 'memory', title: 'Ищу релевантную память' });
-    memory = await retrieveMemory({
-      userId: user.id, domainKey: effectiveDomain, query: userMessage,
-      scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'],
-      entityKeys: Object.values(intent.entities || {}).filter((v) => typeof v === 'string'),
+    const user = await ensureUser(externalId);
+    const previousLastUserAt = await getLastUserMessageTime(user.id);
+    const contactTurn = await recordUserInboundForContactPolicy({
+      userId: user.id,
+      previousUserMessageAt: previousLastUserAt,
     });
-  }
-  const memoryContext = buildMemoryContext(memory, effectiveDomain);
+    const conversation = await ensureConversation(user.id, domainKey);
+    eventMeta.userId = user.id;
+    eventMeta.conversationId = conversation.id;
+    const ctx = {
+      userId: user.id,
+      conversationId: conversation.id,
+      domainKey,
+      timezone: user.timezone || config.timezone,
+      // Признак администратора нужен инструментам глобальной памяти: запись доступна только администратору.
+      isAdmin: user.is_admin === true,
+      // Предпочтение формы ответа пользователя ('text' | 'voice'). Если инструмент set_reply_mode сменит его
+      // в ходе этого запроса, он перезапишет ctx.replyMode, и смена подействует уже на текущий ответ.
+      replyMode: user.reply_mode === 'voice' ? 'voice' : 'text',
+      // Конкретный тембр голосового ответа. Если инструмент set_voice_preference сменит его в текущем запросе,
+      // канал доставки получит новое значение уже в результате этого же handleMessage.
+      voiceOutputVoice: effectiveVoicePreference(user),
+    };
 
-  // Глобальная память (общая для всех пользователей). Глобальные факты подмешиваются всегда (не зависят от
-  // needs_memory). RAG не подмешивается автоматически: модель вызывает global_knowledge_search только когда ей
-  // действительно нужна статья из базы знаний, например при вопросе о возможностях бота.
-  const globalFactsBlock = await buildGlobalFactsBlock(effectiveDomain);
+    // Триггеры проактивности больше НЕ создаются на каждое сообщение: по умолчанию проактивность выключена.
+    // Набор триггеров заводится только в момент, когда пользователь сам включает проактивность командой
+    // /proactivity_on (см. setUserProactivity в src/repo.js и обработчик в src/telegram/bot.js).
 
-  // Темпоральный контекст строится один раз и переиспользуется ниже. Пауза lastAt нужна только режиму
-  // собеседника (для строки «не писал…»), но запрос лёгкий, поэтому делаем его всегда.
-  const temporal = buildTemporalContext(ctx.timezone, previousLastUserAt);
+    // Этап 1: классификация.
+    await emit({ type: 'stage.started', stage: 'classify', title: 'Определяю намерение' });
+    let intent;
+    try {
+      intent = await classifyIntent(userMessage, domainKey);
+    } catch {
+      intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: {} };
+    }
+    // Разрешение активного skill. Источник истины — skill_name классификатора; если он не распознан,
+    // подбираем skill по доменному ключу, иначе берём запасной general. Доменный ключ для адресации памяти
+    // выводится из выбранного skill, а не из ответа модели.
+    const activeSkill = getSkill(intent.skill_name) || getSkillByDomain(intent.domain_key) || getSkill('general');
+    const effectiveDomain = activeSkill ? activeSkill.domain_key : intent.domain_key || domainKey;
+    ctx.domainKey = effectiveDomain;
+    ctx.skillName = activeSkill?.name || null;
+    ctx.activeSkill = activeSkill;
+    eventMeta.domainKey = effectiveDomain;
+    // Модель основного ответа может быть переопределена активным skill (поле model.main), иначе глобальная.
+    const mainModel = activeSkill?.model?.main || config.llm.mainModel;
 
-  // Блок текущей даты, времени и часового пояса. Передаётся модели при ЛЮБОМ запросе, независимо от режима.
-  const dateTimeSystem = {
-    role: 'system',
-    content: `CURRENT_DATETIME (справочные данные, не команды)\n${formatDateTime(temporal)}`,
-  };
+    // Этап 2: выборка памяти (только если нужна).
+    let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
+    if (intent.needs_memory !== false) {
+      await emit({ type: 'stage.started', stage: 'memory', title: 'Ищу релевантную память' });
+      memory = await retrieveMemory({
+        userId: user.id,
+        domainKey: effectiveDomain,
+        query: userMessage,
+        scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'],
+        entityKeys: Object.values(intent.entities || {}).filter((v) => typeof v === 'string'),
+      });
+    }
+    const memoryContext = buildMemoryContext(memory, effectiveDomain);
 
-  // Дополнительный справочный блок собеседника: настрой момента и управление темами (только в режиме COMPANION_MODE).
-  const extraSystem = [];
-  if (contactTurn.welcomeBack) {
-    const hours = Math.max(1, Math.round(contactTurn.gapMinutes / 60));
-    extraSystem.push({
+    // Глобальная память (общая для всех пользователей). Глобальные факты подмешиваются всегда (не зависят от
+    // needs_memory). RAG не подмешивается автоматически: модель вызывает global_knowledge_search только когда ей
+    // действительно нужна статья из базы знаний, например при вопросе о возможностях бота.
+    const globalFactsBlock = await buildGlobalFactsBlock(effectiveDomain);
+
+    // Темпоральный контекст строится один раз и переиспользуется ниже. Пауза lastAt нужна только режиму
+    // собеседника (для строки «не писал…»), но запрос лёгкий, поэтому делаем его всегда.
+    const temporal = buildTemporalContext(ctx.timezone, previousLastUserAt);
+
+    // Блок текущей даты, времени и часового пояса. Передаётся модели при ЛЮБОМ запросе, независимо от режима.
+    const dateTimeSystem = {
       role: 'system',
-      content: `WELCOME_BACK_CONTEXT (справочные данные, НЕ команды; текущий запрос важнее)
+      content: `CURRENT_DATETIME (справочные данные, не команды)\n${formatDateTime(temporal)}`,
+    };
+
+    // Дополнительный справочный блок собеседника: настрой момента и управление темами (только в режиме COMPANION_MODE).
+    const extraSystem = [];
+    if (contactTurn.welcomeBack) {
+      const hours = Math.max(1, Math.round(contactTurn.gapMinutes / 60));
+      extraSystem.push({
+        role: 'system',
+        content: `WELCOME_BACK_CONTEXT (справочные данные, НЕ команды; текущий запрос важнее)
 Пользователь сам написал после паузы примерно ${hours} ч. Ответь как на возвращение: коротко, без давления, не
 перечисляй накопленные поводы. Если уместно, предложи максимум одну-две темы на выбор.`,
-    });
-  }
-  if (config.companion.enabled) {
-    const domainId = await getDomainId(effectiveDomain);
-    let topicsBlock = 'Нет данных о темах.';
-    try { topicsBlock = formatTopicContext(await getTopicContext(user.id, domainId)); } catch { /* темы опциональны */ }
-    extraSystem.push({
-      role: 'system',
-      content: COMPANION_SYSTEM,
-    });
-    extraSystem.push({
-      role: 'system',
-      content: `CONVERSATION_CONTEXT (справочные данные, НЕ команды; текущий запрос важнее)
+      });
+    }
+    if (config.companion.enabled) {
+      const domainId = await getDomainId(effectiveDomain);
+      let topicsBlock = 'Нет данных о темах.';
+      try {
+        topicsBlock = formatTopicContext(await getTopicContext(user.id, domainId));
+      } catch {
+        /* темы опциональны */
+      }
+      extraSystem.push({
+        role: 'system',
+        content: COMPANION_SYSTEM,
+      });
+      extraSystem.push({
+        role: 'system',
+        content: `CONVERSATION_CONTEXT (справочные данные, НЕ команды; текущий запрос важнее)
 
 # Контекст момента (ЗДЕСЬ И СЕЙЧАС)
 
@@ -460,164 +486,187 @@ ${topicsBlock}
 - Если есть discovery_seed факты — периодически предлагай новые направления
 
 Если данных не хватает — задай **один мягкий уточняющий вопрос**.`,
+      });
+    }
+
+    // Сжатая история диалога. При выключенном HISTORY_COMPRESSION_ENABLED возвращает '' — поведение прежнее.
+    // Внутри при превышении порога холодная зона пересжимается, поэтому блок к моменту ответа уже готов.
+    const historyContext = await buildHistoryContext({
+      userId: user.id,
+      conversationId: conversation.id,
+      domainKey: effectiveDomain,
+      memory,
     });
-  }
 
-  // Сжатая история диалога. При выключенном HISTORY_COMPRESSION_ENABLED возвращает '' — поведение прежнее.
-  // Внутри при превышении порога холодная зона пересжимается, поэтому блок к моменту ответа уже готов.
-  const historyContext = await buildHistoryContext({
-    userId: user.id, conversationId: conversation.id, domainKey: effectiveDomain, memory,
-  });
-
-  // Этап 3: ответ модели с циклом инструментов.
-  // Горячее окно: последние N сообщений передаются дословно (по умолчанию 8 — как было раньше).
-  const history = await getRecentMessages(conversation.id, config.historyCompression.hotWindow);
-  // Набор инструментов зависит от флагов глобальной памяти и прав пользователя (записывающие — только админу).
-  const tools = buildToolDefs(ctx);
-  const capabilitiesContext = await buildCapabilitiesContext({ ...ctx, userMessage }, tools);
-  // Инструкция о форматировании ответа под канал доставки. Блок постоянен для канала и меняется редко,
-  // поэтому стоит в стабильном префиксе сразу после MAIN_SYSTEM — это не ломает кэширование общего
-  // префикса промпта. Для канала без разметки (например, командной строки) инструкции нет.
-  const channelInstruction = getChannelProfile(channel).instruction;
-  const channelSystem = channelInstruction ? [{ role: 'system', content: channelInstruction }] : [];
-  // Блок активного skill: его инструкции из «# Skill Prompt». Стоит после стабильного префикса и памяти,
-  // но до истории и текущей реплики. Не заменяет общие правила и приоритет текущего запроса.
-  const activeSkillSystem = (activeSkill && activeSkill.skillPrompt)
-    ? [{
-      role: 'system',
-      content: `ACTIVE_SKILL_CONTEXT (справочные инструкции активного skill; текущий запрос важнее)
+    // Этап 3: ответ модели с циклом инструментов.
+    // Горячее окно: последние N сообщений передаются дословно (по умолчанию 8 — как было раньше).
+    const history = await getRecentMessages(conversation.id, config.historyCompression.hotWindow);
+    // Набор инструментов зависит от флагов глобальной памяти и прав пользователя (записывающие — только админу).
+    const tools = buildToolDefs(ctx);
+    const capabilitiesContext = await buildCapabilitiesContext({ ...ctx, userMessage }, tools);
+    // Инструкция о форматировании ответа под канал доставки. Блок постоянен для канала и меняется редко,
+    // поэтому стоит в стабильном префиксе сразу после MAIN_SYSTEM — это не ломает кэширование общего
+    // префикса промпта. Для канала без разметки (например, командной строки) инструкции нет.
+    const channelInstruction = getChannelProfile(channel).instruction;
+    const channelSystem = channelInstruction ? [{ role: 'system', content: channelInstruction }] : [];
+    // Блок активного skill: его инструкции из «# Skill Prompt». Стоит после стабильного префикса и памяти,
+    // но до истории и текущей реплики. Не заменяет общие правила и приоритет текущего запроса.
+    const activeSkillSystem =
+      activeSkill && activeSkill.skillPrompt
+        ? [
+            {
+              role: 'system',
+              content: `ACTIVE_SKILL_CONTEXT (справочные инструкции активного skill; текущий запрос важнее)
 
 Skill: ${activeSkill.name}
 Domain: ${activeSkill.domain_key}
 
 ${activeSkill.skillPrompt}`,
-    }]
-    : [];
-  // dateTimeSystem стоит в динамической зоне (последним system-блоком перед диалогом): его содержимое
-  // меняется каждую минуту, поэтому держим его ниже стабильного префикса, чтобы не ломать кэширование.
-  // GLOBAL_FACTS стоит сразу после стабильного MAIN_SYSTEM: он одинаков для всех пользователей и меняется
-  // редко, поэтому держим его в начале, чтобы максимизировать общий кэшируемый префикс.
-  const messages = [
-    { role: 'system', content: MAIN_SYSTEM },
-    ...channelSystem,
-    ...(globalFactsBlock ? [{ role: 'system', content: globalFactsBlock }] : []),
-    { role: 'system', content: memoryContext },
-    ...(capabilitiesContext ? [{ role: 'system', content: capabilitiesContext }] : []),
-    ...activeSkillSystem,
-    ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
-    ...extraSystem,
-    dateTimeSystem,
-    ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
-    { role: 'user', content: userMessage },
-  ];
+            },
+          ]
+        : [];
+    // dateTimeSystem стоит в динамической зоне (последним system-блоком перед диалогом): его содержимое
+    // меняется каждую минуту, поэтому держим его ниже стабильного префикса, чтобы не ломать кэширование.
+    // GLOBAL_FACTS стоит сразу после стабильного MAIN_SYSTEM: он одинаков для всех пользователей и меняется
+    // редко, поэтому держим его в начале, чтобы максимизировать общий кэшируемый префикс.
+    const messages = [
+      { role: 'system', content: MAIN_SYSTEM },
+      ...channelSystem,
+      ...(globalFactsBlock ? [{ role: 'system', content: globalFactsBlock }] : []),
+      { role: 'system', content: memoryContext },
+      ...(capabilitiesContext ? [{ role: 'system', content: capabilitiesContext }] : []),
+      ...activeSkillSystem,
+      ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
+      ...extraSystem,
+      dateTimeSystem,
+      ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
+      { role: 'user', content: userMessage },
+    ];
 
-  const toolsUsed = [];
-  let answer = '';
-  let finalReceived = false;
-  let degraded = false;
-  for (let step = 0; step < 5; step++) {
-    await emit({ type: 'stage.started', stage: 'llm', title: 'Готовлю ответ' });
-    const msg = await runModelTurn({
-      streamingOn,
-      model: mainModel,
-      messages,
-      tools,
-      emit,
-    });
-    if (msg.tool_calls && msg.tool_calls.length) {
-      messages.push(msg);
-      for (const tc of msg.tool_calls) {
-        let args = {};
-        try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* пустые аргументы */ }
-        const toolName = tc.function.name;
-        const title = toolTitle(toolName);
-        // Событие испускается после того, как модель полностью решила вызвать инструмент и имя известно,
-        // но ДО executeTool. Аргументы инструмента в событие не кладём: в них бывают приватные данные.
-        await emit({ type: 'tool.started', toolName, toolTitle: title });
-        const result = await executeTool(ctx, toolName, args);
-        const ok = !result?.error;
-        await emit({
-          type: 'tool.completed', toolName, toolTitle: title, ok,
-          ...(ok ? {} : { error: String(result.error) }),
-        });
-        toolsUsed.push({ name: toolName, args, result });
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
-      }
-      continue; // дать модели увидеть результат инструмента
-    }
-    answer = msg.content || '';
-    finalReceived = true;
-    break;
-  }
-
-  // Лимит шагов исчерпан, а финальный текст так и не получен: вместо пустого ответа отдаём понятный
-  // безопасный запасной вариант и помечаем ответ как degraded, чтобы канал мог это учесть.
-  if (!finalReceived) {
-    answer = 'Не получилось завершить цепочку инструментов. Попробуйте уточнить запрос.';
-    degraded = true;
-  }
-  await emit({ type: 'assistant.completed', text: answer });
-
-  // Этап 4: сохранить сообщения диалога.
-  const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
-  const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer);
-
-  // Этап 5: извлечение и запись фактов. По умолчанию асинхронно (не тормозит ответ).
-  const recentText = [...history, { role: 'user', content: userMessage }, { role: 'assistant', content: answer }]
-    .map((m) => `${m.role}: ${m.content}`).join('\n');
-  const writeJob = (async () => {
-    try {
-      const candidates = await extractCandidates({
-        skillName: ctx.skillName, domainKey: effectiveDomain, recentMessages: recentText, assistantResponse: answer,
+    const toolsUsed = [];
+    let answer = '';
+    let finalReceived = false;
+    let degraded = false;
+    for (let step = 0; step < 5; step++) {
+      await emit({ type: 'stage.started', stage: 'llm', title: 'Готовлю ответ' });
+      const msg = await runModelTurn({
+        streamingOn,
+        model: mainModel,
+        messages,
+        tools,
+        emit,
       });
-      const result = await persistCandidates(user.id, effectiveDomain, candidates, conversation.id);
-      // Извлечение и обновление тем диалога — только в режиме собеседника.
-      if (config.companion.enabled) {
-        const topics = await extractTopics({ recentMessages: recentText });
-        if (topics.length) await upsertTopicMentions(user.id, await getDomainId(effectiveDomain), topics);
+      if (msg.tool_calls && msg.tool_calls.length) {
+        messages.push(msg);
+        for (const tc of msg.tool_calls) {
+          let args = {};
+          try {
+            args = JSON.parse(tc.function.arguments || '{}');
+          } catch {
+            /* пустые аргументы */
+          }
+          const toolName = tc.function.name;
+          const title = toolTitle(toolName);
+          // Событие испускается после того, как модель полностью решила вызвать инструмент и имя известно,
+          // но ДО executeTool. Аргументы инструмента в событие не кладём: в них бывают приватные данные.
+          await emit({ type: 'tool.started', toolName, toolTitle: title });
+          const result = await executeTool(ctx, toolName, args);
+          const ok = !result?.error;
+          await emit({
+            type: 'tool.completed',
+            toolName,
+            toolTitle: title,
+            ok,
+            ...(ok ? {} : { error: String(result.error) }),
+          });
+          toolsUsed.push({ name: toolName, args, result });
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+        }
+        continue; // дать модели увидеть результат инструмента
       }
-      return result;
-    } catch (err) {
-      return { error: String(err.message || err) };
+      answer = msg.content || '';
+      finalReceived = true;
+      break;
     }
-  })();
 
-  let memoryWrites = null;
-  if (extractSync) memoryWrites = await writeJob;
-  else writeJob.catch(() => {});
+    // Лимит шагов исчерпан, а финальный текст так и не получен: вместо пустого ответа отдаём понятный
+    // безопасный запасной вариант и помечаем ответ как degraded, чтобы канал мог это учесть.
+    if (!finalReceived) {
+      answer = 'Не получилось завершить цепочку инструментов. Попробуйте уточнить запрос.';
+      degraded = true;
+    }
+    await emit({ type: 'assistant.completed', text: answer });
 
-  await emit({ type: 'agent.completed', ...(degraded ? { degraded: true } : {}) });
+    // Этап 4: сохранить сообщения диалога.
+    const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
+    const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer);
 
-  return {
-    answer, intent, toolsUsed, memoryContext,
-    memoryUsed: memory, memoryWrites,
-    // Признак вырожденного ответа: цикл инструментов исчерпал лимит шагов без финального текста модели.
-    degraded,
-    // Предпочтение формы ответа. Канал решает, как доставить ответ; каналы без поддержки голоса значение
-    // 'voice' просто игнорируют (например, src/cli.js печатает res.answer и поле replyMode не использует).
-    replyMode: ctx.replyMode,
-    voiceOutputVoice: ctx.voiceOutputVoice,
-    userId: user.id, conversationId: conversation.id, domainKey: effectiveDomain,
-    userMessageId: userMessageRow.id, assistantMessageId: assistantMessageRow.id,
-  };
+    // Этап 5: извлечение и запись фактов. По умолчанию асинхронно (не тормозит ответ).
+    const recentText = [...history, { role: 'user', content: userMessage }, { role: 'assistant', content: answer }]
+      .map((m) => `${m.role}: ${m.content}`)
+      .join('\n');
+    const writeJob = (async () => {
+      try {
+        const candidates = await extractCandidates({
+          skillName: ctx.skillName,
+          domainKey: effectiveDomain,
+          recentMessages: recentText,
+          assistantResponse: answer,
+        });
+        const result = await persistCandidates(user.id, effectiveDomain, candidates, conversation.id);
+        // Извлечение и обновление тем диалога — только в режиме собеседника.
+        if (config.companion.enabled) {
+          const topics = await extractTopics({ recentMessages: recentText });
+          if (topics.length) {
+            await upsertTopicMentions(user.id, await getDomainId(effectiveDomain), topics);
+          }
+        }
+        return result;
+      } catch (err) {
+        return { error: String(err.message || err) };
+      }
+    })();
+
+    let memoryWrites = null;
+    if (extractSync) {
+      memoryWrites = await writeJob;
+    } else {
+      writeJob.catch(() => {});
+    }
+
+    await emit({ type: 'agent.completed', ...(degraded ? { degraded: true } : {}) });
+
+    return {
+      answer,
+      intent,
+      toolsUsed,
+      memoryContext,
+      memoryUsed: memory,
+      memoryWrites,
+      // Признак вырожденного ответа: цикл инструментов исчерпал лимит шагов без финального текста модели.
+      degraded,
+      // Предпочтение формы ответа. Канал решает, как доставить ответ; каналы без поддержки голоса значение
+      // 'voice' просто игнорируют (например, src/cli.js печатает res.answer и поле replyMode не использует).
+      replyMode: ctx.replyMode,
+      voiceOutputVoice: ctx.voiceOutputVoice,
+      userId: user.id,
+      conversationId: conversation.id,
+      domainKey: effectiveDomain,
+      userMessageId: userMessageRow.id,
+      assistantMessageId: assistantMessageRow.id,
+    };
   }
 }
 
-export async function recordReactionTurn({
-  externalId, userMessage, domainKey = 'general', delivery,
-}) {
+export async function recordReactionTurn({ externalId, userMessage, domainKey = 'general', delivery }) {
   const user = await ensureUser(externalId);
   const previousLastUserAt = await getLastUserMessageTime(user.id);
   await recordUserInboundForContactPolicy({ userId: user.id, previousUserMessageAt: previousLastUserAt });
   const conversation = await ensureConversation(user.id, domainKey);
   const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
-  const assistantMessageRow = await saveMessage(
-    conversation.id,
-    user.id,
-    'assistant',
-    delivery?.fallbackText || '',
-    { metadata: { event_type: 'bot_reaction', reaction_key: delivery?.reactionKey || null } },
-  );
+  const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', delivery?.fallbackText || '', {
+    metadata: { event_type: 'bot_reaction', reaction_key: delivery?.reactionKey || null },
+  });
   return {
     answer: delivery?.fallbackText || '',
     delivery,
@@ -667,15 +716,20 @@ export async function recordUserReaction({
     const writeJob = (async () => {
       try {
         const candidates = await extractCandidates({
-          domainKey, recentMessages, assistantResponse: targetText,
+          domainKey,
+          recentMessages,
+          assistantResponse: targetText,
         });
         return persistCandidates(user.id, domainKey, candidates, conversation.id);
       } catch (err) {
         return { error: String(err.message || err) };
       }
     })();
-    if (extractSync) memoryWrites = await writeJob;
-    else writeJob.catch(() => {});
+    if (extractSync) {
+      memoryWrites = await writeJob;
+    } else {
+      writeJob.catch(() => {});
+    }
   }
 
   return {

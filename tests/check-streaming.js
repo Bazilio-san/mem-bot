@@ -8,8 +8,13 @@ import { config } from '../src/config.js';
 let passed = 0;
 let failed = 0;
 function check(name, cond, detail = '') {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else { failed++; console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`); }
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
+    failed++;
+    console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`);
+  }
 }
 
 const reminderTool = {
@@ -41,9 +46,14 @@ async function main() {
       { role: 'system', content: 'Отвечай одним коротким предложением на русском языке.' },
       { role: 'user', content: 'Поздоровайся и пожелай хорошего дня.' },
     ],
-    onDelta: (chunk) => { deltas++; chars += chunk.length; },
+    onDelta: (chunk) => {
+      deltas++;
+      chars += chunk.length;
+    },
   });
-  console.log(`     фрагментов: ${deltas}, символов суммарно: ${chars}, ответ: ${(textMsg.content || '').slice(0, 80)}`);
+  console.log(
+    `     фрагментов: ${deltas}, символов суммарно: ${chars}, ответ: ${(textMsg.content || '').slice(0, 80)}`,
+  );
   check('Прокси отдаёт текст ответа потоковыми фрагментами', deltas >= 1 && (textMsg.content || '').length > 0);
   check('Финальный текстовый ответ не содержит tool_calls', !textMsg.tool_calls);
 
@@ -51,16 +61,25 @@ async function main() {
   console.log('\n[2] Потоковый вызов инструмента');
   const toolMsg = await chatStream({
     messages: [
-      { role: 'system', content: 'Если пользователь просит напоминание, обязательно вызови инструмент create_reminder.' },
+      {
+        role: 'system',
+        content: 'Если пользователь просит напоминание, обязательно вызови инструмент create_reminder.',
+      },
       { role: 'user', content: 'Напомни мне завтра в 10 утра проверить цены на билеты.' },
     ],
     tools: [reminderTool],
   });
   const call = toolMsg.tool_calls?.[0];
-  console.log(`     вызовов: ${toolMsg.tool_calls?.length || 0}, имя: ${call?.function?.name}, аргументы: ${call?.function?.arguments}`);
+  console.log(
+    `     вызовов: ${toolMsg.tool_calls?.length || 0}, имя: ${call?.function?.name}, аргументы: ${call?.function?.arguments}`,
+  );
   check('Прокси отдаёт вызов инструмента потоковыми дельтами', !!call && call.function.name === 'create_reminder');
   let argsOk = false;
-  try { argsOk = !!JSON.parse(call?.function?.arguments || 'null'); } catch { argsOk = false; }
+  try {
+    argsOk = !!JSON.parse(call?.function?.arguments || 'null');
+  } catch {
+    argsOk = false;
+  }
   check('Аргументы инструмента собраны в валидный JSON', argsOk, call?.function?.arguments);
   check('У вызова инструмента есть id и type=function', !!call?.id && call?.type === 'function');
 

@@ -19,10 +19,23 @@ export const ENTITY_KEY_MODES = ['fixed_vocab', 'slug'];
 // Виды памяти, которые домен может объявить в allowed_memory_kinds.
 // Совпадают с типом mem.memory_kind из migrations/001_init.sql.
 export const MEMORY_KINDS = [
-  'fact', 'preference', 'constraint', 'goal', 'history', 'state',
-  'progress', 'instruction', 'relationship', 'reminder', 'secure_reference',
-  'emotional_pattern', 'activity_rhythm', 'communication_style',
-  'open_loop', 'topic_energy', 'discovery_seed',
+  'fact',
+  'preference',
+  'constraint',
+  'goal',
+  'history',
+  'state',
+  'progress',
+  'instruction',
+  'relationship',
+  'reminder',
+  'secure_reference',
+  'emotional_pattern',
+  'activity_rhythm',
+  'communication_style',
+  'open_loop',
+  'topic_energy',
+  'discovery_seed',
 ];
 
 // Мета-схема: какой должна быть форма объекта definition.

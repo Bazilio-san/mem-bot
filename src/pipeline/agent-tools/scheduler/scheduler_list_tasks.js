@@ -16,14 +16,26 @@ function pad2(value) {
 }
 
 function describeCron(expr) {
-  const parts = String(expr || '').trim().split(/\s+/);
-  if (parts.length !== 5) return null;
+  const parts = String(expr || '')
+    .trim()
+    .split(/\s+/);
+  if (parts.length !== 5) {
+    return null;
+  }
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
-  if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return null;
+  if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) {
+    return null;
+  }
   const time = `${pad2(hour)}:${pad2(minute)}`;
-  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*') return `каждый день в ${time}`;
-  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '1-5') return `по будням в ${time}`;
-  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '0,6') return `по выходным в ${time}`;
+  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return `каждый день в ${time}`;
+  }
+  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '1-5') {
+    return `по будням в ${time}`;
+  }
+  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '0,6') {
+    return `по выходным в ${time}`;
+  }
   if (dayOfMonth !== '*' && month === '*' && dayOfWeek === '*') {
     return `каждый месяц ${dayOfMonth} числа в ${time}`;
   }
@@ -32,20 +44,34 @@ function describeCron(expr) {
 
 function describeRRule(rrule) {
   const text = String(rrule || '').replace(/^RRULE:/i, '');
-  const fields = Object.fromEntries(text.split(';').map((part) => {
-    const [key, value] = part.split('=');
-    return [key, value];
-  }).filter(([key, value]) => key && value));
+  const fields = Object.fromEntries(
+    text
+      .split(';')
+      .map((part) => {
+        const [key, value] = part.split('=');
+        return [key, value];
+      })
+      .filter(([key, value]) => key && value),
+  );
   const hour = fields.BYHOUR && /^\d+$/.test(fields.BYHOUR) ? pad2(fields.BYHOUR) : null;
   const minute = fields.BYMINUTE && /^\d+$/.test(fields.BYMINUTE) ? pad2(fields.BYMINUTE) : '00';
   const time = hour ? ` в ${hour}:${minute}` : '';
-  if (fields.FREQ === 'DAILY') return `каждый день${time}`;
+  if (fields.FREQ === 'DAILY') {
+    return `каждый день${time}`;
+  }
   if (fields.FREQ === 'WEEKLY') {
-    const days = String(fields.BYDAY || '').split(',').map((d) => WEEKDAYS[d]).filter(Boolean);
+    const days = String(fields.BYDAY || '')
+      .split(',')
+      .map((d) => WEEKDAYS[d])
+      .filter(Boolean);
     return days.length ? `каждую неделю: ${days.join(', ')}${time}` : `каждую неделю${time}`;
   }
-  if (fields.FREQ === 'MONTHLY') return `каждый месяц${time}`;
-  if (fields.FREQ === 'YEARLY') return `каждый год${time}`;
+  if (fields.FREQ === 'MONTHLY') {
+    return `каждый месяц${time}`;
+  }
+  if (fields.FREQ === 'YEARLY') {
+    return `каждый год${time}`;
+  }
   return null;
 }
 
@@ -55,9 +81,15 @@ function describeSchedule(row) {
   }
   if (row.schedule_kind === 'interval') {
     const seconds = Number(row.interval_seconds || 0);
-    if (seconds > 0 && seconds % 86400 === 0) return `каждые ${seconds / 86400} дн.`;
-    if (seconds > 0 && seconds % 3600 === 0) return `каждые ${seconds / 3600} ч.`;
-    if (seconds > 0 && seconds % 60 === 0) return `каждые ${seconds / 60} мин.`;
+    if (seconds > 0 && seconds % 86400 === 0) {
+      return `каждые ${seconds / 86400} дн.`;
+    }
+    if (seconds > 0 && seconds % 3600 === 0) {
+      return `каждые ${seconds / 3600} ч.`;
+    }
+    if (seconds > 0 && seconds % 60 === 0) {
+      return `каждые ${seconds / 60} мин.`;
+    }
     return seconds > 0 ? `каждые ${seconds} сек.` : 'интервальное расписание';
   }
   if (row.schedule_kind === 'cron') {

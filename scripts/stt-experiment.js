@@ -35,9 +35,16 @@ const AAI_BASE = 'https://api.assemblyai.com';
 function guessMime(file) {
   const ext = path.extname(file).toLowerCase();
   const map = {
-    '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
-    '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
-    '.flac': 'audio/flac', '.webm': 'audio/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
+    '.ogg': 'audio/ogg',
+    '.oga': 'audio/ogg',
+    '.opus': 'audio/ogg',
+    '.mp3': 'audio/mpeg',
+    '.m4a': 'audio/mp4',
+    '.wav': 'audio/wav',
+    '.flac': 'audio/flac',
+    '.webm': 'audio/webm',
+    '.mp4': 'video/mp4',
+    '.mov': 'video/quicktime',
   };
   return map[ext] || 'application/octet-stream';
 }
@@ -47,7 +54,9 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
   const form = new FormData();
   form.append('file', new Blob([fileBuf], { type: guessMime(fileName) }), path.basename(fileName));
   form.append('model', model);
-  if (language) form.append('language', language);
+  if (language) {
+    form.append('language', language);
+  }
   form.append('response_format', 'json');
 
   // Прокси иногда обрывает соединение по тайм-ауту (UND_ERR_CONNECT_TIMEOUT) — делаем несколько повторов.
@@ -70,7 +79,9 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
     } catch (err) {
       lastErr = err;
       const cause = err.cause ? ` (${err.cause.code || err.cause.message})` : '';
-      if (attempt < 3) process.stdout.write(`повтор ${attempt}${cause}… `);
+      if (attempt < 3) {
+        process.stdout.write(`повтор ${attempt}${cause}… `);
+      }
     }
   }
   throw lastErr;
@@ -86,7 +97,9 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
     headers: { Authorization: apiKey, 'Content-Type': 'application/octet-stream' },
     body: fileBuf,
   });
-  if (!up.ok) throw new Error(`upload HTTP ${up.status}: ${(await up.text()).slice(0, 200)}`);
+  if (!up.ok) {
+    throw new Error(`upload HTTP ${up.status}: ${(await up.text()).slice(0, 200)}`);
+  }
   const { upload_url: uploadUrl } = await up.json();
 
   // Шаг 2: создание задачи распознавания. Модель universal-2 поддерживает 99 языков, включая русский.
@@ -94,23 +107,35 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   // Берём universal-2, так как universal-3-pro русский язык не поддерживает.
   // Включаем автоопределение языка; код языка передаётся подсказкой через language_code, если задан.
   const body = { audio_url: uploadUrl, speech_models: ['universal-2'] };
-  if (language) body.language_code = language; else body.language_detection = true;
+  if (language) {
+    body.language_code = language;
+  } else {
+    body.language_detection = true;
+  }
   const cr = await fetch(`${AAI_BASE}/v2/transcript`, {
     method: 'POST',
     headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!cr.ok) throw new Error(`create HTTP ${cr.status}: ${(await cr.text()).slice(0, 300)}`);
+  if (!cr.ok) {
+    throw new Error(`create HTTP ${cr.status}: ${(await cr.text()).slice(0, 300)}`);
+  }
   const created = await cr.json();
 
   // Шаг 3: опрос готовности раз в секунду, пока статус не станет completed или error.
   for (;;) {
     await new Promise((r) => setTimeout(r, 1000));
     const pr = await fetch(`${AAI_BASE}/v2/transcript/${created.id}`, { headers: { Authorization: apiKey } });
-    if (!pr.ok) throw new Error(`poll HTTP ${pr.status}: ${(await pr.text()).slice(0, 200)}`);
+    if (!pr.ok) {
+      throw new Error(`poll HTTP ${pr.status}: ${(await pr.text()).slice(0, 200)}`);
+    }
     const t = await pr.json();
-    if (t.status === 'completed') return { elapsedMs: Date.now() - started, text: t.text };
-    if (t.status === 'error') throw new Error(`распознавание не удалось: ${t.error}`);
+    if (t.status === 'completed') {
+      return { elapsedMs: Date.now() - started, text: t.text };
+    }
+    if (t.status === 'error') {
+      throw new Error(`распознавание не удалось: ${t.error}`);
+    }
   }
 }
 
@@ -120,8 +145,7 @@ function buildTargets() {
   if (process.env.ASSEMBLYAI_API_KEY) {
     targets.push({
       label: 'AssemblyAI/universal-2',
-      run: (fileBuf, fileName) =>
-        transcribeAssemblyAI({ apiKey: process.env.ASSEMBLYAI_API_KEY, fileBuf, language: LANG }),
+      run: (fileBuf) => transcribeAssemblyAI({ apiKey: process.env.ASSEMBLYAI_API_KEY, fileBuf, language: LANG }),
     });
   }
   if (process.env.OPENAI_API_KEY) {
@@ -130,7 +154,12 @@ function buildTargets() {
         label: `proxy/${model}`,
         run: (fileBuf, fileName) =>
           transcribeOpenAICompatible({
-            baseURL: OPENAI_BASE, apiKey: process.env.OPENAI_API_KEY, model, fileBuf, fileName, language: LANG,
+            baseURL: OPENAI_BASE,
+            apiKey: process.env.OPENAI_API_KEY,
+            model,
+            fileBuf,
+            fileName,
+            language: LANG,
           }),
       });
     }
@@ -141,7 +170,12 @@ function buildTargets() {
         label: `groq/${model}`,
         run: (fileBuf, fileName) =>
           transcribeOpenAICompatible({
-            baseURL: GROQ_BASE, apiKey: process.env.GROQ_API_KEY, model, fileBuf, fileName, language: LANG,
+            baseURL: GROQ_BASE,
+            apiKey: process.env.GROQ_API_KEY,
+            model,
+            fileBuf,
+            fileName,
+            language: LANG,
           }),
       });
     }

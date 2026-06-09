@@ -11,10 +11,11 @@ export const skillAuthorSchemaEditTool = {
     type: 'function',
     function: {
       name: 'skill_author_schema_edit',
-      description: 'Edit the existing domain memory schema by instruction: add or remove an entity, a data field, '
-        + 'a vocabulary value, a synonym, or change the entity_key mode. Use for targeted schema changes; to '
-        + 'create a schema from scratch use skill_author_schema_generate. Returns a preview and validation issues '
-        + 'unless apply=true.',
+      description:
+        'Edit the existing domain memory schema by instruction: add or remove an entity, a data field, ' +
+        'a vocabulary value, a synonym, or change the entity_key mode. Use for targeted schema changes; to ' +
+        'create a schema from scratch use skill_author_schema_generate. Returns a preview and validation issues ' +
+        'unless apply=true.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -32,9 +33,17 @@ export const skillAuthorSchemaEditTool = {
     if (!skill.definition) {
       return { error: 'У навыка нет схемы. Сначала создайте её через skill_author_schema_generate.' };
     }
-    const { definition, summary, issues } = await proposeSchemaEdit({ definition: skill.definition, instruction: args.instruction });
+    const { definition, summary, issues } = await proposeSchemaEdit({
+      definition: skill.definition,
+      instruction: args.instruction,
+    });
     skill.definition = definition;
     const res = await applyOrStage(ctx, skill, { apply: args.apply === true });
-    return { ...res, summary, schema_issues: issues, entities: definition ? definition.entities.map((e) => e.entity_type) : [] };
+    return {
+      ...res,
+      summary,
+      schema_issues: issues,
+      entities: definition ? definition.entities.map((e) => e.entity_type) : [],
+    };
   },
 };

@@ -13,7 +13,9 @@ function tagsBalanced(html) {
     const closing = m[1] === '/';
     const name = m[2].toLowerCase();
     if (closing) {
-      if (stack.pop() !== name) return false;
+      if (stack.pop() !== name) {
+        return false;
+      }
     } else {
       stack.push(name);
     }
@@ -39,8 +41,10 @@ function tagsBalanced(html) {
 // 3. Одиночные спецсимволы в обычном тексте экранируются.
 {
   const out = telegramPostProcess('если 1 < 2 и 3 > 2, то всё & хорошо');
-  assert.ok(out.includes('&lt;') && out.includes('&gt;') && out.includes('&amp;'),
-    'символы <, > и & экранированы для parse_mode=HTML');
+  assert.ok(
+    out.includes('&lt;') && out.includes('&gt;') && out.includes('&amp;'),
+    'символы <, > и & экранированы для parse_mode=HTML',
+  );
 }
 
 // 4. Содержимое блока кода сохраняется как код.
@@ -66,7 +70,7 @@ function tagsBalanced(html) {
 
 // 7. Длинный размеченный текст режется так, что каждая часть сбалансирована по тегам.
 {
-  const inner = 'слово '.repeat(60);                       // ~360 символов внутри одного тега
+  const inner = 'слово '.repeat(60); // ~360 символов внутри одного тега
   const html = `<b>${inner}</b>`;
   const parts = telegramSplit(html, 100);
   assert.ok(parts.length > 1, 'длинный текст разбит на несколько частей');

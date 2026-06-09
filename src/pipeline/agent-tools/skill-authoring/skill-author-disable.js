@@ -11,10 +11,13 @@ export const skillAuthorDisableTool = {
     type: 'function',
     function: {
       name: 'skill_author_disable',
-      description: 'Disable a skill (set enabled=false) so the router stops selecting it, without deleting it. '
-        + 'Writes immediately.',
+      description:
+        'Disable a skill (set enabled=false) so the router stops selecting it, without deleting it. ' +
+        'Writes immediately.',
       parameters: {
-        type: 'object', additionalProperties: false, required: ['name'],
+        type: 'object',
+        additionalProperties: false,
+        required: ['name'],
         properties: { name: { type: 'string' } },
       },
     },

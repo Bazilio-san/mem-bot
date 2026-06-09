@@ -10,7 +10,9 @@ function fakeTg() {
   let nextId = 100;
   const tg = async (method, body) => {
     calls.push({ method, body });
-    if (method === 'sendMessage') return { message_id: ++nextId };
+    if (method === 'sendMessage') {
+      return { message_id: ++nextId };
+    }
     return {};
   };
   return { tg, calls };
@@ -25,13 +27,19 @@ function fakeTg() {
   const progress = createTelegramProgress({
     chatId: 1,
     tg,
-    startTyping: () => { const s = { stopped: false }; typingStops.push(s); return () => { s.stopped = true; }; },
+    startTyping: () => {
+      const s = { stopped: false };
+      typingStops.push(s);
+      return () => {
+        s.stopped = true;
+      };
+    },
     options: { editIntervalMs: 900, minEditChars: 5, minFirstDraftChars: 0, maxLen: 4000, now: () => clock },
   });
 
-  await progress.onEvent({ type: 'stage.started', stage: 'llm' });   // запускает индикатор «печатает…»
+  await progress.onEvent({ type: 'stage.started', stage: 'llm' }); // запускает индикатор «печатает…»
   for (let i = 0; i < 4; i++) {
-    clock += 1000;                                                    // сдвигаем часы за порог троттлинга
+    clock += 1000; // сдвигаем часы за порог троттлинга
     await progress.onEvent({ type: 'assistant.delta', text: `часть${i} ` });
   }
   const sent = await progress.complete('часть0 часть1 часть2 часть3 финал');
@@ -64,7 +72,10 @@ function fakeTg() {
   assert.equal(statusSend.body.text, 'Ищу в личной памяти...');
 
   await progress.onEvent({ type: 'assistant.delta', text: 'Нашёл нужное.' });
-  assert.ok(calls.some((c) => c.method === 'deleteMessage'), 'статус инструмента убран при появлении ответа');
+  assert.ok(
+    calls.some((c) => c.method === 'deleteMessage'),
+    'статус инструмента убран при появлении ответа',
+  );
   await progress.complete('Нашёл нужное.');
 }
 
@@ -72,7 +83,10 @@ function fakeTg() {
 {
   const { tg, calls } = fakeTg();
   const progress = createTelegramProgress({
-    chatId: 1, tg, startTyping: () => () => {}, options: { toolStatuses: false, now: () => 0 },
+    chatId: 1,
+    tg,
+    startTyping: () => () => {},
+    options: { toolStatuses: false, now: () => 0 },
   });
   await progress.onEvent({ type: 'tool.started', toolName: 'memory_search', toolTitle: 'Ищу в личной памяти...' });
   assert.equal(calls.length, 0, 'при выключенных статусах сообщения не отправляются');
@@ -83,7 +97,7 @@ function fakeTg() {
 {
   const { tg, calls } = fakeTg();
   const progress = createTelegramProgress({ chatId: 1, tg, options: { maxLen: 10, now: () => 0 } });
-  const sent = await progress.complete('0123456789ABCDEFGHIJ');           // 20 символов при пределе 10
+  const sent = await progress.complete('0123456789ABCDEFGHIJ'); // 20 символов при пределе 10
   assert.equal(sent.length, 2, 'ответ разбит на две части');
   assert.equal(calls.filter((c) => c.method === 'sendMessage').length, 2);
 }
@@ -98,12 +112,19 @@ function fakeTg() {
   const progress = createTelegramProgress({
     chatId: 1,
     tg,
-    startTyping: () => { const s = { stopped: false }; typingStops.push(s); return () => { s.stopped = true; }; },
+    startTyping: () => {
+      const s = { stopped: false };
+      typingStops.push(s);
+      return () => {
+        s.stopped = true;
+      };
+    },
     options: { minFirstDraftChars: 50, editIntervalMs: 500, minEditChars: 20, now: () => clock },
   });
 
-  await progress.onEvent({ type: 'stage.started', stage: 'llm' });   // запускает индикатор «печатает…»
-  for (const piece of ['Я ', 'умею ', 'много ']) {                   // суммарно 13 символов — ниже порога 50
+  await progress.onEvent({ type: 'stage.started', stage: 'llm' }); // запускает индикатор «печатает…»
+  for (const piece of ['Я ', 'умею ', 'много ']) {
+    // суммарно 13 символов — ниже порога 50
     clock += 1000;
     await progress.onEvent({ type: 'assistant.delta', text: piece });
   }
@@ -126,15 +147,17 @@ function fakeTg() {
   const { tg, calls } = fakeTg();
   let clock = 0;
   const progress = createTelegramProgress({
-    chatId: 1, tg, startTyping: () => () => {},
+    chatId: 1,
+    tg,
+    startTyping: () => () => {},
     options: { minFirstDraftChars: 10, editIntervalMs: 500, minEditChars: 5, now: () => clock },
   });
 
   clock += 1000;
-  await progress.onEvent({ type: 'assistant.delta', text: 'Я ' });            // 2 символа — ниже порога
+  await progress.onEvent({ type: 'assistant.delta', text: 'Я ' }); // 2 символа — ниже порога
   assert.equal(calls.length, 0, 'короткий первый фрагмент пузырь не создаёт');
   clock += 1000;
-  await progress.onEvent({ type: 'assistant.delta', text: 'умею многое' });   // суммарно перешли порог 10
+  await progress.onEvent({ type: 'assistant.delta', text: 'умею многое' }); // суммарно перешли порог 10
   const firstSend = calls.find((c) => c.method === 'sendMessage');
   assert.ok(firstSend, 'после порога создан черновик');
   assert.equal(firstSend.body.text, 'Я умею многое', 'первый пузырь содержит весь накопленный текст, не обрывок');

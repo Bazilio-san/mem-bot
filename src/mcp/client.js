@@ -9,7 +9,9 @@ const CALL_TIMEOUT_MS = 90_000; // предел ожидания ответа и
 // Трассировка вызовов инструментов MCP: запросы и ответы. Включается категорией DEBUG=mcp:tool (или DEBUG=*).
 // Идёт в stderr, чтобы не смешиваться с пользовательским выводом, и по умолчанию выключена.
 function dbgTool(...args) {
-  if (debugEnabled('mcp:tool')) console.error('[mcp:tool]', ...args);
+  if (debugEnabled('mcp:tool')) {
+    console.error('[mcp:tool]', ...args);
+  }
 }
 
 // Одно живое подключение к серверу. Храним клиента, чтобы переиспользовать соединение между вызовами
@@ -22,7 +24,9 @@ class McpConnection {
 
   // Установить соединение, если его ещё нет. Повторный вызов при живом клиенте — это пустая операция.
   async ensureConnected() {
-    if (this.client) return this.client;
+    if (this.client) {
+      return this.client;
+    }
     const client = new Client({ name: 'mem-bot', version: '1.0.0' });
     // Заголовки транспорта пробрасываем только если они заданы в конфигурации — это место для будущего токена.
     const options = this.server.headers ? { requestInit: { headers: this.server.headers } } : undefined;
@@ -37,7 +41,11 @@ class McpConnection {
     const old = this.client;
     this.client = null;
     if (old) {
-      try { await old.close(); } catch { /* сервер уже мог разорвать связь — это не ошибка */ }
+      try {
+        await old.close();
+      } catch {
+        /* сервер уже мог разорвать связь — это не ошибка */
+      }
     }
   }
 
@@ -71,8 +79,12 @@ class McpConnection {
       dbgTool(`-- ${label} разрыв связи, переподключаюсь и повторяю:`, String(err?.message || err));
       await this.reset();
       const res = await this.invokeOnce(name, args);
-      dbgTool(`<- ${label} ответ после переподключения`, res?.isError ? '(isError)' : '(ok)', ':',
-        JSON.stringify(res?.content ?? res));
+      dbgTool(
+        `<- ${label} ответ после переподключения`,
+        res?.isError ? '(isError)' : '(ok)',
+        ':',
+        JSON.stringify(res?.content ?? res),
+      );
       return res;
     }
   }
@@ -90,14 +102,25 @@ class McpConnection {
 // Тайм-аут вызова сюда намеренно не попадает: повторять заведомо долгий вызов смысла нет.
 function isConnectionError(err) {
   const msg = String(err?.message || err).toLowerCase();
-  return msg.includes('econnrefused') || msg.includes('econnreset') || msg.includes('socket')
-    || msg.includes('network') || msg.includes('closed') || msg.includes('disconnect');
+  return (
+    msg.includes('econnrefused') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket') ||
+    msg.includes('network') ||
+    msg.includes('closed') ||
+    msg.includes('disconnect')
+  );
 }
 
 // Текстовые блоки ответа MCP склеиваем в одну строку — модели нужен текст, а не структура транспорта.
 function describeContent(content) {
-  if (!Array.isArray(content)) return '';
-  return content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n');
 }
 
 // Превратить одно описание инструмента MCP в объект формата локального реестра инструментов.
@@ -139,7 +162,9 @@ function wrapMcpTool(connection, server, mcpTool) {
 // Это даёт на старте полную картину «что вообще заявлено к подключению» ещё до попыток соединения.
 function logDeclaredServers(servers) {
   if (servers.length === 0) {
-    console.log('MCP: в конфигурации (.mcp.json) не объявлено ни одного сервера — внешние инструменты не подключаются.');
+    console.log(
+      'MCP: в конфигурации (.mcp.json) не объявлено ни одного сервера — внешние инструменты не подключаются.',
+    );
     return;
   }
   console.log(`MCP: в конфигурации объявлено серверов — ${servers.length}. Полный список:`);
@@ -170,19 +195,27 @@ export async function loadMcpTools() {
     const startedAt = Date.now();
     try {
       const tools = await connection.listAllTools();
-      for (const mcpTool of tools) collected.push(wrapMcpTool(connection, server, mcpTool));
+      for (const mcpTool of tools) {
+        collected.push(wrapMcpTool(connection, server, mcpTool));
+      }
       connectedCount += 1;
-      console.log(`MCP «${server.title}» (${server.url}): подключение успешно за ${Date.now() - startedAt} мс, `
-        + `получено инструментов — ${tools.length}.`);
+      console.log(
+        `MCP «${server.title}» (${server.url}): подключение успешно за ${Date.now() - startedAt} мс, ` +
+          `получено инструментов — ${tools.length}.`,
+      );
     } catch (err) {
       failedCount += 1;
-      console.error(`MCP «${server.title}» (${server.url}): подключение не удалось за ${Date.now() - startedAt} мс — `
-        + `${err.message}. Сервер пропущен, остальные инструменты остаются доступны.`);
+      console.error(
+        `MCP «${server.title}» (${server.url}): подключение не удалось за ${Date.now() - startedAt} мс — ` +
+          `${err.message}. Сервер пропущен, остальные инструменты остаются доступны.`,
+      );
     }
   }
 
   const enabledCount = servers.filter((s) => s.enabled).length;
-  console.log(`MCP: итог подключения — успешно ${connectedCount} из ${enabledCount} включённых `
-    + `(сбоев ${failedCount}), всего получено инструментов — ${collected.length}.`);
+  console.log(
+    `MCP: итог подключения — успешно ${connectedCount} из ${enabledCount} включённых ` +
+      `(сбоев ${failedCount}), всего получено инструментов — ${collected.length}.`,
+  );
   return collected;
 }

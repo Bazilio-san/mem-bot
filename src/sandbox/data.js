@@ -19,7 +19,10 @@ registerChannelProfile('html', {
 
 // Человеко-понятные названия и описания для типов проактивных триггеров.
 const TRIGGER_LABELS = {
-  inactivity: { title: 'Молчание пользователя', text: 'Бот пишет первым, если пользователь давно не выходил на связь.' },
+  inactivity: {
+    title: 'Молчание пользователя',
+    text: 'Бот пишет первым, если пользователь давно не выходил на связь.',
+  },
   daily_checkin: { title: 'Ежедневное приветствие', text: 'Утренний чек-ин в заданный час с темой дня.' },
   goal_reminder: { title: 'Напоминание о цели', text: 'Периодическое напоминание о незавершённой цели пользователя.' },
   welcome_back: { title: 'Тёплая встреча возврата', text: 'Приветствие, когда пользователь вернулся после паузы.' },
@@ -61,7 +64,9 @@ export async function getUserMemory(userId) {
 
   const group = { profile: [], dialog: [], domain: [] };
   for (const it of items) {
-    if (!group[it.scope]) continue;
+    if (!group[it.scope]) {
+      continue;
+    }
     group[it.scope].push({
       id: it.id,
       kind: it.memory_kind,
@@ -125,12 +130,20 @@ function summarizeSelection(mem) {
       scored.push({ id: it.id, score: Number(it.score ?? 0) });
     }
   }
-  for (const r of mem.reminders || []) chosen.reminder.push(r.id);
-  for (const s of mem.secure || []) chosen.secure.push(s.id);
+  for (const r of mem.reminders || []) {
+    chosen.reminder.push(r.id);
+  }
+  for (const s of mem.secure || []) {
+    chosen.secure.push(s.id);
+  }
 
   // Общий ранг по убыванию веса (нумерация порядка попадания в контекст).
   const ranks = {};
-  scored.sort((a, b) => b.score - a.score).forEach((r, i) => { ranks[r.id] = i + 1; });
+  scored
+    .sort((a, b) => b.score - a.score)
+    .forEach((r, i) => {
+      ranks[r.id] = i + 1;
+    });
   return { chosen, scores, ranks };
 }
 
@@ -143,13 +156,17 @@ export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
   } catch {
     // Откат: если классификатор недоступен, берём домен диалога и базовый набор областей памяти.
     intent = {
-      intent: 'unknown', domain_key: currentDomain, confidence: 0,
-      entities: {}, needs_memory: true, needed_memory_scopes: ['profile', 'dialog', 'domain'],
+      intent: 'unknown',
+      domain_key: currentDomain,
+      confidence: 0,
+      entities: {},
+      needs_memory: true,
+      needed_memory_scopes: ['profile', 'dialog', 'domain'],
     };
   }
   const effectiveDomain = intent.domain_key || currentDomain;
   // Что попросил классификатор. Если он решил, что память не нужна (needs_memory=false), список пуст.
-  const requestedScopes = intent.needs_memory === false ? [] : (intent.needed_memory_scopes || []);
+  const requestedScopes = intent.needs_memory === false ? [] : intent.needed_memory_scopes || [];
   // В песочнице всегда показываем выборку базовых областей (профиль, диалог, предметная), чтобы наглядно
   // подсветить релевантные факты для любой фразы — даже когда классификатор счёл память необязательной.
   // Дополнительные области (напоминания, защищённые) добавляются только если классификатор их запросил.
@@ -167,8 +184,8 @@ export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
     reminder: { picked: (mem.reminders || []).length, limit: LIMITS.reminder },
     secure: { picked: (mem.secure || []).length, limit: LIMITS.secure },
   };
-  const total = chosen.profile.length + chosen.dialog.length + chosen.domain.length
-    + chosen.reminder.length + chosen.secure.length;
+  const total =
+    chosen.profile.length + chosen.dialog.length + chosen.domain.length + chosen.reminder.length + chosen.secure.length;
 
   return {
     classification: {
@@ -256,8 +273,11 @@ export async function getProactivity(userId) {
     if (!t.enabled) {
       status = 'block';
     } else {
-      try { status = (await shouldFire(t, userId)) ? 'ready' : 'pending'; }
-      catch { status = 'pending'; }
+      try {
+        status = (await shouldFire(t, userId)) ? 'ready' : 'pending';
+      } catch {
+        status = 'pending';
+      }
     }
     const label = TRIGGER_LABELS[t.trigger_type] || { title: t.trigger_type, text: '' };
     triggers.push({

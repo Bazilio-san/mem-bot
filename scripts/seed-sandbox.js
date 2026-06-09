@@ -37,9 +37,22 @@ async function insertMemory(userId, domainKey, m) {
        (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text, data,
         importance, confidence, sensitivity, usage_count, embedding, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14)`,
-    [userId, domainId, m.scope, m.kind, m.entityType || null, m.entityKey || null, m.text,
-      JSON.stringify(m.data || {}), m.importance, m.confidence, m.sensitivity || 'normal',
-      m.usage || 0, vector ? `[${vector.join(',')}]` : null, updatedAt],
+    [
+      userId,
+      domainId,
+      m.scope,
+      m.kind,
+      m.entityType || null,
+      m.entityKey || null,
+      m.text,
+      JSON.stringify(m.data || {}),
+      m.importance,
+      m.confidence,
+      m.sensitivity || 'normal',
+      m.usage || 0,
+      vector ? `[${vector.join(',')}]` : null,
+      updatedAt,
+    ],
   );
 }
 
@@ -75,31 +88,161 @@ async function insertTopic(userId, domainKey, topicKey, count, engagement, daysA
 async function seedAnna() {
   const u = await recreateUser('sandbox-anna', 'Анна', 'Europe/Moscow');
   const facts = [
-    { scope: 'profile', kind: 'preference', entityType: 'comm_style', entityKey: 'style', text: 'Предпочитает короткие ответы и примеры по шагам', data: { tone: 'concise' }, importance: 0.8, confidence: 0.9, usage: 11, daysAgo: 2 },
-    { scope: 'profile', kind: 'goal', entityType: 'profile', entityKey: 'goal', text: 'Готовится к ЕГЭ по математике, 11 класс', data: { goal: 'ege_math' }, importance: 0.75, confidence: 0.85, usage: 6, daysAgo: 5 },
-    { scope: 'profile', kind: 'fact', entityType: 'profile', entityKey: 'lang', text: 'Общается на русском, иногда просит английские термины', data: { lang: 'ru' }, importance: 0.4, confidence: 0.7, sensitivity: 'low', usage: 2, daysAgo: 18 },
-    { scope: 'dialog', kind: 'state', entityType: 'dialog', entityKey: 'last_topic', text: 'В прошлый раз разбирали дискриминант квадратного уравнения', importance: 0.55, confidence: 0.8, usage: 1, daysAgo: 0.8 },
-    { scope: 'dialog', kind: 'state', entityType: 'dialog', entityKey: 'mood', text: 'Путается в знаках при переносе слагаемых', importance: 0.45, confidence: 0.65, usage: 1, daysAgo: 0.8 },
-    { scope: 'domain', kind: 'progress', entityType: 'student_skill', entityKey: 'quadratic_equations', text: 'Слабо понимает квадратные уравнения, путает дискриминант', data: { topic: 'quadratic_equations', level: 'weak' }, importance: 0.85, confidence: 0.9, usage: 8, daysAgo: 1 },
-    { scope: 'domain', kind: 'progress', entityType: 'student_skill', entityKey: 'linear_equations', text: 'Линейные уравнения решает уверенно', data: { level: 'strong' }, importance: 0.6, confidence: 0.85, usage: 4, daysAgo: 9 },
-    { scope: 'domain', kind: 'preference', entityType: 'study_pref', entityKey: 'pace', text: 'Любит сначала теорию, потом задачу', data: { order: ['theory', 'task'] }, importance: 0.5, confidence: 0.7, usage: 3, daysAgo: 12 },
+    {
+      scope: 'profile',
+      kind: 'preference',
+      entityType: 'comm_style',
+      entityKey: 'style',
+      text: 'Предпочитает короткие ответы и примеры по шагам',
+      data: { tone: 'concise' },
+      importance: 0.8,
+      confidence: 0.9,
+      usage: 11,
+      daysAgo: 2,
+    },
+    {
+      scope: 'profile',
+      kind: 'goal',
+      entityType: 'profile',
+      entityKey: 'goal',
+      text: 'Готовится к ЕГЭ по математике, 11 класс',
+      data: { goal: 'ege_math' },
+      importance: 0.75,
+      confidence: 0.85,
+      usage: 6,
+      daysAgo: 5,
+    },
+    {
+      scope: 'profile',
+      kind: 'fact',
+      entityType: 'profile',
+      entityKey: 'lang',
+      text: 'Общается на русском, иногда просит английские термины',
+      data: { lang: 'ru' },
+      importance: 0.4,
+      confidence: 0.7,
+      sensitivity: 'low',
+      usage: 2,
+      daysAgo: 18,
+    },
+    {
+      scope: 'dialog',
+      kind: 'state',
+      entityType: 'dialog',
+      entityKey: 'last_topic',
+      text: 'В прошлый раз разбирали дискриминант квадратного уравнения',
+      importance: 0.55,
+      confidence: 0.8,
+      usage: 1,
+      daysAgo: 0.8,
+    },
+    {
+      scope: 'dialog',
+      kind: 'state',
+      entityType: 'dialog',
+      entityKey: 'mood',
+      text: 'Путается в знаках при переносе слагаемых',
+      importance: 0.45,
+      confidence: 0.65,
+      usage: 1,
+      daysAgo: 0.8,
+    },
+    {
+      scope: 'domain',
+      kind: 'progress',
+      entityType: 'student_skill',
+      entityKey: 'quadratic_equations',
+      text: 'Слабо понимает квадратные уравнения, путает дискриминант',
+      data: { topic: 'quadratic_equations', level: 'weak' },
+      importance: 0.85,
+      confidence: 0.9,
+      usage: 8,
+      daysAgo: 1,
+    },
+    {
+      scope: 'domain',
+      kind: 'progress',
+      entityType: 'student_skill',
+      entityKey: 'linear_equations',
+      text: 'Линейные уравнения решает уверенно',
+      data: { level: 'strong' },
+      importance: 0.6,
+      confidence: 0.85,
+      usage: 4,
+      daysAgo: 9,
+    },
+    {
+      scope: 'domain',
+      kind: 'preference',
+      entityType: 'study_pref',
+      entityKey: 'pace',
+      text: 'Любит сначала теорию, потом задачу',
+      data: { order: ['theory', 'task'] },
+      importance: 0.5,
+      confidence: 0.7,
+      usage: 3,
+      daysAgo: 12,
+    },
   ];
-  for (const m of facts) await insertMemory(u.id, 'math_tutor', m);
+  for (const m of facts) {
+    await insertMemory(u.id, 'math_tutor', m);
+  }
 
-  await saveSecureRecord({ userId: u.id, domainKey: 'math_tutor', recordType: 'phone', displayName: 'телефон', rawValue: '+7 900 000-00-37', consentStatus: 'unknown' });
+  await saveSecureRecord({
+    userId: u.id,
+    domainKey: 'math_tutor',
+    recordType: 'phone',
+    displayName: 'телефон',
+    rawValue: '+7 900 000-00-37',
+    consentStatus: 'unknown',
+  });
 
   const genId = await getDomainId('math_tutor');
-  await createTask({ userId: u.id, domainKey: 'math_tutor', task: { task_type: 'reminder', title: 'Решить 10 примеров на квадратные уравнения', instruction: 'Напоминаю, ты хотел порешать примеры на квадратные уравнения', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(1 * DAY), payload: {} } });
-  await createTask({ userId: u.id, domainKey: 'math_tutor', task: { task_type: 'reminder', title: 'Повторить теорему Виета перед пробником', instruction: 'Напоминаю, ты хотел повторить теорему Виета перед пробником', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(3 * DAY), payload: {} } });
+  await createTask({
+    userId: u.id,
+    domainKey: 'math_tutor',
+    task: {
+      task_type: 'reminder',
+      title: 'Решить 10 примеров на квадратные уравнения',
+      instruction: 'Напоминаю, ты хотел порешать примеры на квадратные уравнения',
+      schedule_kind: 'one_time',
+      timezone: u.timezone,
+      run_at: iso(1 * DAY),
+      payload: {},
+    },
+  });
+  await createTask({
+    userId: u.id,
+    domainKey: 'math_tutor',
+    task: {
+      task_type: 'reminder',
+      title: 'Повторить теорему Виета перед пробником',
+      instruction: 'Напоминаю, ты хотел повторить теорему Виета перед пробником',
+      schedule_kind: 'one_time',
+      timezone: u.timezone,
+      run_at: iso(3 * DAY),
+      payload: {},
+    },
+  });
 
-  await ensureDefaultTriggers(u.id, genId, [
-    { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
-    { trigger_type: 'daily_checkin', config: { hour: 10 } },
-    { trigger_type: 'goal_reminder', config: { interval_minutes: 2880 } },
-    { trigger_type: 'welcome_back', config: { gap_minutes: 60 } },
-  ], { enabled: true });
+  await ensureDefaultTriggers(
+    u.id,
+    genId,
+    [
+      { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
+      { trigger_type: 'daily_checkin', config: { hour: 10 } },
+      { trigger_type: 'goal_reminder', config: { interval_minutes: 2880 } },
+      { trigger_type: 'welcome_back', config: { gap_minutes: 60 } },
+    ],
+    { enabled: true },
+  );
 
-  await queueNotification(u.id, 'proactive', 'Привет! Два дня без практики — давай разберём слабую тему: квадратные уравнения?', 4);
+  await queueNotification(
+    u.id,
+    'proactive',
+    'Привет! Два дня без практики — давай разберём слабую тему: квадратные уравнения?',
+    4,
+  );
   await logEvent(u.id, 'news-ege-2026', 0.78, 'Изменения в КИМ ЕГЭ по математике — релевантно цели пользователя.', 2);
   await insertTopic(u.id, 'math_tutor', 'квадратные уравнения', 7, 0.8, 1);
   await insertTopic(u.id, 'math_tutor', 'дискриминант', 5, 0.6, 1);
@@ -111,29 +254,132 @@ async function seedAnna() {
 async function seedDmitry() {
   const u = await recreateUser('sandbox-dmitry', 'Дмитрий', 'Europe/Moscow');
   const facts = [
-    { scope: 'profile', kind: 'preference', entityType: 'comm_style', entityKey: 'style', text: 'Любит развёрнутые объяснения с вариантами', data: { tone: 'detailed' }, importance: 0.7, confidence: 0.85, usage: 9, daysAgo: 3 },
-    { scope: 'profile', kind: 'fact', entityType: 'profile', entityKey: 'city', text: 'Живёт в Казани', data: { city: 'Kazan' }, importance: 0.65, confidence: 0.9, sensitivity: 'low', usage: 7, daysAgo: 6 },
-    { scope: 'dialog', kind: 'state', entityType: 'dialog', entityKey: 'last_topic', text: 'Искал рейсы в Стамбул на майские праздники', importance: 0.5, confidence: 0.8, usage: 1, daysAgo: 1.2 },
-    { scope: 'domain', kind: 'preference', entityType: 'flight_preference', entityKey: 'departure', text: 'Вылетает из Казани, не любит ночные рейсы', data: { city: 'Kazan', avoid: ['night_flights'] }, importance: 0.88, confidence: 0.92, usage: 12, daysAgo: 1 },
-    { scope: 'domain', kind: 'preference', entityType: 'flight_preference', entityKey: 'cabin', text: 'Эконом с возможностью провоза багажа', data: { cabin_class: 'economy', baggage: true }, importance: 0.6, confidence: 0.8, usage: 5, daysAgo: 7 },
-    { scope: 'domain', kind: 'goal', entityType: 'trip', entityKey: 'istanbul', text: 'Поездка Казань → Стамбул в мае, 2 пассажира', data: { destination: 'Istanbul', passengers: 2, status: 'searching' }, importance: 0.75, confidence: 0.85, usage: 3, daysAgo: 1.2 },
+    {
+      scope: 'profile',
+      kind: 'preference',
+      entityType: 'comm_style',
+      entityKey: 'style',
+      text: 'Любит развёрнутые объяснения с вариантами',
+      data: { tone: 'detailed' },
+      importance: 0.7,
+      confidence: 0.85,
+      usage: 9,
+      daysAgo: 3,
+    },
+    {
+      scope: 'profile',
+      kind: 'fact',
+      entityType: 'profile',
+      entityKey: 'city',
+      text: 'Живёт в Казани',
+      data: { city: 'Kazan' },
+      importance: 0.65,
+      confidence: 0.9,
+      sensitivity: 'low',
+      usage: 7,
+      daysAgo: 6,
+    },
+    {
+      scope: 'dialog',
+      kind: 'state',
+      entityType: 'dialog',
+      entityKey: 'last_topic',
+      text: 'Искал рейсы в Стамбул на майские праздники',
+      importance: 0.5,
+      confidence: 0.8,
+      usage: 1,
+      daysAgo: 1.2,
+    },
+    {
+      scope: 'domain',
+      kind: 'preference',
+      entityType: 'flight_preference',
+      entityKey: 'departure',
+      text: 'Вылетает из Казани, не любит ночные рейсы',
+      data: { city: 'Kazan', avoid: ['night_flights'] },
+      importance: 0.88,
+      confidence: 0.92,
+      usage: 12,
+      daysAgo: 1,
+    },
+    {
+      scope: 'domain',
+      kind: 'preference',
+      entityType: 'flight_preference',
+      entityKey: 'cabin',
+      text: 'Эконом с возможностью провоза багажа',
+      data: { cabin_class: 'economy', baggage: true },
+      importance: 0.6,
+      confidence: 0.8,
+      usage: 5,
+      daysAgo: 7,
+    },
+    {
+      scope: 'domain',
+      kind: 'goal',
+      entityType: 'trip',
+      entityKey: 'istanbul',
+      text: 'Поездка Казань → Стамбул в мае, 2 пассажира',
+      data: { destination: 'Istanbul', passengers: 2, status: 'searching' },
+      importance: 0.75,
+      confidence: 0.85,
+      usage: 3,
+      daysAgo: 1.2,
+    },
   ];
-  for (const m of facts) await insertMemory(u.id, 'flight_search', m);
+  for (const m of facts) {
+    await insertMemory(u.id, 'flight_search', m);
+  }
 
-  await saveSecureRecord({ userId: u.id, domainKey: 'flight_search', recordType: 'passport', displayName: 'паспорт', rawValue: '1234 567812', consentStatus: 'granted' });
+  await saveSecureRecord({
+    userId: u.id,
+    domainKey: 'flight_search',
+    recordType: 'passport',
+    displayName: 'паспорт',
+    rawValue: '1234 567812',
+    consentStatus: 'granted',
+  });
 
   const genId = await getDomainId('flight_search');
-  await createTask({ userId: u.id, domainKey: 'flight_search', task: { task_type: 'reminder', title: 'Проверить цены на рейс Казань–Стамбул', instruction: 'Напоминаю, ты хотел проверить цены на рейс Казань–Стамбул', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(2 * DAY), payload: {} } });
+  await createTask({
+    userId: u.id,
+    domainKey: 'flight_search',
+    task: {
+      task_type: 'reminder',
+      title: 'Проверить цены на рейс Казань–Стамбул',
+      instruction: 'Напоминаю, ты хотел проверить цены на рейс Казань–Стамбул',
+      schedule_kind: 'one_time',
+      timezone: u.timezone,
+      run_at: iso(2 * DAY),
+      payload: {},
+    },
+  });
 
-  await ensureDefaultTriggers(u.id, genId, [
-    { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
-    { trigger_type: 'daily_checkin', config: { hour: 10 } },
-    { trigger_type: 'goal_reminder', config: { interval_minutes: 2880 } },
-    { trigger_type: 'welcome_back', config: { gap_minutes: 60 } },
-  ], { enabled: true });
+  await ensureDefaultTriggers(
+    u.id,
+    genId,
+    [
+      { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
+      { trigger_type: 'daily_checkin', config: { hour: 10 } },
+      { trigger_type: 'goal_reminder', config: { interval_minutes: 2880 } },
+      { trigger_type: 'welcome_back', config: { gap_minutes: 60 } },
+    ],
+    { enabled: true },
+  );
 
-  await queueNotification(u.id, 'event', 'Распродажа Turkish Airlines из Казани — по вашему направлению и предпочтению вылета.', 1);
-  await logEvent(u.id, 'news-turkish-sale', 0.91, 'Распродажа из Казани совпадает с предпочтением вылета и направлением.', 1);
+  await queueNotification(
+    u.id,
+    'event',
+    'Распродажа Turkish Airlines из Казани — по вашему направлению и предпочтению вылета.',
+    1,
+  );
+  await logEvent(
+    u.id,
+    'news-turkish-sale',
+    0.91,
+    'Распродажа из Казани совпадает с предпочтением вылета и направлением.',
+    1,
+  );
   await logEvent(u.id, 'news-baggage-rules', 0.69, 'Новые правила багажа в Турцию — релевантно поездке.', 3);
   await insertTopic(u.id, 'flight_search', 'рейсы в Стамбул', 6, 0.8, 1);
   await insertTopic(u.id, 'flight_search', 'вылет из Казани', 4, 0.7, 2);
@@ -144,20 +390,83 @@ async function seedDmitry() {
 async function seedLena() {
   const u = await recreateUser('sandbox-lena', 'Лена', 'Asia/Yekaterinburg');
   const facts = [
-    { scope: 'profile', kind: 'preference', entityType: 'comm_style', entityKey: 'style', text: 'Лёгкий, дружелюбный тон с эмодзи', data: { tone: 'friendly' }, importance: 0.7, confidence: 0.85, usage: 8, daysAgo: 4 },
-    { scope: 'dialog', kind: 'state', entityType: 'dialog', entityKey: 'last_topic', text: 'Просила шутку про программистов вчера', importance: 0.45, confidence: 0.7, usage: 1, daysAgo: 1.1 },
-    { scope: 'domain', kind: 'preference', entityType: 'joke_preference', entityKey: 'taste', text: 'Любит шутки про программистов и быт, не любит политику', data: { liked: ['programmers', 'everyday_life'], disliked: ['politics'] }, importance: 0.82, confidence: 0.9, usage: 10, daysAgo: 1 },
-    { scope: 'domain', kind: 'history', entityType: 'told_jokes', entityKey: 'history', text: 'Слышала 2 шутки про программистов (j-101, j-204)', data: { told: ['j-101', 'j-204'] }, importance: 0.5, confidence: 0.85, sensitivity: 'low', usage: 4, daysAgo: 1 },
+    {
+      scope: 'profile',
+      kind: 'preference',
+      entityType: 'comm_style',
+      entityKey: 'style',
+      text: 'Лёгкий, дружелюбный тон с эмодзи',
+      data: { tone: 'friendly' },
+      importance: 0.7,
+      confidence: 0.85,
+      usage: 8,
+      daysAgo: 4,
+    },
+    {
+      scope: 'dialog',
+      kind: 'state',
+      entityType: 'dialog',
+      entityKey: 'last_topic',
+      text: 'Просила шутку про программистов вчера',
+      importance: 0.45,
+      confidence: 0.7,
+      usage: 1,
+      daysAgo: 1.1,
+    },
+    {
+      scope: 'domain',
+      kind: 'preference',
+      entityType: 'joke_preference',
+      entityKey: 'taste',
+      text: 'Любит шутки про программистов и быт, не любит политику',
+      data: { liked: ['programmers', 'everyday_life'], disliked: ['politics'] },
+      importance: 0.82,
+      confidence: 0.9,
+      usage: 10,
+      daysAgo: 1,
+    },
+    {
+      scope: 'domain',
+      kind: 'history',
+      entityType: 'told_jokes',
+      entityKey: 'history',
+      text: 'Слышала 2 шутки про программистов (j-101, j-204)',
+      data: { told: ['j-101', 'j-204'] },
+      importance: 0.5,
+      confidence: 0.85,
+      sensitivity: 'low',
+      usage: 4,
+      daysAgo: 1,
+    },
   ];
-  for (const m of facts) await insertMemory(u.id, 'joke_teller', m);
+  for (const m of facts) {
+    await insertMemory(u.id, 'joke_teller', m);
+  }
 
   const genId = await getDomainId('joke_teller');
-  await createTask({ userId: u.id, domainKey: 'joke_teller', task: { task_type: 'reminder', title: 'Прислать шутку дня утром', instruction: 'Доставить шутку из любимой категории без повторов', schedule_kind: 'one_time', timezone: u.timezone, run_at: iso(16 * HOUR), payload: {} } });
+  await createTask({
+    userId: u.id,
+    domainKey: 'joke_teller',
+    task: {
+      task_type: 'reminder',
+      title: 'Прислать шутку дня утром',
+      instruction: 'Доставить шутку из любимой категории без повторов',
+      schedule_kind: 'one_time',
+      timezone: u.timezone,
+      run_at: iso(16 * HOUR),
+      payload: {},
+    },
+  });
 
-  await ensureDefaultTriggers(u.id, genId, [
-    { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
-    { trigger_type: 'daily_checkin', config: { hour: 10 } },
-  ], { enabled: true });
+  await ensureDefaultTriggers(
+    u.id,
+    genId,
+    [
+      { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
+      { trigger_type: 'daily_checkin', config: { hour: 10 } },
+    ],
+    { enabled: true },
+  );
 
   await queueNotification(u.id, 'proactive', 'Шутка дня готова — прислать из любимой категории про программистов?', 16);
   await insertTopic(u.id, 'joke_teller', 'шутки про программистов', 5, 0.8, 1);

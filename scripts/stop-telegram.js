@@ -47,9 +47,9 @@ function findOnWindows() {
   // Get-CimInstance даёт полную командную строку каждого процесса Node.js. Фильтруем по маркеру.
   // Вывод формируется построчно в формате «PID<табуляция>командная строка».
   const ps = [
-    "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\"",
+    'Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'"',
     "| Where-Object { $_.CommandLine -like '*bot.js*' }",
-    "| ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+    '| ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
   ].join(' ');
   let out;
   try {
@@ -77,16 +77,26 @@ function parseLines(out) {
   const result = [];
   for (const raw of out.split('\n')) {
     const line = raw.trim();
-    if (!line) continue;
-    if (!MARKER.test(line)) continue;
+    if (!line) {
+      continue;
+    }
+    if (!MARKER.test(line)) {
+      continue;
+    }
     // Первое «слово» строки — идентификатор процесса, остаток — командная строка.
     const match = line.match(/^(\d+)\s+(.*)$/);
-    if (!match) continue;
+    if (!match) {
+      continue;
+    }
     const pid = Number(match[1]);
     const commandLine = match[2];
-    if (!Number.isInteger(pid) || pid === selfPid) continue;
+    if (!Number.isInteger(pid) || pid === selfPid) {
+      continue;
+    }
     // Подстраховка: исключаем сам скрипт остановки, чтобы он ни при каких условиях не остановил себя.
-    if (commandLine.includes('stop-telegram.js')) continue;
+    if (commandLine.includes('stop-telegram.js')) {
+      continue;
+    }
     result.push({ pid, commandLine });
   }
   return result;
@@ -114,7 +124,7 @@ function kill(pid) {
 // Проверить, существует ли ещё процесс с данным идентификатором.
 function isAlive(pid) {
   try {
-    process.kill(pid, 0);                                             // сигнал 0 ничего не делает, только проверяет
+    process.kill(pid, 0); // сигнал 0 ничего не делает, только проверяет
     return true;
   } catch {
     return false;

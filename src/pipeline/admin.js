@@ -3,7 +3,7 @@
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 
-const SEMANTIC_DELETE_TOP_RELEVANCE = 0.50;
+const SEMANTIC_DELETE_TOP_RELEVANCE = 0.5;
 const SEMANTIC_DELETE_GROUP_RELEVANCE = 0.72;
 const SEMANTIC_DELETE_AMBIGUOUS_RELEVANCE = 0.42;
 const SEMANTIC_DELETE_AMBIGUOUS_DELTA = 0.06;
@@ -51,10 +51,10 @@ function isUuid(value) {
 
 async function softDeleteRows(userId, rows) {
   const ids = rows.map((r) => r.id);
-  await query(
-    `UPDATE mem.memory_items SET status='deleted', updated_at=now() WHERE id = ANY($1) AND user_id = $2`,
-    [ids, userId],
-  );
+  await query(`UPDATE mem.memory_items SET status='deleted', updated_at=now() WHERE id = ANY($1) AND user_id = $2`, [
+    ids,
+    userId,
+  ]);
   return {
     deleted: rows.length,
     items: rows.map((r) => ({
@@ -68,15 +68,19 @@ async function softDeleteRows(userId, rows) {
 
 function wantsTopicDelete(value) {
   const text = normalizeLookupText(value);
-  return /\b(all|everything|topic|related)\b/.test(text)
-    || /(^|\s)(все|всё|всю|вся|весь|связан|связанные|относящ)/i.test(text);
+  return (
+    /\b(all|everything|topic|related)\b/.test(text) ||
+    /(^|\s)(все|всё|всю|вся|весь|связан|связанные|относящ)/i.test(text)
+  );
 }
 
 function uniqueRowsById(rows) {
   const seen = new Set();
   const out = [];
   for (const row of rows) {
-    if (seen.has(row.id)) continue;
+    if (seen.has(row.id)) {
+      continue;
+    }
     seen.add(row.id);
     out.push(row);
   }
@@ -95,7 +99,9 @@ function formatMemoryCandidate(row) {
 
 async function findSemanticDeleteCandidates(userId, text) {
   const vec = await embed(text);
-  if (!vec) return { semanticUnavailable: true, candidates: [] };
+  if (!vec) {
+    return { semanticUnavailable: true, candidates: [] };
+  }
 
   const { rows } = await query(
     `SELECT id, entity_type, entity_key, memory_text, 1 - (embedding <=> $2::vector) AS relevance
@@ -110,8 +116,12 @@ async function findSemanticDeleteCandidates(userId, text) {
 
 async function deleteBySemanticMatch(userId, rawName) {
   const { semanticUnavailable, candidates } = await findSemanticDeleteCandidates(userId, rawName);
-  if (semanticUnavailable) return { deleted: 0, items: [], semantic_unavailable: true };
-  if (!candidates.length) return { deleted: 0, items: [] };
+  if (semanticUnavailable) {
+    return { deleted: 0, items: [], semantic_unavailable: true };
+  }
+  if (!candidates.length) {
+    return { deleted: 0, items: [] };
+  }
 
   const topicDelete = wantsTopicDelete(rawName);
   if (topicDelete) {
@@ -130,9 +140,9 @@ async function deleteBySemanticMatch(userId, rawName) {
   const secondRelevance = Number(second?.relevance || 0);
 
   if (
-    second
-    && topRelevance >= SEMANTIC_DELETE_AMBIGUOUS_RELEVANCE
-    && secondRelevance >= topRelevance - SEMANTIC_DELETE_AMBIGUOUS_DELTA
+    second &&
+    topRelevance >= SEMANTIC_DELETE_AMBIGUOUS_RELEVANCE &&
+    secondRelevance >= topRelevance - SEMANTIC_DELETE_AMBIGUOUS_DELTA
   ) {
     return {
       deleted: 0,
@@ -165,7 +175,9 @@ async function deleteBySemanticMatch(userId, rawName) {
 export async function deleteByEntity(userId, entityName, entityType = null) {
   const rawName = String(entityName || '').trim();
   const name = normalizeLookupText(rawName);
-  if (!name) return { deleted: 0, items: [] };
+  if (!name) {
+    return { deleted: 0, items: [] };
+  }
 
   if (isUuid(rawName)) {
     const { rows } = await query(
@@ -184,13 +196,15 @@ export async function deleteByEntity(userId, entityName, entityType = null) {
       ORDER BY updated_at DESC`,
     [userId, name],
   );
-  if (exactTextRows.length > 0) return softDeleteRows(userId, exactTextRows);
+  if (exactTextRows.length > 0) {
+    return softDeleteRows(userId, exactTextRows);
+  }
 
   const params = [userId, name];
   let typeClause = '';
   if (entityType) {
     params.push(String(entityType).trim().toLowerCase());
-    typeClause = 'AND lower(coalesce(entity_type, \'\')) = $3';
+    typeClause = "AND lower(coalesce(entity_type, '')) = $3";
   }
   const { rows } = await query(
     `SELECT id, entity_type, entity_key, memory_text
@@ -206,7 +220,9 @@ export async function deleteByEntity(userId, entityName, entityType = null) {
       ORDER BY updated_at DESC`,
     params,
   );
-  if (rows.length === 0) return deleteBySemanticMatch(userId, rawName);
+  if (rows.length === 0) {
+    return deleteBySemanticMatch(userId, rawName);
+  }
 
   const types = [...new Set(rows.map((r) => r.entity_type))];
   if (!entityType && types.length > 1) {

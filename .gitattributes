@@ -1,0 +1,3 @@
+* text=auto eol=lf
+
+*.{png,jpg,jpeg,gif,webp,woff,woff2,docx,xlsx,xls,pptx,dump,7z,zip,rar,bintext} binary

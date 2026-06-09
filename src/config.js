@@ -11,7 +11,7 @@
 import 'dotenv/config';
 import { normalizeVoiceId } from './voice/voices.js';
 
-const env = process.env;
+const { env } = process;
 const openaiBaseURL = env.OPENAI_BASE_URL?.trim() || undefined;
 const defaultVoiceOutputModel = openaiBaseURL ? 'openai/gpt-4o-mini-tts' : 'gpt-4o-mini-tts';
 const defaultVoiceOutputVoice = normalizeVoiceId(env.VOICE_OUTPUT_VOICE) || 'alloy';
@@ -57,7 +57,10 @@ export const config = {
   authSecret: env.AUTH_SECRET || 'dev-insecure-secret-change-me',
 
   timezone: env.TZ_DEFAULT || 'Europe/Moscow',
-  debug: (env.DEBUG || '').split(',').map((s) => s.trim()).filter(Boolean),
+  debug: (env.DEBUG || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
 
   // Режим собеседника: темпоральный и тематический контекст в онлайн-ответе + извлечение тем после ответа.
   companion: {
@@ -67,7 +70,7 @@ export const config = {
   // Проактивный контур: бот пишет первым по триггерам с анти-спамом. По умолчанию выключен.
   proactive: {
     enabled: flag(env.PROACTIVE_ENABLED, false),
-    intervalMs: Number(env.PROACTIVE_INTERVAL_MS || 300000),       // как часто воркер проверяет триггеры
+    intervalMs: Number(env.PROACTIVE_INTERVAL_MS || 300000), // как часто воркер проверяет триггеры
     inactivityMinutes: Number(env.PROACTIVE_INACTIVITY_MIN || 1440),
     checkinHour: Number(env.PROACTIVE_CHECKIN_HOUR || 10),
     goalIntervalMinutes: Number(env.PROACTIVE_GOAL_INTERVAL_MIN || 2880),
@@ -116,12 +119,12 @@ export const config = {
   // Жёсткие лимиты минимизации памяти: сколько фактов каждой области попадает в промпт (раздел 10.7 архитектуры).
   // Список ранжируется по релевантности и обрезается до этих значений. По умолчанию совпадают с прежними константами.
   memoryLimits: {
-    profile: Number(env.MEMORY_LIMIT_PROFILE || 7),     // устойчивые факты о пользователе и стиле общения
-    dialog: Number(env.MEMORY_LIMIT_DIALOG || 5),       // факты текущего диалога
-    domain: Number(env.MEMORY_LIMIT_DOMAIN || 12),      // факты предметной области
-    reminder: Number(env.MEMORY_LIMIT_REMINDER || 3),   // активные напоминания
-    secure: Number(env.MEMORY_LIMIT_SECURE || 3),       // безопасные резюме защищённых данных
-    total: Number(env.MEMORY_LIMIT_TOTAL || 30),        // общий потолок числа фактов в промпте
+    profile: Number(env.MEMORY_LIMIT_PROFILE || 7), // устойчивые факты о пользователе и стиле общения
+    dialog: Number(env.MEMORY_LIMIT_DIALOG || 5), // факты текущего диалога
+    domain: Number(env.MEMORY_LIMIT_DOMAIN || 12), // факты предметной области
+    reminder: Number(env.MEMORY_LIMIT_REMINDER || 3), // активные напоминания
+    secure: Number(env.MEMORY_LIMIT_SECURE || 3), // безопасные резюме защищённых данных
+    total: Number(env.MEMORY_LIMIT_TOTAL || 30), // общий потолок числа фактов в промпте
   },
 
   // Глобальная память: общий для всех пользователей слой. Два независимых механизма, каждый со своим флагом.
@@ -129,9 +132,9 @@ export const config = {
   // Наполнять и чистить оба хранилища может только администратор (пометка is_admin). По умолчанию всё выключено.
   globalMemory: {
     factsEnabled: flag(env.GLOBAL_MEMORY_ENABLED, false), // всегда-включённые глобальные факты + их инструменты
-    factsLimit: Number(env.GLOBAL_FACTS_LIMIT || 5),      // сколько фактов подмешивать в каждый запрос
-    ragEnabled: flag(env.GLOBAL_RAG_ENABLED, false),      // общая база знаний (RAG) + её инструменты
-    ragLimit: Number(env.GLOBAL_RAG_LIMIT || 5),          // сколько фрагментов базы знаний подмешивать по релевантности
+    factsLimit: Number(env.GLOBAL_FACTS_LIMIT || 5), // сколько фактов подмешивать в каждый запрос
+    ragEnabled: flag(env.GLOBAL_RAG_ENABLED, false), // общая база знаний (RAG) + её инструменты
+    ragLimit: Number(env.GLOBAL_RAG_LIMIT || 5), // сколько фрагментов базы знаний подмешивать по релевантности
     ragMinRelevance: Number(env.GLOBAL_RAG_MIN_RELEVANCE || 0.3), // порог отсечения слабых совпадений базы знаний
   },
 
@@ -141,9 +144,9 @@ export const config = {
     enabled: flag(env.VOICE_INPUT_ENABLED, false),
     // Выбор распознавателя из реестра src/voice/transcribe.js. По умолчанию — самый быстрый и дешёвый.
     provider: env.VOICE_INPUT_PROVIDER || 'groq-whisper-large-v3-turbo',
-    maxSeconds: Number(env.VOICE_INPUT_MAX_SECONDS || 300),        // предел длительности (пять минут)
-    maxBytes: Number(env.VOICE_INPUT_MAX_BYTES || 25000000),       // предел размера, когда длительность неизвестна
-    language: env.VOICE_INPUT_LANG || 'ru',                        // код языка-подсказки для распознавателя
+    maxSeconds: Number(env.VOICE_INPUT_MAX_SECONDS || 300), // предел длительности (пять минут)
+    maxBytes: Number(env.VOICE_INPUT_MAX_BYTES || 25000000), // предел размера, когда длительность неизвестна
+    language: env.VOICE_INPUT_LANG || 'ru', // код языка-подсказки для распознавателя
   },
 
   // Голосовой ответ бота (текст в речь, TTS). Канальная настройка Telegram-адаптера: ядро лишь хранит и
@@ -153,9 +156,9 @@ export const config = {
   // напрямую в OpenAI API. Проверенный LiteLLM-прокси отдаёт gpt-4o-mini-tts и OGG/OPUS без перекодировки.
   voiceOutput: {
     enabled: flag(env.VOICE_OUTPUT_ENABLED, false),
-    model: env.VOICE_OUTPUT_MODEL || defaultVoiceOutputModel,   // модель TTS для выбранного base URL
-    voice: defaultVoiceOutputVoice,                            // тембр (язык подстраивается под текст ответа)
-    format: env.VOICE_OUTPUT_FORMAT || 'opus',                 // OGG/OPUS — прямая отправка в Telegram sendVoice
+    model: env.VOICE_OUTPUT_MODEL || defaultVoiceOutputModel, // модель TTS для выбранного base URL
+    voice: defaultVoiceOutputVoice, // тембр (язык подстраивается под текст ответа)
+    format: env.VOICE_OUTPUT_FORMAT || 'opus', // OGG/OPUS — прямая отправка в Telegram sendVoice
     // Жёсткий предел длины текста, отправляемого в синтез. Значение по умолчанию и максимум — 500 символов:
     // более длинный текст никогда не уходит в TTS, вместо него озвучивается резюме.
     maxChars: Math.min(500, Number(env.VOICE_OUTPUT_MAX_CHARS || 500)),
@@ -170,25 +173,27 @@ export const config = {
   // лишь один потребитель этих событий. По умолчанию включено: новый UX работает без настройки .env.
   // streaming.enabled управляет ядром (потоковый вызов модели), telegramEnabled — отображением в Telegram.
   streaming: {
-    enabled: flag(env.LLM_STREAMING_ENABLED, true),              // потоковый вызов модели в ядре агента
+    enabled: flag(env.LLM_STREAMING_ENABLED, true), // потоковый вызов модели в ядре агента
     telegramEnabled: flag(env.TELEGRAM_STREAMING_ENABLED, true), // редактируемый черновик ответа в Telegram
-    editIntervalMs: Number(env.TELEGRAM_STREAM_EDIT_INTERVAL_MS || 500),  // не чаще одного редактирования за это время
-    minEditChars: Number(env.TELEGRAM_STREAM_MIN_EDIT_CHARS || 20),       // и не реже, чем накопится столько новых символов
+    editIntervalMs: Number(env.TELEGRAM_STREAM_EDIT_INTERVAL_MS || 500), // не чаще одного редактирования за это время
+    minEditChars: Number(env.TELEGRAM_STREAM_MIN_EDIT_CHARS || 20), // и не реже, чем накопится столько новых символов
     // Первый видимый пузырь-черновик создаём только когда накопился осмысленный объём текста. Иначе пользователь
     // видит мигающий пузырь из одной-двух букв («Я»), который тут же переписывается. Короткий ответ, который
     // завершится раньше этого порога, доставляется целиком методом complete() — без промежуточного черновика.
     minFirstDraftChars: Number(env.TELEGRAM_STREAM_MIN_FIRST_DRAFT_CHARS || 50),
-    toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true),  // показывать ли статус вызова инструмента
+    toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true), // показывать ли статус вызова инструмента
   },
 
   // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.
   // Последние hotWindow сообщений всегда передаются дословно; всё, что старше, сжимается в дайджест.
   historyCompression: {
     enabled: flag(env.HISTORY_COMPRESSION_ENABLED, false),
-    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8),       // сколько последних сообщений не сжимать вообще
-    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000),    // порог запуска сжатия холодной зоны
+    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8), // сколько последних сообщений не сжимать вообще
+    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000), // порог запуска сжатия холодной зоны
     shrinkTokens: Number(env.HISTORY_SHRINK_TOKENS || 800), // целевой максимум размера дайджеста
-    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15').split(',').map(Number), // ближняя/средняя/дальняя
+    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15')
+      .split(',')
+      .map(Number), // ближняя/средняя/дальняя
     model: env.HISTORY_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
     minCompressGain: Number(env.HISTORY_MIN_COMPRESS_GAIN || 0.35), // минимальный выигрыш сжатия, иначе не перезаписываем
   },

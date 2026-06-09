@@ -18,11 +18,19 @@ function readJson(req) {
     let body = '';
     req.on('data', (chunk) => {
       body += chunk;
-      if (body.length > 1_000_000) reject(new Error('Слишком большое тело запроса.'));
+      if (body.length > 1_000_000) {
+        reject(new Error('Слишком большое тело запроса.'));
+      }
     });
     req.on('end', () => {
-      if (!body) return resolve({});
-      try { resolve(JSON.parse(body)); } catch { reject(new Error('Тело запроса не является корректным JSON.')); }
+      if (!body) {
+        return resolve({});
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('Тело запроса не является корректным JSON.'));
+      }
     });
     req.on('error', reject);
   });
@@ -56,7 +64,9 @@ async function route(req, res) {
   // Вся память выбранного пользователя по категориям.
   if (req.method === 'GET' && pathname === '/api/memory') {
     const userId = url.searchParams.get('user');
-    if (!userId) return sendJson(res, 400, { error: 'Не указан параметр user.' });
+    if (!userId) {
+      return sendJson(res, 400, { error: 'Не указан параметр user.' });
+    }
     sendJson(res, 200, await getUserMemory(userId));
     return;
   }
@@ -66,7 +76,9 @@ async function route(req, res) {
     const userId = url.searchParams.get('user');
     const category = url.searchParams.get('category');
     const id = url.searchParams.get('id');
-    if (!userId || !category || !id) return sendJson(res, 400, { error: 'Нужны параметры user, category и id.' });
+    if (!userId || !category || !id) {
+      return sendJson(res, 400, { error: 'Нужны параметры user, category и id.' });
+    }
     const ok = await deleteItem({ userId, category, id });
     return sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'Запись не найдена.' });
   }
@@ -74,7 +86,9 @@ async function route(req, res) {
   // Состояние проактивности выбранного пользователя.
   if (req.method === 'GET' && pathname === '/api/proactivity') {
     const userId = url.searchParams.get('user');
-    if (!userId) return sendJson(res, 400, { error: 'Не указан параметр user.' });
+    if (!userId) {
+      return sendJson(res, 400, { error: 'Не указан параметр user.' });
+    }
     sendJson(res, 200, await getProactivity(userId));
     return;
   }
@@ -82,7 +96,9 @@ async function route(req, res) {
   // Прогон этапа фильтрации памяти: классификация запроса и выборка релевантных фактов.
   if (req.method === 'POST' && pathname === '/api/filter') {
     const { user, phrase, domain } = await readJson(req);
-    if (!user || !phrase) return sendJson(res, 400, { error: 'Нужны поля user и phrase.' });
+    if (!user || !phrase) {
+      return sendJson(res, 400, { error: 'Нужны поля user и phrase.' });
+    }
     sendJson(res, 200, await runFilter({ userId: user, phrase, currentDomain: domain || 'general' }));
     return;
   }
@@ -90,7 +106,9 @@ async function route(req, res) {
   // Полноценный ответ бота через основной пайплайн.
   if (req.method === 'POST' && pathname === '/api/chat') {
     const { externalId, phrase, domain } = await readJson(req);
-    if (!externalId || !phrase) return sendJson(res, 400, { error: 'Нужны поля externalId и phrase.' });
+    if (!externalId || !phrase) {
+      return sendJson(res, 400, { error: 'Нужны поля externalId и phrase.' });
+    }
     sendJson(res, 200, await chat({ externalId, phrase, currentDomain: domain || 'general' }));
     return;
   }
@@ -103,7 +121,9 @@ const server = http.createServer(async (req, res) => {
     await route(req, res);
   } catch (err) {
     console.error('Ошибка обработки запроса:', err.message);
-    if (!res.headersSent) sendJson(res, 500, { error: String(err.message || err) });
+    if (!res.headersSent) {
+      sendJson(res, 500, { error: String(err.message || err) });
+    }
   }
 });
 

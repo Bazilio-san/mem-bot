@@ -10,7 +10,9 @@ import { getFactExtractionPrompt, getSkill, getSkillByDomain } from './skills/re
 // чтобы модель сразу выбирала правильный entity_type. Для доменов без схемы возвращается пустая строка.
 async function buildSchemaHint(domainKey) {
   const def = await loadDomainDefinition(domainKey);
-  if (!def || !def.entities?.length) return '';
+  if (!def || !def.entities?.length) {
+    return '';
+  }
   const lines = def.entities.map((e) => {
     const fields = Object.keys(e.data_schema?.properties || {}).join(', ');
     return `  - ${e.entity_type}: поля data — ${fields}`;
@@ -22,9 +24,10 @@ async function buildSchemaHint(domainKey) {
 // Модель обязана вернуть ровно entity_key, memory_text и data по схеме сущности: лишних полей нет,
 // все поля data перечислены, типы и enum заданы. Для fixed_vocab ключ ограничивается словарём.
 function buildEntityExtractionSchema(spec) {
-  const entityKeyProp = spec.entity_key.mode === 'fixed_vocab'
-    ? { type: 'string', enum: spec.entity_key.vocabulary || [] }
-    : { type: 'string' };
+  const entityKeyProp =
+    spec.entity_key.mode === 'fixed_vocab'
+      ? { type: 'string', enum: spec.entity_key.vocabulary || [] }
+      : { type: 'string' };
   return {
     type: 'object',
     additionalProperties: false,
@@ -41,9 +44,13 @@ function buildEntityExtractionSchema(spec) {
 // Кандидат без entity_type или сущность вне схемы домена возвращаются без изменений
 // (на записи такой предметный факт всё равно будет отклонён, если сущности нет в схеме).
 async function refineCandidate(domainKey, candidate, contextText, model = config.llm.extractModel) {
-  if (!candidate.entity_type) return candidate;
+  if (!candidate.entity_type) {
+    return candidate;
+  }
   const spec = await getEntitySpec(domainKey, candidate.entity_type);
-  if (!spec) return candidate;
+  if (!spec) {
+    return candidate;
+  }
 
   const schema = buildEntityExtractionSchema(spec);
   const system = `Ты заполняешь факт памяти для домена «${domainKey}», сущность «${spec.entity_type}».
@@ -76,7 +83,9 @@ memory_text — короткая человеческая фраза о факт
 // для домена без схемы список возвращается без изменений (второй проход не запускается).
 async function refineCandidates(domainKey, candidates, contextText, model = config.llm.extractModel) {
   const def = await loadDomainDefinition(domainKey);
-  if (!def) return candidates;
+  if (!def) {
+    return candidates;
+  }
   return Promise.all(candidates.map((c) => refineCandidate(domainKey, c, contextText, model)));
 }
 
@@ -90,15 +99,44 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['scope', 'memory_kind', 'entity_type', 'entity_key', 'memory_text', 'data',
-          'importance', 'confidence', 'sensitivity', 'ttl_days', 'requires_confirmation', 'reason'],
+        required: [
+          'scope',
+          'memory_kind',
+          'entity_type',
+          'entity_key',
+          'memory_text',
+          'data',
+          'importance',
+          'confidence',
+          'sensitivity',
+          'ttl_days',
+          'requires_confirmation',
+          'reason',
+        ],
         properties: {
           scope: { type: 'string', enum: ['profile', 'domain', 'dialog', 'system'] },
-          memory_kind: { type: 'string', enum: [
-            'fact', 'preference', 'constraint', 'goal', 'history', 'state', 'progress', 'instruction',
-            'relationship', 'reminder', 'secure_reference', 'emotional_pattern', 'activity_rhythm',
-            'communication_style', 'open_loop', 'topic_energy', 'discovery_seed',
-          ] },
+          memory_kind: {
+            type: 'string',
+            enum: [
+              'fact',
+              'preference',
+              'constraint',
+              'goal',
+              'history',
+              'state',
+              'progress',
+              'instruction',
+              'relationship',
+              'reminder',
+              'secure_reference',
+              'emotional_pattern',
+              'activity_rhythm',
+              'communication_style',
+              'open_loop',
+              'topic_energy',
+              'discovery_seed',
+            ],
+          },
           entity_type: { type: ['string', 'null'] },
           entity_key: { type: ['string', 'null'] },
           memory_text: { type: 'string' },
@@ -205,8 +243,8 @@ const TOPICS_SCHEMA = {
         additionalProperties: false,
         required: ['topic_key', 'user_engagement'],
         properties: {
-          topic_key: { type: 'string' },        // короткий стабильный ключ: fitness, work_stress, travel
-          user_engagement: { type: 'number' },   // 0..1 — насколько живо пользователь отвечал по теме
+          topic_key: { type: 'string' }, // короткий стабильный ключ: fitness, work_stress, travel
+          user_engagement: { type: 'number' }, // 0..1 — насколько живо пользователь отвечал по теме
         },
       },
     },

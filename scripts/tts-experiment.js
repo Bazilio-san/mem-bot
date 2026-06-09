@@ -13,8 +13,8 @@ import path from 'node:path';
 const OUT_DIR = path.resolve('_tmp/tts');
 
 // Текст по умолчанию на русском — именно поддержку русского нам и нужно подтвердить.
-const DEFAULT_TEXT = process.argv[2]
-  || 'Привет! Это проверка синтеза речи. Если вы слышите этот текст по-русски, значит синтез работает.';
+const DEFAULT_TEXT =
+  process.argv[2] || 'Привет! Это проверка синтеза речи. Если вы слышите этот текст по-русски, значит синтез работает.';
 
 // Перечень проверяемых конфигураций синтеза. Каждая описывает поставщика, базовый адрес, ключ и модель.
 // Замечание по именам моделей: прокси litellm.my-proxy.com использует имена с префиксом поставщика,
@@ -26,7 +26,7 @@ const TARGETS = [
     apiKey: process.env.OPENAI_API_KEY,
     model: 'openai/gpt-4o-mini-tts',
     voice: 'alloy',
-    format: 'opus',                 // Telegram sendVoice ожидает OGG/OPUS — проверяем именно этот формат
+    format: 'opus', // Telegram sendVoice ожидает OGG/OPUS — проверяем именно этот формат
   },
   {
     label: 'proxy/openai/gpt-4o-mini-tts (mp3)',
@@ -34,7 +34,7 @@ const TARGETS = [
     apiKey: process.env.OPENAI_API_KEY,
     model: 'openai/gpt-4o-mini-tts',
     voice: 'alloy',
-    format: 'mp3',                  // запасной формат на случай, если прокси не поддерживает opus
+    format: 'mp3', // запасной формат на случай, если прокси не поддерживает opus
   },
   {
     label: 'proxy/openai/tts-1 (opus)',
@@ -88,8 +88,8 @@ async function main() {
       const outPath = path.join(OUT_DIR, `${target.label.replace(/[^\w.-]+/g, '_')}.${ext}`);
       await writeFile(outPath, buf);
       console.log(
-        `[${target.label}] УСПЕХ за ${elapsedMs} мс: получено ${buf.length} байт `
-        + `(тип содержимого «${contentType}»), сохранено в ${outPath}.`,
+        `[${target.label}] УСПЕХ за ${elapsedMs} мс: получено ${buf.length} байт ` +
+          `(тип содержимого «${contentType}»), сохранено в ${outPath}.`,
       );
     } catch (err) {
       const cause = err.cause ? ` (причина: ${err.cause.code || err.cause.message})` : '';

@@ -1,0 +1,101 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "node": true,
+    "browser": true,
+    "es2024": true
+  },
+  "plugins": ["import", "promise", "unicorn", "node"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-console": "off",
+    "consistent-return": "off",
+    "default-case": "off",
+    "global-require": "off",
+    "max-classes-per-file": "off",
+    "no-nested-ternary": "off",
+    "no-param-reassign": "off",
+    "no-plusplus": "off",
+    "no-underscore-dangle": "off",
+    "no-use-before-define": "off",
+    "no-void": "off",
+    "no-await-in-loop": "off",
+    "prefer-promise-reject-errors": "off",
+    "no-constant-binary-expression": "off",
+    "no-control-regex": "off",
+    "no-useless-catch": "off",
+    "preserve-caught-error": "off",
+    "curly": ["error", "all"],
+    "prefer-destructuring": ["error", { "object": true, "array": false }],
+    "no-shadow": "error",
+    "no-unused-vars": ["error", {
+      "args": "after-used",
+      "argsIgnorePattern": "^_",
+      "caughtErrorsIgnorePattern": "^_",
+      "vars": "all",
+      "varsIgnorePattern": "^_",
+      "ignoreRestSiblings": true
+    }],
+
+    "import/first": "off",
+    "import/named": "off",
+    "import/namespace": "error",
+    "import/default": "error",
+    "import/export": "error",
+    "import/prefer-default-export": "off",
+    "import/no-default-export": "error",
+    "import/no-unassigned-import": "off",
+    "import/no-named-as-default": "off",
+    "import/no-named-as-default-member": "off",
+    "import/extensions": ["error", "always", { "js": "always", "ignorePackages": true }],
+
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/prefer-set-has": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/no-array-sort": "off",
+
+    "promise/always-return": "off",
+    "promise/no-multiple-resolved": "off"
+  },
+  "overrides": [
+    {
+      "files": ["src/index.js", "index.js"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.js", "**/*.spec.js", "**/*.test.mjs", "**/*.spec.mjs", "tests/**/*.js", "tests/**/*.mjs"],
+      "rules": {
+        "import/no-default-export": "off",
+        "no-unused-vars": "warn"
+      }
+    },
+    {
+      "files": ["bin/**/*.js", "bin/**/*.cjs", "bin/**/*.mjs", "scripts/**/*.js", "scripts/**/*.cjs", "scripts/**/*.mjs"],
+      "rules": {
+        "no-shadow": "off",
+        "import/no-default-export": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/**",
+    "**/dist/**",
+    "coverage/**",
+    ".claude/**",
+    ".idea/**",
+    ".run/**",
+    "_misc/**",
+    "**/_tmp/**",
+    "deploy/**",
+    "doc/**",
+    "docs/**",
+    "migrations/**",
+    "**/*.min.js"
+  ]
+}

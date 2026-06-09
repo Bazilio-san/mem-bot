@@ -11,9 +11,10 @@ export const skillAuthorWriteExtractionTool = {
     type: 'function',
     function: {
       name: 'skill_author_write_extraction',
-      description: 'Rewrite or improve the fact-extraction prompt (the "## Fact Extraction Prompt" block) '
-        + 'following an instruction. Use to change WHICH durable facts the skill remembers. Returns a preview '
-        + 'unless apply=true.',
+      description:
+        'Rewrite or improve the fact-extraction prompt (the "## Fact Extraction Prompt" block) ' +
+        'following an instruction. Use to change WHICH durable facts the skill remembers. Returns a preview ' +
+        'unless apply=true.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -29,8 +30,15 @@ export const skillAuthorWriteExtractionTool = {
   async handler(ctx, args) {
     const skill = editableOrStaged(ctx, args.name);
     const { text } = await refineBlock({
-      kind: 'fact_extraction_prompt', current: skill.factExtractionPrompt, instruction: args.instruction,
-      skillContext: { name: skill.name, domain_key: skill.domain_key, title: skill.title, description: skill.description },
+      kind: 'fact_extraction_prompt',
+      current: skill.factExtractionPrompt,
+      instruction: args.instruction,
+      skillContext: {
+        name: skill.name,
+        domain_key: skill.domain_key,
+        title: skill.title,
+        description: skill.description,
+      },
     });
     skill.factExtractionPrompt = text;
     const res = await applyOrStage(ctx, skill, { apply: args.apply === true });

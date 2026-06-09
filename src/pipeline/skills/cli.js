@@ -33,7 +33,9 @@ function cmdList() {
     const tools = skill.tools.allowed.length ? skill.tools.allowed.join(', ') : '(только базовые)';
     const schema = skill.definition ? `${skill.definition.entities.length} сущностей` : 'нет';
     console.log(`  • ${r.name} / domain ${r.domain_key} — ${r.title}`);
-    console.log(`      инструменты: ${tools}; схема домена: ${schema}; справочники: ${skill.references.allowed ? 'да' : 'нет'}`);
+    console.log(
+      `      инструменты: ${tools}; схема домена: ${schema}; справочники: ${skill.references.allowed ? 'да' : 'нет'}`,
+    );
   }
 }
 
@@ -59,9 +61,15 @@ async function main() {
   const command = process.argv[2];
   try {
     switch (command) {
-      case 'validate': cmdValidate(); break;
-      case 'list': cmdList(); break;
-      case 'sync': await cmdSync(); break;
+      case 'validate':
+        cmdValidate();
+        break;
+      case 'list':
+        cmdList();
+        break;
+      case 'sync':
+        await cmdSync();
+        break;
       default:
         console.log('Команды: validate | list | sync');
         process.exitCode = 1;

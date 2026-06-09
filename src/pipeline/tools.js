@@ -33,12 +33,20 @@ export function toolTitle(name) {
 // для инструментов MCP сверяем и «голое» имя (tool.mcpName): иначе разрешение в skill никогда не совпадёт с
 // префиксным именем и инструмент будет невидим для модели.
 function allowedForActiveSkill(tool, ctx) {
-  if (BASE_TOOL_NAMES.has(tool.name)) return true;
+  if (BASE_TOOL_NAMES.has(tool.name)) {
+    return true;
+  }
   const skill = ctx.activeSkill;
-  if (!skill) return true;
+  if (!skill) {
+    return true;
+  }
   const allowed = skill.tools?.allowed || [];
-  if (allowed.includes(tool.name)) return true;
-  if (tool.mcpName && allowed.includes(tool.mcpName)) return true;
+  if (allowed.includes(tool.name)) {
+    return true;
+  }
+  if (tool.mcpName && allowed.includes(tool.mcpName)) {
+    return true;
+  }
   return false;
 }
 
@@ -61,7 +69,9 @@ export function initTools() {
   if (!initPromise) {
     initPromise = (async () => {
       const mcp = await loadMcpTools();
-      if (mcp.length === 0) return;            // нечего добавлять — реестр остаётся прежним
+      if (mcp.length === 0) {
+        return;
+      } // нечего добавлять — реестр остаётся прежним
       registry = [...registry, ...mcp];
       tools = registry;
       toolDefs = registry.map((t) => t.definition);

@@ -20,13 +20,17 @@ const DEFAULT_STATE = {
 };
 
 function asDate(value) {
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
   return value instanceof Date ? value : new Date(value);
 }
 
 function minutesSince(value, now) {
   const d = asDate(value);
-  if (!d) return Infinity;
+  if (!d) {
+    return Infinity;
+  }
   return (now.getTime() - d.getTime()) / 60000;
 }
 
@@ -35,9 +39,15 @@ function result(allowed, reason, nextCheckAt = null) {
 }
 
 function modeFor({ unanswered, quietUntil, now }) {
-  if (quietUntil && now < quietUntil) return 'quiet';
-  if (unanswered >= config.proactive.contactPolicy.quietAfterUnanswered) return 'quiet';
-  if (unanswered > 0) return 'cautious';
+  if (quietUntil && now < quietUntil) {
+    return 'quiet';
+  }
+  if (unanswered >= config.proactive.contactPolicy.quietAfterUnanswered) {
+    return 'quiet';
+  }
+  if (unanswered > 0) {
+    return 'cautious';
+  }
   return 'active';
 }
 
@@ -224,23 +234,35 @@ export async function recordProactiveSent({ userId, candidate: rawCandidate, sen
             updated_at = now()
       WHERE user_id = $1
       RETURNING *`,
-    [userId, sentAt, isSoft, isRequested, policy.quietAfterUnanswered,
-      policy.quietHoursAfterIgnores, candidate.triggerType, candidate.topicKey],
+    [
+      userId,
+      sentAt,
+      isSoft,
+      isRequested,
+      policy.quietAfterUnanswered,
+      policy.quietHoursAfterIgnores,
+      candidate.triggerType,
+      candidate.topicKey,
+    ],
   );
   return rows[0];
 }
 
 export async function recordUserInboundForContactPolicy({
-  userId, messageAt = new Date(), previousUserMessageAt = null,
+  userId,
+  messageAt = new Date(),
+  previousUserMessageAt = null,
 }) {
   const state = await ensureContactState(userId, messageAt);
   const previous = asDate(previousUserMessageAt);
   const gapMinutes = previous ? minutesSince(previous, messageAt) : null;
-  const wasWaiting = Number(state.unanswered_proactive_count || 0) > 0
-    || Boolean(state.quiet_until && messageAt < asDate(state.quiet_until));
-  const welcomeBack = gapMinutes !== null
-    && gapMinutes >= config.proactive.welcomeBackGapMinutes
-    && (wasWaiting || gapMinutes >= config.proactive.inactivityMinutes);
+  const wasWaiting =
+    Number(state.unanswered_proactive_count || 0) > 0 ||
+    Boolean(state.quiet_until && messageAt < asDate(state.quiet_until));
+  const welcomeBack =
+    gapMinutes !== null &&
+    gapMinutes >= config.proactive.welcomeBackGapMinutes &&
+    (wasWaiting || gapMinutes >= config.proactive.inactivityMinutes);
   const { rows } = await query(
     `UPDATE mem.proactive_contact_state
         SET mode = 'active',
@@ -274,12 +296,20 @@ export function chooseBestAllowed(allowed = []) {
     inactivity: 40,
     daily_checkin: 10,
   };
-  return allowed.sort((a, b) => {
-    const pa = priority[a.candidate.triggerType] || 0;
-    const pb = priority[b.candidate.triggerType] || 0;
-    if (pb !== pa) return pb - pa;
-    if (a.candidate.importance === 'high' && b.candidate.importance !== 'high') return -1;
-    if (b.candidate.importance === 'high' && a.candidate.importance !== 'high') return 1;
-    return 0;
-  })[0] || null;
+  return (
+    allowed.sort((a, b) => {
+      const pa = priority[a.candidate.triggerType] || 0;
+      const pb = priority[b.candidate.triggerType] || 0;
+      if (pb !== pa) {
+        return pb - pa;
+      }
+      if (a.candidate.importance === 'high' && b.candidate.importance !== 'high') {
+        return -1;
+      }
+      if (b.candidate.importance === 'high' && a.candidate.importance !== 'high') {
+        return 1;
+      }
+      return 0;
+    })[0] || null
+  );
 }

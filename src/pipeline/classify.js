@@ -11,7 +11,17 @@ function buildSchema(routeNames) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['intent', 'skill_name', 'domain_key', 'confidence', 'entities', 'needs_memory', 'needed_memory_scopes', 'needs_tools', 'candidate_tools'],
+    required: [
+      'intent',
+      'skill_name',
+      'domain_key',
+      'confidence',
+      'entities',
+      'needs_memory',
+      'needed_memory_scopes',
+      'needs_tools',
+      'candidate_tools',
+    ],
     properties: {
       intent: { type: 'string' },
       skill_name: { type: 'string', enum: routeNames },
@@ -32,11 +42,13 @@ function buildSchema(routeNames) {
 
 // Системный промпт: перечень skills с правилом применения для каждого.
 function buildSystemPrompt(routes) {
-  const list = routes.map((r) => {
-    const pos = r.positive_signals?.length ? `\n    Положительные сигналы: ${r.positive_signals.join('; ')}` : '';
-    const neg = r.negative_signals?.length ? `\n    Отрицательные сигналы: ${r.negative_signals.join('; ')}` : '';
-    return `  - ${r.name} / domain ${r.domain_key}\n    Назначение: ${r.description}\n    Когда использовать: ${r.when_to_use}${pos}${neg}`;
-  }).join('\n');
+  const list = routes
+    .map((r) => {
+      const pos = r.positive_signals?.length ? `\n    Положительные сигналы: ${r.positive_signals.join('; ')}` : '';
+      const neg = r.negative_signals?.length ? `\n    Отрицательные сигналы: ${r.negative_signals.join('; ')}` : '';
+      return `  - ${r.name} / domain ${r.domain_key}\n    Назначение: ${r.description}\n    Когда использовать: ${r.when_to_use}${pos}${neg}`;
+    })
+    .join('\n');
   return `Ты классификатор входящего сообщения для агентского приложения с памятью.
 Определи намерение, важные сущности, какие виды памяти нужны и нужны ли инструменты.
 Выбери ОДИН наиболее подходящий skill по смыслу запроса и верни его имя в поле skill_name точно как в списке.
