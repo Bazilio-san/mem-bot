@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
@@ -68,6 +68,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.20.0",
+    "config": "^4.4.1",
     "cron-parser": "^5.5.0",
     "dotenv": "^16.4.7",
     "openai": "^4.77.0",
