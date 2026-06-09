@@ -12,10 +12,10 @@ export const skillReadReferenceTool = {
     type: 'function',
     function: {
       name: 'skill_read_reference',
-      description: 'Read a reference document that belongs to the currently active skill. Use this only when the '
-        + 'task needs detailed domain material that is not already in your instructions. Pass a relative path '
-        + 'inside the skill references folder (for example "airlines.md"). Absolute paths and parent traversal '
-        + 'are rejected.',
+      description: `Read a reference document that belongs to the currently active skill. 
+Use this only when the task needs detailed domain material that is not already in your instructions. 
+Pass a relative path inside the skill references folder (for example "airlines.md"). 
+Absolute paths and parent traversal are rejected.`,
       parameters: {
         type: 'object',
         additionalProperties: false,

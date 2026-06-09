@@ -530,6 +530,17 @@ async function mandatory() {
     check('13. Удаление по названию помечает нужную запись и сохраняет остальные', res.deleted === 1 && addrGone && colorKept);
   }
 
+  // 13b. Удаление по точному тексту работает для строк, которые пользователь копирует из memory_list.
+  {
+    const u = await freshUser('t13b');
+    const text = 'Пользователь предпочитает обращаться к ассистенту как «Бобик».';
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text, entityType: 'assistant', entityKey: 'assistant_name' });
+    const res = await deleteByEntity(u.id, text);
+    const left = await listMemory(u.id);
+    check('13b. Удаление по точному тексту memory_text удаляет показанный факт',
+      res.deleted === 1 && !left.some((m) => m.memory_text === text));
+  }
+
   // 14. Все три инструмента памяти проходят через executeTool и пишутся в журнал вызовов.
   {
     const u = await freshUser('t14');
