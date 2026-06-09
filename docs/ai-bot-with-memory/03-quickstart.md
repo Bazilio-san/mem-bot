@@ -43,7 +43,9 @@ npm run check:streaming # проверка потоковой отдачи endpo
 Управление skills (см. [11-per-domain-schema.md](11-per-domain-schema.md)): новый домен добавляется каталогом
 `skills/<name>/` с файлом `SKILL.md` и при необходимости `domain-schema.json`. Команда `npm run skills:validate`
 проверяет все skills; `npm run skills:list` показывает их домены, инструменты и наличие схемы; `npm run skills:sync`
-заводит в справочнике `mem.agent_domains` строки соответствия `domain_key` → `domain_id` для новых доменов.
+заводит в справочнике `mem.agent_domains` строки соответствия `domain_key` → `domain_id` для новых доменов. Кроме
+ручного редактирования файлов, навыки создаёт и правит администратор прямо в диалоге через инструментарий
+редактирования навыков; он включается флагом `SKILL_AUTHORING_ENABLED` и доступен только администраторам.
 
 В интерактивном чате доступны команды: `/domain <ключ>` — сменить специализацию. Базовым доменом служит `general`, а
 домены вроде `flight_search` и `math_tutor` приведены лишь как иллюстративные примеры специализаций: конкретный набор
@@ -135,6 +137,10 @@ src/pipeline/classify.js     этап 1: классификация запрос
 src/pipeline/skills/parse.js     разбор SKILL.md на фронтматтер и markdown-блоки
 src/pipeline/skills/registry.js  реестр skills: загрузка, валидация, доступ к prompt, схеме, справочникам
 src/pipeline/skills/cli.js       команды управления skills: validate, list, sync
+src/pipeline/skills/author.js    генераторы частей навыка моделью (черновик, prompt-блоки, схема)
+src/pipeline/skills/writer.js    сборка SKILL.md, валидация, атомарная запись и горячая перезагрузка навыка
+src/pipeline/skills/authoring-support.js  помощники инструментов редактирования навыков
+src/pipeline/agent-tools/skill-authoring/  admin-инструменты создания и редактирования навыков (skill_author_*)
 src/pipeline/retrieve.js     выборка памяти, ранжирование, минимизация, сборка MEMORY_CONTEXT
 src/pipeline/extract.js      извлечение кандидатов в память, companion-памяти и тем после ответа
 src/pipeline/merge.js        фильтр приватности, поиск похожих, дедупликация, запись
@@ -162,6 +168,7 @@ tests/run.js                 комплексная проверка по сло
 tests/memory_cases.json      набор кейсов извлечения фактов
 tests/schema.test.js         проверка слоя схем data под домен (npm run test:schema)
 tests/skills.test.mjs        проверка реестра skills и фильтрации инструментов (npm run test:skills)
+tests/skill-authoring.test.mjs  проверка инструментария редактирования навыков (npm run test:skill-authoring)
 tests/check-llm.js           проверка доступности и возможностей моделей через выбранный endpoint
 scripts/memory-dedupe.js     CLI dry-run/apply для ретроактивной дедупликации памяти
 ```

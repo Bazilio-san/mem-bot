@@ -81,7 +81,9 @@
   (миграция `005`, две таблицы и пометка `is_admin`) → [04-architecture](04-architecture.md) (блоки `GLOBAL_FACTS` и
   `GLOBAL_KNOWLEDGE`) → [10-operations](10-operations.md) (инструменты и слой `layerGlobalMemory`).
 - **Добавить домен через skill.** [11-per-domain-schema.md](11-per-domain-schema.md) (каталог `skills/<name>/`, схема
-  `data` рядом со skill) → [08-prompts-and-models](08-prompts-and-models.md) (классификация по skills и двухпроходное
-  строгое извлечение) → [06-memory](06-memory.md) (дедупликация по каноническому `entity_key`) →
-  [05-data-schema](05-data-schema.md) (справочник `agent_domains`).
+  `data` рядом со skill, и инструментарий редактирования навыков для администратора) →
+  [08-prompts-and-models](08-prompts-and-models.md) (классификация по skills, двухпроходное строгое извлечение и
+  генераторы частей навыка) → [06-memory](06-memory.md) (дедупликация по каноническому `entity_key`) →
+  [05-data-schema](05-data-schema.md) (справочник `agent_domains`) → [10-operations](10-operations.md)
+  (admin-инструменты редактирования навыков).
 - **Проверить готовность.** [02-criteria](02-criteria.md) → [10-operations](10-operations.md) (раздел тестов).

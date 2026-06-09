@@ -129,7 +129,9 @@ export async function handleMessage({
   // Набор инструментов собирается из встроенных модулей src/pipeline/agent-tools/* и инструментов MCP и зависит от
   // флагов, прав пользователя и активного skill: базовые системные инструменты доступны всегда, предметный
   // инструмент — только если он перечислен в tools.allowed активного skill (ctx.activeSkill); административные
-  // инструменты получает только администратор (ctx.isAdmin), см. 10-operations, 11-per-domain-schema и 14-global-memory.
+  // инструменты получает только администратор (ctx.isAdmin). Инструменты редактирования навыков (skill_author_*)
+  // доступны только администратору при включённом флаге и управляются навыком-редактором skill-author.
+  // См. 10-operations, 11-per-domain-schema и 14-global-memory.
   const tools = buildToolDefs(ctx);
   const toolsUsed = [];
   let answer = '';
