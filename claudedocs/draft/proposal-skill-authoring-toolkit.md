@@ -539,24 +539,24 @@ skill_author_schema_edit:
 и сделать коммит-чекпойнт.
 
 ### Этап A — генерация
-- [ ] A1. `config.skills.authoring` добавлен в `src/config.js`.
-- [ ] A2. `src/pipeline/skills/author.js` создан, четыре функции реализованы с контрактами из 16.1.
-- [ ] A3. Импорт `author.js` без сети проходит; коммит-чекпойнт.
+- [x] A1. `config.skills.authoring` добавлен в `src/config.js`.
+- [x] A2. `src/pipeline/skills/author.js` создан, четыре функции реализованы с контрактами из 16.1.
+- [x] A3. Импорт `author.js` без сети проходит; коммит-чекпойнт.
 
 ### Этап B — запись
-- [ ] B1. `registry.js` экспортирует `parseSkillDir`/`getAllSkills`.
-- [ ] B2. `src/pipeline/skills/writer.js` создан: `composeSkillFile`, `validateSkill`, `writeSkill`, `writeReference`,
+- [x] B1. `registry.js` экспортирует `parseSkillDir`/`getAllSkills`.
+- [x] B2. `src/pipeline/skills/writer.js` создан: `composeSkillFile`, `validateSkill`, `writeSkill`, `writeReference`,
   `removeReference`, `deleteSkill`, `ensureDomainRow`.
-- [ ] B3. `tests/skill-authoring.test.mjs`: round-trip compose↔parse, все правила `validateSkill`, ограничение области,
+- [x] B3. `tests/skill-authoring.test.mjs`: round-trip compose↔parse, все правила `validateSkill`, ограничение области,
   запрет удаления `general`/`skill-author` — зелёные.
-- [ ] B4. `npm run test:skills` зелёный; коммит-чекпойнт.
+- [x] B4. `npm run test:skills` зелёный; коммит-чекпойнт.
 
 ### Этап C — чтение/создание + meta-skill
-- [ ] C1. Инструменты `skill_author_list/read/create/validate/apply` созданы (admin + флаг, английские описания).
-- [ ] C2. Инструменты зарегистрированы в `agent-tools/index.js`.
-- [ ] C3. `skills/skill-author/SKILL.md` создан с грунтинг-промптом (раздел 5) и `tools.allowed`.
-- [ ] C4. `npm run skills:validate` принимает `skill-author`; `npm run test:skills` зелёный.
-- [ ] C5. Ручная проверка: админ создаёт навык из описания, предпросмотр → `apply` → навык в реестре; коммит-чекпойнт.
+- [x] C1. Инструменты `skill_author_list/read/create/validate/apply` созданы (admin + флаг, английские описания).
+- [x] C2. Инструменты зарегистрированы в `agent-tools/index.js`.
+- [x] C3. `skills/skill-author/SKILL.md` создан с грунтинг-промптом (раздел 5) и `tools.allowed`.
+- [x] C4. `npm run skills:validate` принимает `skill-author`; `npm run test:skills` зелёный.
+- [x] C5. Ручная проверка: админ создаёт навык из описания, предпросмотр → `apply` → навык в реестре; коммит-чекпойнт.
 
 ### Этап D — редактирование частей
 - [ ] D1. `set_field`, `write_prompt`, `write_extraction`, `schema_generate`, `schema_edit`, `add_reference`,
