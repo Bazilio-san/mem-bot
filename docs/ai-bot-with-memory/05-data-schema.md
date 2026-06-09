@@ -1,24 +1,5 @@
 # 05. Схема данных PostgreSQL
 
-## Вкратце
-
-Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — девятнадцать таблиц. Их определяют миграции:
-`001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
-`005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `007_proactivity_flag.sql` — колонка
-`proactivity_enabled` в `mem.users`; `008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах
-доставки; `009_reply_mode.sql` — колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа);
-`013_companion_memory_kinds.sql` — виды памяти режима собеседника; `015_memory_dedupe.sql` — колонки и индексы
-смысловой дедупликации памяти; `016_voice_preference.sql` — пользовательский тембр голосового ответа. Все миграции
-идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
-
-## Зачем отдельная схема и идемпотентность
-
-Отдельная схема `mem` не смешивает память агента с прочими данными. Идемпотентность позволяет безопасно прогонять
-миграцию повторно (важно для разработки и CI): объекты создаются через `IF NOT EXISTS`, а ENUM-типы — через защищённый
-блок `DO $$ ... EXCEPTION WHEN duplicate_object THEN NULL; END $$;`.
-
----
-
 ## [DATA-1] Расширения, схема и ENUM-типы
 
 ```sql
@@ -463,7 +444,7 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 Признак `enabled` отдельного триггера выбирает активные поводы, а мастер-переключатель `mem.users.proactivity_enabled`
 (миграция `007_proactivity_flag.sql`) стоит над ним и управляет всем контуром у пользователя. Набор триггеров заводится
 выключенным, когда пользователь включает проактивность. Таблица `proactive_contact_state` хранит общий режим контакта,
-лимиты мягкой инициативы и состояние тишины; она не зависит от конкретного канала доставки. Подробности — в
+
 [09-proactivity.md](09-proactivity.md).
 
 Итого с проактивностью — семнадцать таблиц.
@@ -556,11 +537,4 @@ ON mem.message_external_refs (conversation_message_id);
 
 ---
 
-## Связанные документы
 
-- Как используется память — [06-memory.md](06-memory.md)
-- Защищённая память — [07-secure-privacy.md](07-secure-privacy.md)
-- Планировщик и инструменты — [10-operations.md](10-operations.md)
-- Проактивность — [09-proactivity.md](09-proactivity.md)
-- Поджатие истории и миграция `003` — [13-history-compression.md](13-history-compression.md)
-- Глобальная память и миграция `005` — [14-global-memory.md](14-global-memory.md)

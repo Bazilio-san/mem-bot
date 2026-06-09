@@ -1,18 +1,5 @@
 # 03. Быстрый старт и структура проекта
 
-## Вкратце
-
-Нужны Node.js 22+ и PostgreSQL 16 с расширениями `pgvector` и `pgcrypto`. После заполнения `.env` и запуска миграции
-бот готов: интерактивный чат `npm run chat`, воркер напоминаний и проактивности `npm run scheduler`, проверки `npm test`.
-Проактивность включается флагами окружения и по умолчанию выключена.
-
-## Зачем порядок важен
-
-Сначала фундамент и проверка структуры, потом поведение. База памяти должна существовать и проходить проверку структуры
-до того, как писать логику пайплайна.
-
----
-
 ## [QS-1] Требования окружения
 
 - Node.js 22 и новее, тип модулей ESM (`"type": "module"` в `package.json`).
@@ -94,7 +81,6 @@ COMPANION_MODE=on PROACTIVE_ENABLED=on PROACTIVE_EVENTS_ENABLED=on npm run sched
 | `HISTORY_SUMMARY_MODEL` | модель суммаризатора истории (по умолчанию `<AUX_MODEL>`) | `<AUX_MODEL>` |
 | `HISTORY_MIN_COMPRESS_GAIN` | минимальный выигрыш сжатия, ниже которого пересжатие не выполняется | 0.35 |
 
-Подробный разбор слоя — в [13-history-compression.md](13-history-compression.md).
 
 ---
 
@@ -109,7 +95,6 @@ COMPANION_MODE=on PROACTIVE_ENABLED=on PROACTIVE_EVENTS_ENABLED=on npm run sched
 | `GLOBAL_RAG_MIN_RELEVANCE` | порог релевантности: фрагменты слабее порога в контекст не идут | 0.3 |
 
 Флаги независимы: можно включить только постоянные факты, только базу знаний, оба сразу или ничего. Запись в глобальную
-память доступна только администратору (пометка `is_admin` в `mem.users`). Подробный разбор слоя — в
 [14-global-memory.md](14-global-memory.md).
 
 ---
@@ -205,10 +190,4 @@ scripts/memory-dedupe.js     CLI dry-run/apply для ретроактивной
 
 ---
 
-## Связанные документы
 
-- Полный DDL — [05-data-schema.md](05-data-schema.md)
-- Конфигурация и выбор моделей — [08-prompts-and-models.md](08-prompts-and-models.md)
-- Проактивность — [09-proactivity.md](09-proactivity.md)
-- Поджатие истории диалога — [13-history-compression.md](13-history-compression.md)
-- Глобальная память — [14-global-memory.md](14-global-memory.md)
