@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../src/config.js';
-import { query, closePool } from '../src/db.js';
+import { query, closePool, vectorToSql } from '../src/db.js';
+import { embed } from '../src/llm.js';
 import { ensureUser, getDomainId, ensureDefaultTriggers, ensureConversation, getRecentMessages } from '../src/repo.js';
 import { handleMessage } from '../src/agent.js';
 import { classifyIntent } from '../src/pipeline/classify.js';
@@ -71,6 +72,30 @@ async function seedFact(userId, domainKey, { scope, kind = 'fact', text, entityT
     `INSERT INTO mem.memory_items (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text, importance, confidence, sensitivity)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [userId, domainId, scope, kind, entityType, entityKey, text, importance, confidence, sensitivity],
+  );
+}
+
+async function seedEmbeddedFact(userId, domainKey, fact) {
+  const vec = await embed(fact.text);
+  const domainId = await getDomainId(domainKey);
+  await query(
+    `INSERT INTO mem.memory_items
+       (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text,
+        importance, confidence, sensitivity, embedding)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::vector)`,
+    [
+      userId,
+      domainId,
+      fact.scope,
+      fact.kind || 'fact',
+      fact.entityType || null,
+      fact.entityKey || null,
+      fact.text,
+      fact.importance || 0.7,
+      fact.confidence || 0.8,
+      fact.sensitivity || 'normal',
+      vec ? vectorToSql(vec) : null,
+    ],
   );
 }
 
@@ -539,6 +564,63 @@ async function mandatory() {
     const left = await listMemory(u.id);
     check('13b. Удаление по точному тексту memory_text удаляет показанный факт',
       res.deleted === 1 && !left.some((m) => m.memory_text === text));
+  }
+
+  // 13c. Смысловое удаление находит явно подходящий факт, даже если пользователь не цитирует его дословно.
+  {
+    const u = await freshUser('t13c');
+    const text = 'Пользователь предпочитает обращаться к ассистенту как «Бобик».';
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text });
+    await seedEmbeddedFact(u.id, 'general', {
+      scope: 'profile',
+      kind: 'preference',
+      text: 'Пользователь предпочитает короткие ответы без вступлений.',
+    });
+    const res = await deleteByEntity(u.id, 'удали запись о том, как пользователь называет помощника');
+    const left = await listMemory(u.id);
+    check('13c. Semantic delete удаляет уверенный смысловой матч',
+      res.deleted === 1 && res.strategy === 'semantic' && !left.some((m) => m.memory_text === text));
+  }
+
+  // 13d. Запрос на удаление темы удаляет пачку сильных смысловых совпадений, но не удаляет слабые совпадения.
+  {
+    const u = await freshUser('t13d');
+    const bobik1 = 'Ассистента зовут Бобик.';
+    const bobik2 = 'Пользователь предпочитает называть ассистента Бобик.';
+    const unrelated = 'Пользователь предпочитает получать ответы короткими сообщениями.';
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: bobik1 });
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text: bobik2 });
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text: unrelated });
+    const res = await deleteByEntity(u.id, 'сотри всё про имя Бобик у ассистента');
+    const left = await listMemory(u.id);
+    const bobikGone = !left.some((m) => m.memory_text === bobik1 || m.memory_text === bobik2);
+    const unrelatedKept = left.some((m) => m.memory_text === unrelated);
+    check('13d. Semantic topic delete удаляет группу сильных совпадений',
+      res.deleted === 2 && res.strategy === 'semantic_group' && bobikGone && unrelatedKept);
+  }
+
+  // 13e. Слабое смысловое совпадение не удаляется автоматически.
+  {
+    const u = await freshUser('t13e');
+    const text = 'Пользователь предпочитает чай без сахара.';
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text });
+    const res = await deleteByEntity(u.id, 'удали сведения о расписании тренировок по плаванию');
+    const left = await listMemory(u.id);
+    check('13e. Semantic delete не удаляет слабое совпадение',
+      res.deleted === 0 && left.some((m) => m.memory_text === text));
+  }
+
+  // 13f. Близкие смысловые кандидаты не удаляются без уточнения.
+  {
+    const u = await freshUser('t13f');
+    const bobik = 'Ассистента зовут Бобик.';
+    const sharik = 'Ассистента зовут Шарик.';
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: bobik });
+    await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: sharik });
+    const res = await deleteByEntity(u.id, 'удали факт про имя ассистента');
+    const left = await listMemory(u.id);
+    check('13f. Semantic delete возвращает ambiguous для близких кандидатов',
+      res.deleted === 0 && res.ambiguous === true && left.length === 2 && res.candidates.length === 2);
   }
 
   // 14. Все три инструмента памяти проходят через executeTool и пишутся в журнал вызовов.
