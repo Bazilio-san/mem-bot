@@ -40,13 +40,13 @@
 | [02-criteria.md](02-criteria.md) | 1 — обзор | Все критерии готовности: 12 базовых, 5 проактивных (13–17), поджатие (18), глобальная память (19–21) |
 | [03-quickstart.md](03-quickstart.md) | 1 — обзор | Установка, окружение, флаги, команды, структура, сборка с нуля |
 | [04-architecture.md](04-architecture.md) | 2 — глубоко | Пайплайн `handleMessage` пошагово и оба контура обработки |
-| [05-data-schema.md](05-data-schema.md) | 2 — глубоко | Полный DDL: двадцать таблиц, типы, индексы |
+| [05-data-schema.md](05-data-schema.md) | 2 — глубоко | Полный DDL: девятнадцать таблиц, типы, индексы |
 | [06-memory.md](06-memory.md) | 2 — глубоко | Пять видов памяти плюс темы, выборка, запись, дедупликация |
 | [07-secure-privacy.md](07-secure-privacy.md) | 2 — глубоко | Защищённая память: шифрование, согласие, маскирование |
 | [08-prompts-and-models.md](08-prompts-and-models.md) | 2 — глубоко | Промпты всех этапов, LLM-прокси, строгий JSON, выбор моделей |
 | [09-proactivity.md](09-proactivity.md) | 2 — глубоко | Пять свойств собеседника: темы, время, триггеры, возврат, события |
 | [10-operations.md](10-operations.md) | 2 — глубоко | Планировщик, инструменты, логирование, тесты |
-| [11-per-domain-schema.md](11-per-domain-schema.md) | 2 — глубоко | Слой схем `data` под домен |
+| [11-per-domain-schema.md](11-per-domain-schema.md) | 2 — глубоко | Skills: домены, схемы `data` и поведение домена |
 | [12-appendix.md](12-appendix.md) | 2 — глубоко | Внешние источники и рекомендованная раскладка кода |
 | [13-history-compression.md](13-history-compression.md) | 2 — глубоко | Поджатие истории: горячее окно, дайджест, градиент |
 | [14-global-memory.md](14-global-memory.md) | 2 — глубоко | Глобальная память: глобальные факты и общая база знаний (RAG), права администратора |
@@ -80,7 +80,8 @@
 - **Подключить глобальную память.** [14-global-memory.md](14-global-memory.md) → [05-data-schema](05-data-schema.md)
   (миграция `005`, две таблицы и пометка `is_admin`) → [04-architecture](04-architecture.md) (блоки `GLOBAL_FACTS` и
   `GLOBAL_KNOWLEDGE`) → [10-operations](10-operations.md) (инструменты и слой `layerGlobalMemory`).
-- **Подключить схемы `data` под домен.** [11-per-domain-schema.md](11-per-domain-schema.md) → [05-data-schema](05-data-schema.md)
-  (миграция `006`, таблица `domain_schemas`) → [08-prompts-and-models](08-prompts-and-models.md) (двухпроходное строгое
-  извлечение) → [06-memory](06-memory.md) (дедупликация по каноническому `entity_key`).
+- **Добавить домен через skill.** [11-per-domain-schema.md](11-per-domain-schema.md) (каталог `skills/<name>/`, схема
+  `data` рядом со skill) → [08-prompts-and-models](08-prompts-and-models.md) (классификация по skills и двухпроходное
+  строгое извлечение) → [06-memory](06-memory.md) (дедупликация по каноническому `entity_key`) →
+  [05-data-schema](05-data-schema.md) (справочник `agent_domains`).
 - **Проверить готовность.** [02-criteria](02-criteria.md) → [10-operations](10-operations.md) (раздел тестов).

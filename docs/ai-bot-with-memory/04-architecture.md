@@ -106,6 +106,8 @@ export async function handleMessage({
     { role: 'system', content: memoryContext },
     // ...capabilitiesContext (CAPABILITIES_CONTEXT) — только для вопросов о возможностях и инструментах.
     //    В этот блок список доменов не передаётся; реальные действия выводятся из инструментов.
+    // ...activeSkillSystem (ACTIVE_SKILL_CONTEXT) — инструкции активного skill из «# Skill Prompt»; стоит после
+    //    памяти, но до истории и текущей реплики; не заменяет общие правила и приоритет текущего запроса (см. 11).
     // ...globalKnowledgeBlock (GLOBAL_KNOWLEDGE, если включён RAG) — рядом с памятью, зависит от запроса
     // ...historyContext (HISTORY_CONTEXT, если включён флаг),
     // ...extraSystem (COMPANION_SYSTEM и CONVERSATION_CONTEXT, если включён COMPANION_MODE),
@@ -119,8 +121,9 @@ export async function handleMessage({
   // 10-operations).
   await initTools();
   // Набор инструментов собирается из встроенных модулей src/pipeline/agent-tools/* и инструментов MCP и зависит от
-  // флагов и прав пользователя: административные инструменты получает только администратор (ctx.isAdmin), см.
-  // 10-operations и 14-global-memory.
+  // флагов, прав пользователя и активного skill: базовые системные инструменты доступны всегда, предметный
+  // инструмент — только если он перечислен в tools.allowed активного skill (ctx.activeSkill); административные
+  // инструменты получает только администратор (ctx.isAdmin), см. 10-operations, 11-per-domain-schema и 14-global-memory.
   const tools = buildToolDefs(ctx);
   const toolsUsed = [];
   let answer = '';
@@ -175,9 +178,11 @@ export async function handleMessage({
 
 ## [ARCH-3] Пять этапов по смыслу
 
-1. **Классификация.** Дешёвая модель определяет намерение, домен, сущности и то, какие виды памяти и инструменты нужны.
-   Если классификатор недоступен — откат на безопасные значения по умолчанию. Промпт и схема — в
-   [08-prompts-and-models.md](08-prompts-and-models.md).
+1. **Классификация.** Дешёвая модель выбирает подходящий skill (источник истины — `skill_name`), а заодно определяет
+   намерение, сущности и то, какие виды памяти и инструменты нужны. Доменный ключ выводится из выбранного skill. Если
+   классификатор недоступен — откат на безопасные значения по умолчанию. Промпт и схема — в
+   [08-prompts-and-models.md](08-prompts-and-models.md), реестр skills — в
+   [11-per-domain-schema.md](11-per-domain-schema.md).
 2. **Выборка памяти.** Достаётся только нужный минимум: структурный фильтр, эмбеддинги и полнотекст, взвешенное
    ранжирование, жёсткие лимиты. Детали — в [06-memory.md](06-memory.md).
 3. **Ответ с инструментами.** Цикл до пяти шагов: модель либо вызывает инструменты (их результат возвращается ей), либо

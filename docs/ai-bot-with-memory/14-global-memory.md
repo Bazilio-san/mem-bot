@@ -106,8 +106,8 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
                                                               WHERE embedding IS NOT NULL;
 ```
 
-С этими двумя таблицами общее число таблиц схемы — двадцать (вместе с реестром схем доменов
-`mem.domain_schemas` и внешними ссылками сообщений `mem.message_external_refs`, см.
+С этими двумя таблицами общее число таблиц схемы — девятнадцать (вместе со справочником доменов
+`mem.agent_domains` и внешними ссылками сообщений `mem.message_external_refs`, см.
 [05-data-schema.md](05-data-schema.md)). Колонка `is_admin` намеренно живёт в таблице `mem.users`, а не в отдельной
 таблице ролей: требование
 ставит ровно одну ручную пометку «администратор», и заводить полноценную систему ролей под одну булеву характеристику —

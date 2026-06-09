@@ -2,13 +2,12 @@
 
 ## Вкратце
 
-Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — всего двадцать таблиц. Их определяют миграции:
+Вся память живёт в отдельной схеме `mem` выделенной базы `agent_mem` — девятнадцать таблиц. Их определяют миграции:
 `001_init.sql` — тринадцать базовых таблиц, типы и индексы; `002_proactive.sql` — три таблицы проактивности;
-`005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `006_domain_schemas.sql` — таблица-реестр
-схем `data` под домен; `007_proactivity_flag.sql` — колонка `proactivity_enabled` в `mem.users`;
-`008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах доставки; `009_reply_mode.sql` —
-колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа); `013_companion_memory_kinds.sql` — виды памяти
-режима собеседника. Все миграции идемпотентны
+`005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `007_proactivity_flag.sql` — колонка
+`proactivity_enabled` в `mem.users`; `008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах
+доставки; `009_reply_mode.sql` — колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа);
+`013_companion_memory_kinds.sql` — виды памяти режима собеседника. Все миграции идемпотентны
 (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
@@ -49,10 +48,12 @@ CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed
 `proactivity_enabled` — миграция `007`. Колонку `reply_mode` (предпочитаемая форма ответа — текст или голос)
 добавляет миграция `009`; это управляющая настройка пользователя, которую канал доставки читает на каждом ответе
 (см. [MEM-8]).
-`mem.agent_domains` описывает области контекста и предметной памяти агента; базовые домены засеваются прямо в миграции.
-Домен используется для классификации, выборки памяти, схем `data`, тем и доменных глобальных фактов. Он не является
-реестром публичных умений: наличие строки домена само по себе не означает, что бот умеет выполнять действие в этой
-области. Реальные действия выводятся из доступных инструментов и явно описанных функций.
+`mem.agent_domains` — тонкий справочник соответствия `domain_key` → числовой `domain_id`, на который ссылаются внешние
+ключи таблиц памяти. Содержательное описание домена живёт в реестре skills (см.
+[11-per-domain-schema.md](11-per-domain-schema.md)); строки этого справочника заводятся из skills (командой `sync`) и
+руками не редактируются. Базовый домен `general` засевается прямо в миграции, чтобы адресация памяти работала с первого
+запуска. Наличие строки домена само по себе не означает, что бот умеет выполнять действие в этой области: реальные
+действия выводятся из доступных инструментов активного skill и явно описанных функций.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.users (
@@ -502,30 +503,12 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
 
 ---
 
-## [DATA-10] Реестр схем `data` под домен (миграция `006`)
+## [DATA-10] Схема `data` под домен
 
-Таблица `mem.domain_schemas` хранит версионируемые определения схем `data` и правил канонизации `entity_key` по доменам.
-Это источник истины во время выполнения: на каждый домен приходится не более одной активной версии (гарантирует
-частичный уникальный индекс), а при сохранении новой версии прежняя активная уходит в архив. Подробно слой описан в
-[11-per-domain-schema.md](11-per-domain-schema.md).
-
-```sql
-CREATE TABLE IF NOT EXISTS mem.domain_schemas (
-    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_key  text NOT NULL,
-    version     integer NOT NULL,
-    status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','draft')),
-    title       text NOT NULL,
-    description text,
-    definition  jsonb NOT NULL,        -- entities[].data_schema (закрытая JSON Schema) + словари entity_key
-    created_by  text,
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (domain_key, version)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_schemas_active
-ON mem.domain_schemas (domain_key) WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_domain_schemas_domain ON mem.domain_schemas (domain_key, version DESC);
-```
+Закрытая схема полей `data` и правила канонизации `entity_key` по доменам хранятся не в базе, а в файле рядом со skill
+(`skills/<name>/domain-schema.json`) и загружаются реестром skills в память при старте. База лишь применяет результат:
+проверенный `data` и канонизированный `entity_key` записываются в `mem.memory_items`, а маркер источника схемы и
+замечания канонизации — в его `metadata`. Подробно слой описан в [11-per-domain-schema.md](11-per-domain-schema.md).
 
 ## [DATA-11] Внешние ссылки сообщений (миграция `008`)
 
@@ -550,7 +533,7 @@ CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
 ON mem.message_external_refs (conversation_message_id);
 ```
 
-Итого с глобальной памятью, реестром схем доменов и внешними ссылками сообщений — двадцать таблиц.
+Итого с глобальной памятью и внешними ссылками сообщений — девятнадцать таблиц.
 
 ---
 
