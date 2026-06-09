@@ -2,7 +2,7 @@ import { deleteGlobalFact } from '../../global-memory.js';
 
 export const globalFactDeleteTool = {
   name: 'global_fact_delete',
-  title: 'Удаление глобального факта',
+  title: 'Удаляю глобальный факт...',
   requiresAdmin: true,
   isEnabled: (ctx, config) => config.globalMemory.factsEnabled && ctx.isAdmin,
   definition: {

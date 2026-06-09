@@ -2,7 +2,7 @@ import { deleteByEntity } from '../../admin.js';
 
 export const memoryForgetEntityTool = {
   name: 'memory_forget_entity',
-  title: 'Удаление факта из памяти',
+  title: 'Удаляю факт из личной памяти...',
   definition: {
     type: 'function',
     function: {

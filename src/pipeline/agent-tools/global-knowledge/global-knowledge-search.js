@@ -2,7 +2,7 @@ import { searchGlobalKnowledge } from '../../global-memory.js';
 
 export const globalKnowledgeSearchTool = {
   name: 'global_knowledge_search',
-  title: 'Поиск в базе знаний',
+  title: 'Ищу в базе знаний...',
   isEnabled: (ctx, config) => config.globalMemory.ragEnabled,
   definition: {
     type: 'function',

@@ -4,7 +4,7 @@ import { authoringEnabled, loadEditable, summarize } from '../../skills/authorin
 // Выключить навык (enabled=false): роутер перестаёт его выбирать, но навык не удаляется. Пишет сразу.
 export const skillAuthorDisableTool = {
   name: 'skill_author_disable',
-  title: 'Выключение навыка',
+  title: 'Выключаю навык...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

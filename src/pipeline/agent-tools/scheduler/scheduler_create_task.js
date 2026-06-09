@@ -2,7 +2,7 @@ import { createTask, formatLocalDateTime } from '../../scheduler.js';
 
 export const schedulerCreateTaskTool = {
   name: 'scheduler_create_task',
-  title: 'Создание напоминания',
+  title: 'Создаю напоминание...',
   definition: {
     type: 'function',
     function: {

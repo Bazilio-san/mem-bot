@@ -7,7 +7,7 @@ import { authoringEnabled, buildSkillFromDraft, stageSkill, clearStaged, summari
 // проверяет его и по умолчанию только показывает предпросмотр; запись на диск — лишь при apply=true.
 export const skillAuthorCreateTool = {
   name: 'skill_author_create',
-  title: 'Создание навыка',
+  title: 'Создаю навык...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

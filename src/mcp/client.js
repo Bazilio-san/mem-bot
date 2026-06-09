@@ -106,7 +106,7 @@ function wrapMcpTool(connection, server, mcpTool) {
   const requiresAdmin = server.requiresAdmin === true;
   return {
     name: prefixedName,
-    title: `${server.title}: ${mcpTool.name}`,
+    title: `Вызываю инструмент ${server.title}: ${mcpTool.name}...`,
     requiresAdmin,
     // Если инструмент только для администратора, прячем его и из справки о возможностях для остальных,
     // повторяя поведение локальных admin-инструментов (см. global-fact-*). Иначе инструмент виден всегда.

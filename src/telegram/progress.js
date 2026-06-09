@@ -65,11 +65,11 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     }
   }
 
-  // Показать или обновить одно status-сообщение «Вызываю инструмент: …». Пока идёт показ ответа
+  // Показать или обновить одно status-сообщение инструмента. Пока идёт показ ответа
   // (черновик уже создан), статус инструмента не смешиваем с текстом ответа.
   async function showToolStatus(title) {
     if (!toolStatuses || state.draftId !== null) return;
-    const text = `Вызываю инструмент: ${title}`;
+    const text = String(title);
     if (state.statusId === null) {
       const res = await tg('sendMessage', { chat_id: chatId, text });
       state.statusId = res?.message_id ?? null;

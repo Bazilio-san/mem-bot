@@ -7,7 +7,7 @@ import { setReplyMode } from '../../repo.js';
 // подействовала уже на текущий ответ (handleMessage берёт итоговый режим из ctx.replyMode).
 export const setReplyModeTool = {
   name: 'set_reply_mode',
-  title: 'Форма ответа: голос или текст',
+  title: 'Настраиваю формат ответа...',
   isEnabled: (ctx, config) => config.voiceOutput.enabled,
   definition: {
     type: 'function',

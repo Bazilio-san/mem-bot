@@ -73,7 +73,7 @@ function describeSchedule(row) {
 
 export const schedulerListTasksTool = {
   name: 'scheduler_list_tasks',
-  title: 'Список напоминаний и задач',
+  title: 'Собираю напоминания и задачи...',
   definition: {
     type: 'function',
     function: {

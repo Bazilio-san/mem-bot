@@ -47,7 +47,7 @@ function fakeTg() {
   assert.ok(typingStops[0]?.stopped === true, 'индикатор набора остановлен при появлении текста');
 }
 
-// 2. Вызов инструмента до появления ответа создаёт отдельное status-сообщение «Вызываю инструмент: …»,
+// 2. Вызов инструмента до появления ответа создаёт отдельное status-сообщение с готовым текстом toolTitle,
 //    которое убирается, когда начинается текст ответа.
 {
   const { tg, calls } = fakeTg();
@@ -58,10 +58,10 @@ function fakeTg() {
     options: { toolStatuses: true, minFirstDraftChars: 0, now: () => 0 },
   });
 
-  await progress.onEvent({ type: 'tool.started', toolName: 'memory_search', toolTitle: 'Поиск в памяти' });
+  await progress.onEvent({ type: 'tool.started', toolName: 'memory_search', toolTitle: 'Ищу в личной памяти...' });
   const statusSend = calls.find((c) => c.method === 'sendMessage');
   assert.ok(statusSend, 'статус инструмента отправлен');
-  assert.equal(statusSend.body.text, 'Вызываю инструмент: Поиск в памяти');
+  assert.equal(statusSend.body.text, 'Ищу в личной памяти...');
 
   await progress.onEvent({ type: 'assistant.delta', text: 'Нашёл нужное.' });
   assert.ok(calls.some((c) => c.method === 'deleteMessage'), 'статус инструмента убран при появлении ответа');
@@ -74,7 +74,7 @@ function fakeTg() {
   const progress = createTelegramProgress({
     chatId: 1, tg, startTyping: () => () => {}, options: { toolStatuses: false, now: () => 0 },
   });
-  await progress.onEvent({ type: 'tool.started', toolName: 'memory_search', toolTitle: 'Поиск в памяти' });
+  await progress.onEvent({ type: 'tool.started', toolName: 'memory_search', toolTitle: 'Ищу в личной памяти...' });
   assert.equal(calls.length, 0, 'при выключенных статусах сообщения не отправляются');
   await progress.complete('Готово.');
 }

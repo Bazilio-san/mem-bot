@@ -2,7 +2,7 @@ import { getSecureValue } from '../secure.js';
 
 export const secureRecordGetTool = {
   name: 'secure_record_get',
-  title: 'Доступ к защищённой записи',
+  title: 'Получаю защищённую запись...',
   definition: {
     type: 'function',
     function: {

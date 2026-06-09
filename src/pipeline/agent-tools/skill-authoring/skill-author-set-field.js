@@ -29,7 +29,7 @@ function toArray(v) {
 
 export const skillAuthorSetFieldTool = {
   name: 'skill_author_set_field',
-  title: 'Изменение поля навыка',
+  title: 'Изменяю поле навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

@@ -1,8 +1,8 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.2",
-  "description": "Agentic Telegram and CLI chat bot with long-term PostgreSQL memory, reminders, voice support, skills, and MCP tools.",
+  "version": "1.0.7",
+  "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
   "engines": {

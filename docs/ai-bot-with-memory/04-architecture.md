@@ -291,9 +291,9 @@ export async function handleMessage({
 { type: 'stage.started', stage: 'llm',      title: 'Готовлю ответ' }
 { type: 'assistant.delta', text: 'часть ответа' }                          // фрагмент финального текста
 { type: 'assistant.completed', text: 'полный финальный ответ' }            // финальный текст целиком
-{ type: 'tool.started',   toolName: 'memory_search', toolTitle: 'Поиск в памяти' }
-{ type: 'tool.completed', toolName: 'memory_search', toolTitle: 'Поиск в памяти', ok: true }
-{ type: 'tool.completed', toolName: 'memory_search', toolTitle: 'Поиск в памяти', ok: false, error: '...' }
+{ type: 'tool.started',   toolName: 'memory_search', toolTitle: 'Ищу в личной памяти...' }
+{ type: 'tool.completed', toolName: 'memory_search', toolTitle: 'Ищу в личной памяти...', ok: true }
+{ type: 'tool.completed', toolName: 'memory_search', toolTitle: 'Ищу в личной памяти...', ok: false, error: '...' }
 { type: 'agent.completed' }                                                // обработка успешно завершена
 { type: 'agent.failed', error: '...' }                                     // обработка прервана ошибкой
 ```

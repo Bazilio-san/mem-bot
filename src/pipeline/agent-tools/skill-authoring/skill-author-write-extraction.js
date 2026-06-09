@@ -4,7 +4,7 @@ import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/a
 // Переписать или улучшить блок «## Fact Extraction Prompt» навыка по инструкции (под капотом — модель).
 export const skillAuthorWriteExtractionTool = {
   name: 'skill_author_write_extraction',
-  title: 'Правка промпта извлечения навыка',
+  title: 'Правлю промпт извлечения навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

@@ -4,7 +4,7 @@ import { authoringEnabled } from '../../skills/authoring-support.js';
 // Удалить каталог навыка целиком (требует подтверждения; general и skill-author защищены).
 export const skillAuthorDeleteTool = {
   name: 'skill_author_delete',
-  title: 'Удаление навыка',
+  title: 'Удаляю навык...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

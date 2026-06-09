@@ -4,7 +4,7 @@ import { authoringEnabled, editableOrStaged } from '../../skills/authoring-suppo
 // Проверить навык без записи: подготовленный в этом диалоге черновик или сохранённый на диске.
 export const skillAuthorValidateTool = {
   name: 'skill_author_validate',
-  title: 'Проверка навыка',
+  title: 'Проверяю навык...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

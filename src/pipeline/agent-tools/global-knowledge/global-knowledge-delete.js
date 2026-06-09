@@ -2,7 +2,7 @@ import { deleteGlobalKnowledge } from '../../global-memory.js';
 
 export const globalKnowledgeDeleteTool = {
   name: 'global_knowledge_delete',
-  title: 'Удаление из базы знаний',
+  title: 'Удаляю из базы знаний...',
   requiresAdmin: true,
   isEnabled: (ctx, config) => config.globalMemory.ragEnabled && ctx.isAdmin,
   definition: {

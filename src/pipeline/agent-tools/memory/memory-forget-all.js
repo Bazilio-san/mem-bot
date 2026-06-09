@@ -2,7 +2,7 @@ import { forgetAll } from '../../admin.js';
 
 export const memoryForgetAllTool = {
   name: 'memory_forget_all',
-  title: 'Полное удаление личной памяти',
+  title: 'Выполняю полное удаление личной памяти...',
   definition: {
     type: 'function',
     function: {

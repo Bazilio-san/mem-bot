@@ -6,7 +6,7 @@ import { getReference } from '../skills/registry.js';
 // принимает относительный путь внутри references/** и не может выйти за пределы каталога текущего skill.
 export const skillReadReferenceTool = {
   name: 'skill_read_reference',
-  title: 'Чтение справочника навыка',
+  title: 'Читаю справочник навыка...',
   isEnabled: (ctx) => ctx.activeSkill?.references?.allowed === true,
   definition: {
     type: 'function',

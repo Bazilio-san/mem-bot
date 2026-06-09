@@ -4,7 +4,7 @@ import { authoringEnabled, summarize } from '../../skills/authoring-support.js';
 // Перечислить все навыки с краткой сводкой: имя, домен, инструменты, наличие схемы и справочников.
 export const skillAuthorListTool = {
   name: 'skill_author_list',
-  title: 'Список навыков',
+  title: 'Показываю навыки...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

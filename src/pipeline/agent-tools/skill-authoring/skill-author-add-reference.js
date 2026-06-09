@@ -4,7 +4,7 @@ import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/a
 // Создать или обновить файл справочника навыка и включить чтение справочников. Содержимое пишет модель в content.
 export const skillAuthorAddReferenceTool = {
   name: 'skill_author_add_reference',
-  title: 'Добавление справочника навыка',
+  title: 'Добавляю справочник навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

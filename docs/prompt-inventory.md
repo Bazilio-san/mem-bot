@@ -60,20 +60,3 @@
 |------|------------|
 | Проверка LLM-прокси | `tests/check-llm.js:68`, `tests/check-llm.js:85`, `tests/check-llm.js:112`, `tests/check-llm.js:144`, `tests/check-llm.js:173` |
 | Проверка streaming | `tests/check-streaming.js:40`, `tests/check-streaming.js:53` |
-
-## Документационные и исторические промпты
-
-| Документ | Координата |
-|----------|------------|
-| Канонический реестр `[PROMPT-*]` | `docs/ai-bot-with-memory/08-prompts-and-models.md:18` |
-| Проектный статус `PROMPT` | `docs/ai-bot-implementation-status.md:136` |
-| Историческая архитектура памяти | `_invisible/made/agent_memory_architecture.md:884` |
-| Исторический промпт суммаризатора | `_invisible/history-compression-proposal-gpt.md:187` |
-| Исходное задание на ИИ-бота | `_invisible/made/prompt-ai-bot.md:1` |
-| План-промпт стриминга | `claudedocs/made/proposal-llm-and-tool-streaming.md:1` |
-| План-промпт contact policy | `claudedocs/made/proactive-human-contact-policy-plan.md:1` |
-| План-промпт MCP-клиента | `claudedocs/draft/proposal-mcp-client.md:1` |
-| Задание на Fli skill | `_invisible/prompt-create-fli-skill.md:1` |
-| Задание на Telethon skill | `_invisible/prompt-create-telephon-skill.md:1` |
-| Задание на копирование Pydantic AI skill | `_invisible/prompt-copy-building-pydantic-ai-agents-skill.md:1` |
-

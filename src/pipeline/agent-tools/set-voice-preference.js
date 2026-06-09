@@ -9,7 +9,7 @@ function shouldEnableVoicePreferenceTool(ctx) {
 
 export const setVoicePreferenceTool = {
   name: 'set_voice_preference',
-  title: 'Тембр голосового ответа',
+  title: 'Настраиваю голос ответа...',
   isEnabled: (ctx, config) => config.voiceOutput.enabled && shouldEnableVoicePreferenceTool(ctx),
   definition: {
     type: 'function',

@@ -4,7 +4,7 @@ import { authoringEnabled, loadEditable, summarize } from '../../skills/authorin
 // Включить навык (enabled=true), чтобы роутер мог его выбирать. Пишет сразу.
 export const skillAuthorEnableTool = {
   name: 'skill_author_enable',
-  title: 'Включение навыка',
+  title: 'Включаю навык...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

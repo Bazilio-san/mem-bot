@@ -178,7 +178,7 @@ export const config = {
     // видит мигающий пузырь из одной-двух букв («Я»), который тут же переписывается. Короткий ответ, который
     // завершится раньше этого порога, доставляется целиком методом complete() — без промежуточного черновика.
     minFirstDraftChars: Number(env.TELEGRAM_STREAM_MIN_FIRST_DRAFT_CHARS || 50),
-    toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true),  // показывать ли «Вызываю инструмент: …»
+    toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true),  // показывать ли статус вызова инструмента
   },
 
   // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.

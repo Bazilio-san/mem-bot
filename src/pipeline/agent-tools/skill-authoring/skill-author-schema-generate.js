@@ -4,7 +4,7 @@ import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/a
 // Сгенерировать (или пересоздать) закрытую схему доменной памяти навыка: сущности, поля data, словари ключей.
 export const skillAuthorSchemaGenerateTool = {
   name: 'skill_author_schema_generate',
-  title: 'Генерация схемы навыка',
+  title: 'Генерирую схему навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

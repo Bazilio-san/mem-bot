@@ -2,7 +2,7 @@ import { addGlobalKnowledge } from '../../global-memory.js';
 
 export const globalKnowledgeAddTool = {
   name: 'global_knowledge_add',
-  title: 'Добавление в базу знаний',
+  title: 'Добавляю в базу знаний...',
   requiresAdmin: true,
   isEnabled: (ctx, config) => config.globalMemory.ragEnabled && ctx.isAdmin,
   definition: {

@@ -204,7 +204,7 @@ class McpConnection {
   // Установить соединение, если его ещё нет. Повторный вызов при живом клиенте — это пустая операция.
   async ensureConnected() {
     if (this.client) return this.client;
-    const client = new Client({ name: 'inter-2', version: '1.0.0' });
+    const client = new Client({ name: 'mem-bot', version: '1.0.0' });
     // Заголовки транспорта пробрасываем только если они заданы в конфигурации — это место для будущего токена.
     const options = this.server.headers ? { requestInit: { headers: this.server.headers } } : undefined;
     const transport = new StreamableHTTPClientTransport(new URL(this.server.url), options);

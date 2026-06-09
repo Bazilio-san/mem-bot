@@ -2,7 +2,7 @@ import { addGlobalFact } from '../../global-memory.js';
 
 export const globalFactAddTool = {
   name: 'global_fact_add',
-  title: 'Добавление глобального факта',
+  title: 'Добавляю глобальный факт...',
   requiresAdmin: true,
   isEnabled: (ctx, config) => config.globalMemory.factsEnabled && ctx.isAdmin,
   definition: {

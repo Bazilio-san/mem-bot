@@ -4,7 +4,7 @@ import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/a
 // Переписать или улучшить блок «# Skill Prompt» навыка по инструкции (под капотом — модель).
 export const skillAuthorWritePromptTool = {
   name: 'skill_author_write_prompt',
-  title: 'Правка промпта ответа навыка',
+  title: 'Правлю промпт ответа навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

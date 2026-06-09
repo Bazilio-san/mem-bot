@@ -4,7 +4,7 @@ import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/a
 // Точечно поправить схему домена навыка: добавить/убрать сущность, поле, значение словаря, синоним, режим ключа.
 export const skillAuthorSchemaEditTool = {
   name: 'skill_author_schema_edit',
-  title: 'Правка схемы навыка',
+  title: 'Правлю схему навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

@@ -5,7 +5,7 @@ import { authoringEnabled, getStaged, clearStaged, summarize } from '../../skill
 // Делает резервную копию, перезагружает реестр и заводит строку домена. Разрушающее действие: confirm=true.
 export const skillAuthorApplyTool = {
   name: 'skill_author_apply',
-  title: 'Применение изменений навыка',
+  title: 'Применяю изменения навыка...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {

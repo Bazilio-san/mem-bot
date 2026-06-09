@@ -2,7 +2,7 @@ import { listMemory } from '../../admin.js';
 
 export const memoryListTool = {
   name: 'memory_list',
-  title: 'Список личной памяти',
+  title: 'Смотрю личную память...',
   definition: {
     type: 'function',
     function: {

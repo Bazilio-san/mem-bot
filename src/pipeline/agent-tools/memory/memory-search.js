@@ -4,7 +4,7 @@ import { getDomainId } from '../../../repo.js';
 
 export const memorySearchTool = {
   name: 'memory_search',
-  title: 'Поиск в памяти',
+  title: 'Ищу в личной памяти...',
   definition: {
     type: 'function',
     function: {

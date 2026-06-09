@@ -2,7 +2,7 @@
 
 ## Роль и цель
 
-Ты работаешь в проекте `D:\DEV\SAND\inter-2-prep`. Нужно реализовать полноценную поддержку `schedule_kind = 'cron'` и
+Ты работаешь в проекте `D:\DEV\SAND\mem-bot`. Нужно реализовать полноценную поддержку `schedule_kind = 'cron'` и
 `schedule_kind = 'rrule'` в планировщике напоминаний, не ломая существующие сценарии `one_time` и `interval`.
 
 Сейчас схема базы уже готова: `mem.scheduled_tasks` содержит `timezone`, `cron_expr`, `rrule`, `next_run_at`, а ENUM

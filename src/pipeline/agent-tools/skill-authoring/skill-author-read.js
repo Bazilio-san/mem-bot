@@ -4,7 +4,7 @@ import { authoringEnabled, loadEditable, summarize } from '../../skills/authorin
 // то, что реально есть, а не угадывала.
 export const skillAuthorReadTool = {
   name: 'skill_author_read',
-  title: 'Чтение навыка',
+  title: 'Читаю навык...',
   requiresAdmin: true,
   isEnabled: authoringEnabled,
   definition: {
