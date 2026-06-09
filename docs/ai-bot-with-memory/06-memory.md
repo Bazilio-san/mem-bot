@@ -152,31 +152,35 @@ function passesAutoSave(c) {
 
 ### [MEM-6] Дедупликация и обновление вместо дублей
 
-Чтобы не плодить три противоречивых факта «живёт в Москве / в Казани / в Сочи», система ищет похожие записи по сущности
-(`entity_type` плюс `entity_key`) или по полнотекстовому совпадению, а затем решает простыми правилами. Если найдена
-та же сущность с другим текстом — старый факт архивируется, новый записывается, а в метаданных старого проставляется
-`replaced_by`. Если та же сущность с тем же смыслом — обновляется на месте, прежнее значение сохраняется в
-`metadata.last_update`.
-Решение принимается кодом без отдельного вызова модели — ради скорости.
+Чтобы не плодить три противоречивых факта «живёт в Москве / в Казани / в Сочи» и смысловые повторы вроде «короткие
+ответы» в разных `scope`, система строит для каждого кандидата устойчивый `dedupe_key`. Этот ключ отражает смысл
+утверждения: `profile:communication_style:short_direct_answers`, `feature_request:global_memory`,
+`flight_search:trip:sgn_mow_2026_06_16_2_adults_baggage`. Исходные `scope` и `memory_kind` сохраняются, но поиск дублей
+идёт по совместимым группам: профильные предпочтения сравниваются с системными инструкциями о стиле, feature requests —
+между `profile`, `domain` и `dialog`, а контекст одной поездки — между `dialog open_loop`, `domain goal` и `progress`.
 
-Поиск по сущности надёжен потому, что `entity_key` приходит уже канонизированным: схема домена приводит синонимы к
-единому ключу из словаря и нормализует свободные ключи в slug, поэтому «откуда» и «город вылета» сходятся в один
-`departure`, а не плодят дубли (см. [11-per-domain-schema.md](11-per-domain-schema.md)). Текстовое и векторное сходство
-остаются дополнительным сигналом для случаев, где сущность не определена.
+Поиск похожих записей использует несколько сигналов: точный `dedupe_key`, каноническую сущность (`entity_type` +
+`entity_key`), полнотекстовый матч, векторную близость, совпадение важных полей `data`, совместимость scope-группы и
+близость `memory_kind`. Очевидные совпадения решаются локально: запись обновляется или заменяет старую, а лишняя строка
+мягко архивируется. Спорные случаи остаются расширяемой точкой для `MergeDecision`, но базовый контур не зависит от
+дополнительного вызова модели и деградирует до rule-based решения.
+
+Каждая группа дублей получает `canonical_group_id`. Каноническая строка выбирается по важности, уверенности, свежести,
+конкретности текста, заполненности `data` и `usage_count`; более конкретная запись побеждает общую. В `metadata`
+сохраняются `last_update`, `replaced_by` и блок `dedupe` с ключом, score, источником решения и временем.
 
 ```js
-function decideMerge(c, similar) {
-  const sameEntity = similar.find(
-    (s) => s.entity_key && c.entity_key && s.entity_key === c.entity_key && s.entity_type === c.entity_type);
-  if (sameEntity) {
-    const conflict = sameEntity.memory_text.trim() !== c.memory_text.trim();
-    return { decision: conflict ? 'replace_existing' : 'update_existing', targetId: sameEntity.id };
-  }
-  const near = similar.find((s) => normalize(s.memory_text) === normalize(c.memory_text));
-  if (near) return { decision: 'update_existing', targetId: near.id };
-  return { decision: 'create_new', targetId: null };
+const identity = buildDedupeIdentity(domainKey, candidate);
+const similar = await findDedupeCandidates({ userId, domainKey, candidate, candidateVector });
+const merge = decideDedupe(candidate, similar);
+if (merge.decision === 'replace_existing') {
+  const newId = await insertMemory(...);
+  await archiveMemory(merge.targetId, newId, { dedupe: merge.audit });
 }
 ```
+
+Ретроактивная очистка уже накопленных дублей выполняется тем же модулем дедупликации. Dry-run показывает группы,
+каноническую строку и кандидатов на архивирование, а apply переводит дубли в `status='archived'` и пишет аудит.
 
 ---
 

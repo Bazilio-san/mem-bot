@@ -9,6 +9,7 @@ import { getDomainId } from '../repo.js';
 import {
   classifyReminderCandidate, evaluateContactPolicy, getContactState, recordProactiveSent,
 } from './proactiveContactPolicy.js';
+import { runMemoryDedupe } from './memory-dedupe.js';
 
 const WORKER_ID = process.env.WORKER_ID || 'scheduler-1';
 const { rrulestr } = rrulePkg;
@@ -327,6 +328,12 @@ export async function runTask(task, { onReminder } = {}) {
          WHERE user_id=$1 AND status='active' AND expires_at IS NOT NULL AND expires_at < now()`,
         [task.user_id],
       );
+    } else if (task.task_type === 'memory_dedupe_cleanup') {
+      await runMemoryDedupe({
+        userId: task.user_id,
+        dryRun: false,
+        limit: Number(task.payload?.limit || 500),
+      });
     }
 
     const nextRun = calculateNextRun(task);

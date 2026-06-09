@@ -36,6 +36,7 @@ import {
   evaluateContactPolicy, getContactState, recordProactiveSent, recordUserInboundForContactPolicy,
   classifyTriggerCandidate,
 } from '../src/pipeline/proactiveContactPolicy.js';
+import { runMemoryDedupe } from '../src/pipeline/memory-dedupe.js';
 
 const TRIGGER_DEFAULTS = [
   { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
@@ -117,6 +118,7 @@ async function layerStructure() {
   check('Индекс по expires_at есть', /expires_at/.test(defs));
   check('Векторный HNSW-индекс есть', /hnsw/.test(defs));
   check('Полнотекстовый GIN-индекс есть', /search_tsv/.test(defs));
+  check('Индекс смысловой дедупликации есть', /idx_memory_dedupe_key/.test(defs));
 
   // Внешние ключи.
   const { rows: fks } = await query(
@@ -131,6 +133,12 @@ async function layerStructure() {
   const colMap = {};
   for (const c of cols) (colMap[c.table_name] ||= new Set()).add(c.column_name);
   check('memory_items имеет created_at и updated_at', colMap.memory_items?.has('created_at') && colMap.memory_items?.has('updated_at'));
+
+  const { rows: dedupeCols } = await query(
+    `SELECT column_name FROM information_schema.columns
+      WHERE table_schema='mem' AND table_name='memory_items'
+        AND column_name IN ('dedupe_key','canonical_group_id','dedupe_status')`);
+  check('memory_items имеет поля смысловой дедупликации', dedupeCols.length === 3);
 
   // Чувствительные данные — отдельная таблица, не в memory_items.
   const { rows: secCols } = await query(
@@ -289,6 +297,111 @@ async function mandatory() {
     const { rows } = await query(`SELECT memory_text, status FROM mem.memory_items WHERE user_id=$1 AND entity_key='home_city'`, [u.id]);
     const active = rows.filter((r) => r.status === 'active');
     check('4. Обновляет факт, а не создаёт дубль', active.length === 1 && /Казан/.test(active[0].memory_text), `активных: ${active.length}`);
+  }
+
+  // 4b. Смысловой дедуп объединяет разные формулировки стиля в разных scope.
+  {
+    const u = await freshUser('t4b');
+    const base = { data: {}, importance: 0.8, confidence: 0.9, sensitivity: 'low', requires_confirmation: false };
+    await processCandidate(u.id, 'general', {
+      ...base, scope: 'profile', memory_kind: 'communication_style',
+      memory_text: 'Пользователь предпочитает короткие, прямые ответы без лишней церемонии.',
+    });
+    await processCandidate(u.id, 'general', {
+      ...base, scope: 'system', memory_kind: 'instruction',
+      memory_text: 'Пользователю комфортен сухой прямой тон без смягчителей.',
+    });
+    const { rows } = await query(
+      `SELECT status, dedupe_key FROM mem.memory_items WHERE user_id=$1 AND dedupe_key LIKE 'profile:communication_style:%'`,
+      [u.id],
+    );
+    const active = rows.filter((r) => r.status === 'active');
+    check('4b. Смысловой дедуп стиля не оставляет активные дубли', active.length === 1,
+      `активных: ${active.length}, всего: ${rows.length}`);
+  }
+
+  // 4c. Feature request, пришедший как goal/reminder/constraint, сводится к одной canonical-группе.
+  {
+    const u = await freshUser('t4c');
+    const base = { data: {}, importance: 0.82, confidence: 0.9, sensitivity: 'low', requires_confirmation: false };
+    await processCandidate(u.id, 'general', {
+      ...base, scope: 'domain', memory_kind: 'goal',
+      memory_text: 'Пользователь хочет добавить глобальную память.',
+    });
+    await processCandidate(u.id, 'general', {
+      ...base, scope: 'dialog', memory_kind: 'reminder',
+      memory_text: 'Напоминание: добавить глобальную память.',
+    });
+    await processCandidate(u.id, 'general', {
+      ...base, scope: 'profile', memory_kind: 'constraint',
+      memory_text: 'Ассистенту не хватает глобальной памяти.',
+    });
+    const { rows } = await query(
+      `SELECT status, canonical_group_id FROM mem.memory_items
+        WHERE user_id=$1 AND dedupe_key='feature_request:global_memory'`,
+      [u.id],
+    );
+    const active = rows.filter((r) => r.status === 'active');
+    const groups = new Set(rows.map((r) => String(r.canonical_group_id)));
+    check('4c. Feature request не размножается между goal/reminder/constraint',
+      active.length === 1 && groups.size === 1, `активных: ${active.length}, групп: ${groups.size}`);
+  }
+
+  // 4d. Одинаковый поиск билетов не размножается между dialog open_loop, domain goal и progress.
+  {
+    const u = await freshUser('t4d');
+    const base = {
+      scope: 'domain', memory_kind: 'goal', entity_type: 'trip', entity_key: 'sgn-moscow-2026-06-16',
+      data: { origin: 'Хошимин', destination: 'Москва', date: '2026-06-16', passengers: 2, status: 'searching' },
+      importance: 0.82, confidence: 0.92, sensitivity: 'normal', requires_confirmation: false,
+    };
+    await processCandidate(u.id, 'flight_search', {
+      ...base,
+      memory_text: 'Пользователь ищет билеты из Хошимина в Москву на 16 июня для 2 взрослых с багажом.',
+    });
+    await processCandidate(u.id, 'flight_search', {
+      ...base, scope: 'dialog', memory_kind: 'open_loop',
+      memory_text: 'Пользователь искал билеты из Хошимина в Москву на 16 июня для 2 взрослых с багажом.',
+    });
+    await processCandidate(u.id, 'flight_search', {
+      ...base, scope: 'domain', memory_kind: 'progress',
+      memory_text: 'Пользователь искал билеты Хошимин → Москва 16 июня, 2 взрослых, с багажом.',
+    });
+    const { rows } = await query(
+      `SELECT status FROM mem.memory_items WHERE user_id=$1 AND dedupe_key LIKE 'flight_search:trip:%'`,
+      [u.id],
+    );
+    const active = rows.filter((r) => r.status === 'active');
+    check('4d. Контекст одной поездки не размножается между видами памяти', active.length === 1,
+      `активных: ${active.length}, всего: ${rows.length}`);
+  }
+
+  // 4e. Ретроактивный maintenance-dedup: dry-run не меняет БД, apply архивирует дубли.
+  {
+    const u = await freshUser('t4e');
+    await seedFact(u.id, 'general', {
+      scope: 'profile', kind: 'communication_style',
+      text: 'Пользователь предпочитает короткие прямые ответы.',
+    });
+    await seedFact(u.id, 'general', {
+      scope: 'system', kind: 'instruction',
+      text: 'Пользователю комфортен короткий прямой стиль без лишней церемонии.',
+    });
+    const dry = await runMemoryDedupe({ userId: u.id, dryRun: true });
+    const before = (await query(
+      `SELECT count(*)::int c FROM mem.memory_items WHERE user_id=$1 AND status='active'`,
+      [u.id],
+    )).rows[0].c;
+    const applied = await runMemoryDedupe({ userId: u.id, dryRun: false });
+    const afterRows = (await query(
+      `SELECT status, metadata FROM mem.memory_items WHERE user_id=$1 ORDER BY updated_at DESC`,
+      [u.id],
+    )).rows;
+    const activeAfter = afterRows.filter((r) => r.status === 'active').length;
+    const archivedWithAudit = afterRows.some((r) => r.status === 'archived' && r.metadata?.dedupe?.role === 'duplicate');
+    check('4e. memory:dedupe dry-run находит группу и ничего не меняет', dry.groups.length === 1 && before === 2);
+    check('4f. memory:dedupe apply архивирует дубли и пишет metadata.dedupe', applied.applied.length === 1
+      && activeAfter === 1 && archivedWithAudit, `activeAfter=${activeAfter}`);
   }
 
   // 5. Достаёт только релевантную память.

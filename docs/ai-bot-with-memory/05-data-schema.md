@@ -7,8 +7,9 @@
 `005_global_memory.sql` — две таблицы глобальной памяти и колонка `is_admin`; `007_proactivity_flag.sql` — колонка
 `proactivity_enabled` в `mem.users`; `008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах
 доставки; `009_reply_mode.sql` — колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа);
-`013_companion_memory_kinds.sql` — виды памяти режима собеседника. Все миграции идемпотентны
-(`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
+`013_companion_memory_kinds.sql` — виды памяти режима собеседника; `015_memory_dedupe.sql` — колонки и индексы
+смысловой дедупликации памяти. Все миграции идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`).
+Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
 
@@ -156,7 +157,8 @@ CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversatio
 Одна универсальная таблица закрывает и профильную, и предметную память. Различие задаёт поле `scope`: `profile`, `domain`,
 `dialog`, `system`. Человекочитаемый текст факта — в `memory_text` (он попадает в промпт), структурированные данные домена
 — в `data jsonb`. Столбец `search_tsv` — автоматический полнотекстовый вектор, `embedding` — вектор размерности 1536 для
-смыслового поиска.
+смыслового поиска. Поля `dedupe_key`, `canonical_group_id` и `dedupe_status` связывают смысловые дубли в одну
+каноническую группу: активной остаётся одна строка, а заменённые строки архивируются с аудитом в `metadata`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.memory_items (
@@ -184,6 +186,9 @@ CREATE TABLE IF NOT EXISTS mem.memory_items (
     search_tsv   tsvector GENERATED ALWAYS AS (
         to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(memory_text,''))
     ) STORED,
+    dedupe_key         text,
+    canonical_group_id uuid,
+    dedupe_status      text NOT NULL DEFAULT 'candidate',
     metadata   jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
@@ -198,10 +203,19 @@ CREATE INDEX IF NOT EXISTS idx_memory_search_tsv         ON mem.memory_items USI
 CREATE INDEX IF NOT EXISTS idx_memory_data_gin           ON mem.memory_items USING gin (data jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw     ON mem.memory_items USING hnsw (embedding vector_cosine_ops)
                                                           WHERE embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_dedupe_key         ON mem.memory_items (user_id, dedupe_key)
+                                                          WHERE status = 'active' AND dedupe_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_canonical_group    ON mem.memory_items (user_id, canonical_group_id)
+                                                          WHERE canonical_group_id IS NOT NULL;
 ```
 
 Размерность `vector(1536)` соответствует модели `<EMBED_MODEL>`. Если векторный поиск не нужен, поле `embedding`
 и HNSW-индекс можно убрать — система корректно откатывается на полнотекстовый и структурный поиск.
+
+`dedupe_key` строится из устойчивой смысловой идентичности факта, а не из произвольного текста. Примеры:
+`profile:communication_style:short_direct_answers`, `feature_request:global_memory` и
+`flight_search:trip:sgn_mow_2026_06_16_2_adults_baggage`. `canonical_group_id` объединяет строки одной группы,
+`dedupe_status` показывает роль строки внутри группы (`canonical`, `duplicate`, `superseded`, `candidate`).
 
 ---
 

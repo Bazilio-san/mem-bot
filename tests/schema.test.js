@@ -9,6 +9,7 @@ import { getEntitySpec, loadDomainDefinition } from '../src/schema/registry.js';
 import { validateAndCanonicalize, slugify } from '../src/schema/validate.js';
 import { processCandidate } from '../src/pipeline/merge.js';
 import { extractCandidates } from '../src/pipeline/extract.js';
+import { buildDedupeIdentity } from '../src/pipeline/memory-dedupe.js';
 
 let passed = 0;
 let failed = 0;
@@ -108,6 +109,8 @@ async function layerValidate() {
     entity_type: 'city', entity_key: 'откуда', data: { city_name: 'Казань' }, confidence: 0.9,
   });
   check('3.4. Синоним «откуда» канонизируется в «departure»', syn.candidate.entity_key === 'departure', syn.candidate.entity_key);
+  check('3.4b. Канонический ключ даёт тот же dedupe_key для синонима',
+    buildDedupeIdentity(DOMAIN, valid.candidate).dedupeKey === buildDedupeIdentity(DOMAIN, syn.candidate).dedupeKey);
 
   // Кодовая нормализация: лишний ключ убирается, строка-число приводится к integer, отсутствующее поле — null.
   const fixed = await validateAndCanonicalize(DOMAIN, {
@@ -167,11 +170,13 @@ async function layerIntegration() {
   });
   check('4.1. Факт создан', res.action === 'created' && !!res.id);
 
-  const { rows } = await query('SELECT entity_key, data, metadata FROM mem.memory_items WHERE id = $1', [res.id]);
+  const { rows } = await query('SELECT entity_key, data, metadata, dedupe_key FROM mem.memory_items WHERE id = $1', [res.id]);
   const row = rows[0];
   check('4.2. entity_key канонизирован в «departure»', row.entity_key === 'departure', row.entity_key);
   check('4.3. metadata.schema_version помечен источником', row.metadata?.schema_version === 'skill', JSON.stringify(row.metadata));
   check('4.4. data сохранён валидным', row.data.city_name === 'Казань');
+  check('4.4b. dedupe_key сохранён в строке памяти', row.dedupe_key === 'flight_search:domain:city:departure',
+    row.dedupe_key);
 
   // Повторный кандидат другим синонимом обновляет тот же факт (дедуп по каноническому ключу), без дубля.
   await processCandidate(u.id, DOMAIN, {

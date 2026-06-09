@@ -126,6 +126,12 @@ const SYSTEM = `Ты извлекаешь кандидаты в долговре
 Чувствительные данные (паспорт, телефон, адрес, дата рождения, платёжные, медицинские):
 ставь sensitivity = high или secret и requires_confirmation = true, а memory_text делай безопасным
 резюме без полного значения.
+Для повторяющихся запросов на функции ассистента используй стабильные сущности:
+entity_type="feature_request", entity_key из набора streaming_responses, global_memory, reminder_view,
+bot_menu, status_command, audio_recognition, emoji_reactions, log_analysis, self_development.
+Для устойчивого стиля общения используй стабильные ключи:
+entity_type="communication_style", entity_key short_direct, streamed_answers, text_not_voice,
+notification_first_person, emoji_chat_names, informal_tone.
 Если из сообщения нечего сохранять (короткие подтверждения, смех, эмоции, погода) — верни {"candidates": []}.
 Реакции пользователя на сообщение ассистента являются значимыми только если смысл реакции очевиден из целевого
 сообщения ассистента. Например, если ассистент спросил «Ты любишь торты?», а пользователь отреагировал :heart:,

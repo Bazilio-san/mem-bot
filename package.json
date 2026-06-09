@@ -15,6 +15,7 @@
     "scheduler": "node src/scheduler-run.js",
     "sandbox": "node src/sandbox/server.js",
     "seed:sandbox": "node scripts/seed-sandbox.js",
+    "memory:dedupe": "node scripts/memory-dedupe.js",
     "delete:user": "node scripts/delete-user.js",
     "test": "node tests/run.js",
     "test:schema": "node tests/schema.test.js",
