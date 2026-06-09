@@ -9,10 +9,12 @@
 // Замечание по скорости относится к проверенному прокси: gpt-5.4-* отвечают за ~5–10 с, а gpt-4o-mini — за
 // ~1.2 с; если нужен максимально быстрый отклик, задайте MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL=gpt-4o-mini.
 import 'dotenv/config';
+import { normalizeVoiceId } from './voice/voices.js';
 
 const env = process.env;
 const openaiBaseURL = env.OPENAI_BASE_URL?.trim() || undefined;
 const defaultVoiceOutputModel = openaiBaseURL ? 'openai/gpt-4o-mini-tts' : 'gpt-4o-mini-tts';
+const defaultVoiceOutputVoice = normalizeVoiceId(env.VOICE_OUTPUT_VOICE) || 'alloy';
 
 // Чтение булевых флагов из окружения. Включают значения 1/true/on/yes; всё прочее — выключено.
 const flag = (v, d = false) =>
@@ -146,7 +148,7 @@ export const config = {
   voiceOutput: {
     enabled: flag(env.VOICE_OUTPUT_ENABLED, false),
     model: env.VOICE_OUTPUT_MODEL || defaultVoiceOutputModel,   // модель TTS для выбранного base URL
-    voice: env.VOICE_OUTPUT_VOICE || 'alloy',                  // тембр (язык подстраивается под текст ответа)
+    voice: defaultVoiceOutputVoice,                            // тембр (язык подстраивается под текст ответа)
     format: env.VOICE_OUTPUT_FORMAT || 'opus',                 // OGG/OPUS — прямая отправка в Telegram sendVoice
     // Жёсткий предел длины текста, отправляемого в синтез. Значение по умолчанию и максимум — 500 символов:
     // более длинный текст никогда не уходит в TTS, вместо него озвучивается резюме.

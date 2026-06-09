@@ -298,7 +298,7 @@ async function deliverVoice(chatId, result, state) {
   }
 
   await sendVoiceAction(chatId);
-  const audio = await synthesizeSpeech(text);
+  const audio = await synthesizeSpeech(text, { voice: result.voiceOutputVoice || config.voiceOutput.voice });
   const voiceMsg = await sendVoice(chatId, audio);
   await saveSentRefs(chatId, [voiceMsg], result.assistantMessageId, 'voice');
 }

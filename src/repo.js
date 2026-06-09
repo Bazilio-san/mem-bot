@@ -2,6 +2,7 @@
 import { query } from './db.js';
 import { config } from './config.js';
 import { estimateTokens } from './pipeline/token-counter.js';
+import { normalizeVoiceId } from './voice/voices.js';
 
 // Найти или создать пользователя по внешнему идентификатору (например, Telegram ID).
 export async function ensureUser(externalId, { displayName = null, locale = 'ru', timezone = 'Europe/Moscow' } = {}) {
@@ -258,6 +259,29 @@ export async function setReplyMode(userId, mode) {
 export async function getUserReplyMode(externalId) {
   const { rows } = await query('SELECT reply_mode FROM mem.users WHERE external_id = $1', [externalId]);
   return rows[0]?.reply_mode === 'voice' ? 'voice' : 'text';
+}
+
+// Сохранить пользовательский тембр голосового ответа. NULL очищает пользовательскую настройку и возвращает
+// глобальный fallback из конфигурации. Недопустимые значения не записываются.
+export async function setVoicePreference(userId, voice) {
+  const normalized = voice == null ? null : normalizeVoiceId(voice);
+  if (voice != null && !normalized) throw new Error(`Недопустимый голос TTS: ${voice}`);
+  await query(
+    'UPDATE mem.users SET voice_output_voice = $2, updated_at = now() WHERE id = $1',
+    [userId, normalized],
+  );
+  return normalized;
+}
+
+export function effectiveVoicePreference(user) {
+  return normalizeVoiceId(user?.voice_output_voice) || config.voiceOutput.voice;
+}
+
+// Лёгкое чтение эффективного тембра по внешнему идентификатору без создания пользователя. Нужно каналам,
+// которым требуется принять решение до входа в основной агентский контур.
+export async function getUserVoicePreference(externalId) {
+  const { rows } = await query('SELECT voice_output_voice FROM mem.users WHERE external_id = $1', [externalId]);
+  return normalizeVoiceId(rows[0]?.voice_output_voice) || config.voiceOutput.voice;
 }
 
 // Текущее состояние проактивности пользователя: мастер-флаг и список его триггеров с признаком enabled.

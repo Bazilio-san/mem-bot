@@ -8,8 +8,8 @@
 `proactivity_enabled` в `mem.users`; `008_message_external_refs.sql` — внешние идентификаторы сообщений в каналах
 доставки; `009_reply_mode.sql` — колонка `reply_mode` в `mem.users` (предпочитаемая форма ответа);
 `013_companion_memory_kinds.sql` — виды памяти режима собеседника; `015_memory_dedupe.sql` — колонки и индексы
-смысловой дедупликации памяти. Все миграции идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`).
-Используются расширения `pgcrypto` и `pgvector`.
+смысловой дедупликации памяти; `016_voice_preference.sql` — пользовательский тембр голосового ответа. Все миграции
+идемпотентны (`CREATE ... IF NOT EXISTS`, защищённые `CREATE TYPE`). Используются расширения `pgcrypto` и `pgvector`.
 
 ## Зачем отдельная схема и идемпотентность
 
@@ -47,8 +47,8 @@ CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed
 мессенджере, CRM или системе авторизации); `timezone` нужен планировщику и темпоральному контексту. Колонку `is_admin`
 (права на запись в глобальную память) добавляет миграция `005`, а мастер-переключатель проактивности
 `proactivity_enabled` — миграция `007`. Колонку `reply_mode` (предпочитаемая форма ответа — текст или голос)
-добавляет миграция `009`; это управляющая настройка пользователя, которую канал доставки читает на каждом ответе
-(см. [MEM-8]).
+добавляет миграция `009`, а `voice_output_voice` (выбранный тембр голосового ответа) — миграция `016`; это управляющие
+настройки пользователя, которые канал доставки читает на каждом ответе (см. [MEM-8]).
 `mem.agent_domains` — тонкий справочник соответствия `domain_key` → числовой `domain_id`, на который ссылаются внешние
 ключи таблиц памяти. Содержательное описание домена живёт в реестре skills (см.
 [11-per-domain-schema.md](11-per-domain-schema.md)); строки этого справочника заводятся из skills (командой `sync`) и
@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS mem.users (
     proactivity_enabled boolean NOT NULL DEFAULT false, -- мастер-переключатель проактивности пользователя (см. 09)
     reply_mode   text NOT NULL DEFAULT 'text'           -- предпочитаемая форма ответа: 'text' | 'voice' (см. [MEM-8])
                  CHECK (reply_mode IN ('text', 'voice')),
+    voice_output_voice text                             -- выбранный тембр голосового ответа или NULL = fallback
+                 CHECK (voice_output_voice IS NULL OR voice_output_voice IN
+                   ('alloy','ash','ballad','cedar','coral','marin','nova','fable','onyx','sage','verse')),
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()

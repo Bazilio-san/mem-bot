@@ -109,7 +109,7 @@ export async function synthesizeSpeech(text, opts = {}) {
         body: JSON.stringify({
           model: config.voiceOutput.model,
           input: text,
-          voice: config.voiceOutput.voice,
+          voice: opts.voice || config.voiceOutput.voice,
           response_format: config.voiceOutput.format,
         }),
       });

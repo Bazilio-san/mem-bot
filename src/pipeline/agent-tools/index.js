@@ -12,6 +12,7 @@ import { globalKnowledgeSearchTool } from './global-knowledge/global-knowledge-s
 import { globalKnowledgeAddTool } from './global-knowledge/global-knowledge-add.js';
 import { globalKnowledgeDeleteTool } from './global-knowledge/global-knowledge-delete.js';
 import { setReplyModeTool } from './set-reply-mode.js';
+import { setVoicePreferenceTool } from './set-voice-preference.js';
 import { skillReadReferenceTool } from './skill-read-reference.js';
 
 export const allTools = [
@@ -29,5 +30,6 @@ export const allTools = [
   globalKnowledgeAddTool,
   globalKnowledgeDeleteTool,
   setReplyModeTool,
+  setVoicePreferenceTool,
   skillReadReferenceTool,
 ];

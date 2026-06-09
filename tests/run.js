@@ -1364,8 +1364,13 @@ async function layerVoiceOutput() {
         WHERE table_schema='mem' AND table_name='users' AND column_name='reply_mode'`);
     check('9.1. Колонка mem.users.reply_mode есть со значением по умолчанию text',
       rows.length === 1 && /text/.test(rows[0].column_default || ''));
+    const { rows: voiceCols } = await query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema='mem' AND table_name='users' AND column_name='voice_output_voice'`);
+    check('9.1c. Колонка mem.users.voice_output_voice есть', voiceCols.length === 1);
     const u = await freshUser('tvo_default');
     check('9.1b. Новый пользователь по умолчанию в текстовом режиме', u.reply_mode === 'text');
+    check('9.1d. Новый пользователь без выбранного тембра', u.voice_output_voice === null);
   }
 
   // 9.2. Инструмент set_reply_mode сохраняет предпочтение и помечает его в контексте текущего запроса;
@@ -1385,13 +1390,37 @@ async function layerVoiceOutput() {
     check('9.2b. Обратное переключение на текст возвращает прежний режим', ctx2.replyMode === 'text' && back === 'text');
   }
 
-  // 9.3. handleMessage возвращает текущее предпочтение в поле replyMode.
+  // 9.3. Инструмент set_voice_preference сохраняет тембр и помечает его в контексте текущего запроса.
+  {
+    const u = await freshUser('tvo_voice_pref');
+    const conv = await ensureConversation(u.id, 'general');
+    const ctx = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
+    const res = await executeTool(ctx, 'set_voice_preference', { selection: 'женский голос' });
+    const saved = (await query('SELECT voice_output_voice FROM mem.users WHERE id=$1', [u.id]))
+      .rows[0].voice_output_voice;
+    check('9.3. set_voice_preference сохраняет тембр и метит контекст',
+      res.voice_output_voice === 'nova' && ctx.voiceOutputVoice === 'nova' && saved === 'nova');
+
+    const bad = await executeTool(ctx, 'set_voice_preference', { selection: 'робокоп' });
+    check('9.3b. Неизвестный голос не сохраняется', !!bad.error && Array.isArray(bad.allowed_voices));
+
+    const withVoiceRequest = buildToolDefs({ isAdmin: false, userMessage: 'выбери голос onyx' })
+      .map((def) => def.function.name);
+    const withoutVoiceRequest = buildToolDefs({ isAdmin: false, userMessage: 'найди билеты в Казань' })
+      .map((def) => def.function.name);
+    check('9.3c. set_voice_preference доступен только для запроса о голосе',
+      withVoiceRequest.includes('set_voice_preference') && !withoutVoiceRequest.includes('set_voice_preference'));
+  }
+
+  // 9.4. handleMessage возвращает текущие предпочтения replyMode и voiceOutputVoice.
   {
     const u = await freshUser('tvo_reply');
-    await query(`UPDATE mem.users SET reply_mode='voice' WHERE id=$1`, [u.id]);
+    await query(`UPDATE mem.users SET reply_mode='voice', voice_output_voice='onyx' WHERE id=$1`, [u.id]);
     const res = await handleMessage({ externalId: 'tvo_reply', userMessage: 'Привет!', domainKey: 'general' });
-    check('9.3. handleMessage возвращает replyMode из сохранённого предпочтения', res.replyMode === 'voice',
+    check('9.4. handleMessage возвращает replyMode из сохранённого предпочтения', res.replyMode === 'voice',
       `replyMode=${res.replyMode}`);
+    check('9.4b. handleMessage возвращает voiceOutputVoice из сохранённого предпочтения',
+      res.voiceOutputVoice === 'onyx', `voiceOutputVoice=${res.voiceOutputVoice}`);
   }
 }
 

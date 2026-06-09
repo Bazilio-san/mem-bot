@@ -130,6 +130,18 @@ async function layerSynthesize() {
     try { await synthesizeSpeech('Привет.', { fetch: fakeFetch }); } catch { threw = true; }
     check('4.3. После трёх неудач синтез бросает ошибку', threw);
   }
+
+  // 4.4. Пользовательский голос передаётся в тело запроса вместо глобального fallback.
+  {
+    let body = null;
+    const fakeFetch = async (url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, text: async () => '', arrayBuffer: async () => new ArrayBuffer(8) };
+    };
+    await synthesizeSpeech('Привет.', { fetch: fakeFetch, voice: 'onyx' });
+    check('4.4. synthesizeSpeech передаёт opts.voice в audio/speech', body?.voice === 'onyx',
+      `voice=${body?.voice}`);
+  }
 }
 
 // ---- 5. Развилка доставки в Telegram-адаптере (проверка исходника) -----------
@@ -147,6 +159,8 @@ function layerAdapterWiring() {
   check('5.3. Голосовые сообщения сохраняются с видом «voice»', /saveSentRefs\([^)]*'voice'\)/.test(src));
   check('5.4. На время синтеза показывается индикатор record_voice', /record_voice/.test(src));
   check('5.5. Голос гейтится флагом VOICE_OUTPUT_ENABLED', /config\.voiceOutput\.enabled/.test(src));
+  check('5.6. В голосовую доставку передаётся пользовательский voiceOutputVoice',
+    /voiceOutputVoice/.test(src) && /synthesizeSpeech\(text,\s*\{\s*voice/.test(src));
 }
 
 async function main() {

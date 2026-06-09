@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Agentic Telegram and CLI chat bot with long-term PostgreSQL memory, reminders, voice support, skills, and MCP tools.",
   "main": "index.js",
   "type": "module",
@@ -28,6 +28,7 @@
     "test:progress": "node tests/progress.test.mjs",
     "test:voice": "node tests/voice.test.mjs",
     "test:voice-output": "node tests/voice-output.test.mjs",
+    "test:voice-selector": "node tests/voice-selector.test.mjs",
     "test:channels": "node tests/channels.test.mjs",
     "test:telegram-format": "node tests/telegram-format.test.mjs",
     "test:progress-format": "node tests/progress-format.test.mjs",
