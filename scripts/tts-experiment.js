@@ -1,5 +1,5 @@
 // Экспериментальный модуль синтеза речи (текст в речь, TTS).
-// Назначение: проверить, отдаёт ли OpenAI-совместимый прокси litellm.finam.ru конечную точку audio/speech,
+// Назначение: проверить, отдаёт ли OpenAI-совместимый прокси litellm.my-proxy.com конечную точку audio/speech,
 // и в первую очередь модель gpt-4o-mini-tts, а также сравнить её с запасными вариантами.
 // Запуск: node scripts/tts-experiment.js ["произвольный текст для озвучивания"]
 //
@@ -17,12 +17,12 @@ const DEFAULT_TEXT = process.argv[2]
   || 'Привет! Это проверка синтеза речи. Если вы слышите этот текст по-русски, значит синтез работает.';
 
 // Перечень проверяемых конфигураций синтеза. Каждая описывает поставщика, базовый адрес, ключ и модель.
-// Замечание по именам моделей: прокси litellm.finam.ru использует имена с префиксом поставщика,
+// Замечание по именам моделей: прокси litellm.my-proxy.com использует имена с префиксом поставщика,
 // поэтому модель называется «openai/gpt-4o-mini-tts», а не «gpt-4o-mini-tts».
 const TARGETS = [
   {
     label: 'proxy/openai/gpt-4o-mini-tts (opus)',
-    baseURL: process.env.OPENAI_BASE_URL || 'https://litellm.finam.ru/v1',
+    baseURL: process.env.OPENAI_BASE_URL || '',
     apiKey: process.env.OPENAI_API_KEY,
     model: 'openai/gpt-4o-mini-tts',
     voice: 'alloy',
@@ -30,7 +30,7 @@ const TARGETS = [
   },
   {
     label: 'proxy/openai/gpt-4o-mini-tts (mp3)',
-    baseURL: process.env.OPENAI_BASE_URL || 'https://litellm.finam.ru/v1',
+    baseURL: process.env.OPENAI_BASE_URL || '',
     apiKey: process.env.OPENAI_API_KEY,
     model: 'openai/gpt-4o-mini-tts',
     voice: 'alloy',
@@ -38,7 +38,7 @@ const TARGETS = [
   },
   {
     label: 'proxy/openai/tts-1 (opus)',
-    baseURL: process.env.OPENAI_BASE_URL || 'https://litellm.finam.ru/v1',
+    baseURL: process.env.OPENAI_BASE_URL || '',
     apiKey: process.env.OPENAI_API_KEY,
     model: 'openai/tts-1',
     voice: 'alloy',

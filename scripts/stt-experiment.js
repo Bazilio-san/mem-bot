@@ -5,7 +5,7 @@
 //
 // Проверяемые модели:
 //   AssemblyAI  : universal-2          (распознавание готового файла, поддержка русского)
-//   OpenAI      : gpt-4o-transcribe, gpt-4o-mini-transcribe   (через прокси litellm.finam.ru)
+//   OpenAI      : gpt-4o-transcribe, gpt-4o-mini-transcribe   (через прокси litellm.my-proxy.com)
 //   Groq        : whisper-large-v3, whisper-large-v3-turbo    (напрямую через api.groq.com)
 //
 // Запуск: node scripts/stt-experiment.js путь/к/файлу [код_языка]
@@ -27,7 +27,7 @@ if (!FILE) {
   process.exit(1);
 }
 
-const OPENAI_BASE = (process.env.OPENAI_BASE_URL || 'https://litellm.finam.ru/v1').replace(/\/$/, '');
+const OPENAI_BASE = (process.env.OPENAI_BASE_URL || '').replace(/\/$/, '');
 const GROQ_BASE = (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
 const AAI_BASE = 'https://api.assemblyai.com';
 

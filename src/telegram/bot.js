@@ -22,6 +22,7 @@ import {
 } from '../voice/transcribe.js';
 import { buildVoiceText, synthesizeSpeech } from '../voice/tts.js';
 import { createTelegramProgress } from './progress.js';
+import { initTools } from '../pipeline/tools.js';
 import { registerChannelProfile } from '../pipeline/channels.js';
 import { telegramPostProcess, telegramSplit } from './format.js';
 
@@ -858,6 +859,11 @@ async function main() {
   }
   console.log(`Профиль представления канала «telegram» зарегистрирован: ответ форматируется разметкой Telegram `
     + `(parse_mode=${TELEGRAM_PROFILE.parseMode}).`);
+  // Стартовая диагностика внешних MCP-серверов: выводим объявленный список и проверяем подключение к каждому
+  // сразу при запуске, а не лениво при первом сообщении. initTools кэширует промис, поэтому позже, при первом
+  // обращении агента, повторного подключения не происходит — используется уже собранный реестр инструментов.
+  console.log('Проверяю подключение к объявленным MCP-серверам…');
+  await initTools();
   console.log(`Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
     config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.');
   await startOutboxListener();                                       // событийная доставка очереди (LISTEN/NOTIFY)

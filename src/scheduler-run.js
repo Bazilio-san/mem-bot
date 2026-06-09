@@ -10,6 +10,7 @@ import { tick, msUntilDueTask } from './pipeline/scheduler.js';
 import { createListener } from './db.js';
 import { checkProactiveTriggers } from './pipeline/proactive.js';
 import { processEvents } from './pipeline/events.js';
+import { initTools } from './pipeline/tools.js';
 import { config } from './config.js';
 
 // Нижняя граница сна не даёт воркеру крутиться слишком часто, когда задачи идут вплотную.
@@ -44,6 +45,12 @@ function computeSleepMs(nextTaskMs) {
 }
 
 async function loop() {
+  // Стартовая диагностика внешних MCP-серверов: проактивный контур обращается к агенту, а тот пользуется
+  // инструментами MCP, поэтому выводим объявленный список серверов и проверяем подключение к каждому сразу
+  // при запуске воркера. initTools кэширует промис, повторного подключения при первом обращении не будет.
+  console.log('Проверяю подключение к объявленным MCP-серверам…');
+  await initTools();
+
   // Подписка на уведомления о появлении новых задач: вставка задачи будит воркер немедленно.
   const listener = createListener('scheduler_wake', () => { if (wakeUp) wakeUp(); });
   await listener.ready;

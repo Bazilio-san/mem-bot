@@ -111,7 +111,7 @@ check('Схема домена flight_search валидна и содержит 
 
 check('tools.allowed у flight-search содержит предметные инструменты', () => {
   const skill = getSkill('flight-search');
-  assert.deepEqual(skill.tools.allowed, ['search_flights', 'find_airports', 'get_booking_options']);
+  assert.deepEqual(skill.tools.allowed, ['search_flights', 'resolve_place']);
   assert.equal(skill.tools.base, true);
 });
 

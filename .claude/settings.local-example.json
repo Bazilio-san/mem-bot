@@ -10,5 +10,22 @@
     "CLAUDE_NOTIFY_VOICE": 0,
     "CLAUDE_NOTIFY_WAITING": 0,
     "CLAUDE_NOTIFY_DEBUG": 0
-  }
+  },
+  "deny": [
+    "Read(./.agents/**)",
+    "Read(./.idea/**)",
+    "Read(./.qwen/**)",
+    "Read(./.run/**)",
+    "Read(./.venv/**)",
+    "Read(./_misc/**)",
+    "Read(./asset/**)",
+    "Read(./backups/**)",
+    "Read(./claudedocs/_invisible/**)",
+    "Read(./**/*.local.*)",
+    "Read(./**/*.private.*)",
+    "Read(./**/*local-*)",
+    "Read(./**/_tmp/**)",
+    "Write(.claude/**)",
+    "Edit(.claude/**)"
+  ]
 }

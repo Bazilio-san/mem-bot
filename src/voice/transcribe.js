@@ -29,12 +29,16 @@ export const VOICE_PROVIDERS = {
     type: ASSEMBLYAI, keyEnv: 'ASSEMBLYAI_API_KEY',
   },
   'openai-gpt-4o-transcribe': {
-    type: OPENAI_COMPATIBLE, keyEnv: 'OPENAI_API_KEY', baseEnv: 'OPENAI_BASE_URL',
-    defaultBase: 'https://litellm.finam.ru/v1', model: 'openai/gpt-4o-transcribe',
+    type: OPENAI_COMPATIBLE,
+    keyEnv: 'OPENAI_API_KEY',
+    baseEnv: 'OPENAI_BASE_URL',
+    model: 'openai/gpt-4o-transcribe',
   },
   'openai-gpt-4o-mini-transcribe': {
-    type: OPENAI_COMPATIBLE, keyEnv: 'OPENAI_API_KEY', baseEnv: 'OPENAI_BASE_URL',
-    defaultBase: 'https://litellm.finam.ru/v1', model: 'openai/gpt-4o-mini-transcribe',
+    type: OPENAI_COMPATIBLE,
+    keyEnv: 'OPENAI_API_KEY',
+    baseEnv: 'OPENAI_BASE_URL',
+    model: 'openai/gpt-4o-mini-transcribe',
   },
 };
 
@@ -43,26 +47,26 @@ export const VOICE_PROVIDERS = {
 const ECHO_KINDS = new Set(['audio', 'video', 'document']);
 
 // Имя переменной окружения с ключом доступа для выбранного распознавателя (или null, если имя неизвестно).
-export function providerKeyEnv(provider) {
+export function providerKeyEnv (provider) {
   return VOICE_PROVIDERS[provider]?.keyEnv || null;
 }
 
 // Готов ли распознаватель к работе: распознаватель известен и для него задан ключ доступа в окружении.
-export function isProviderConfigured(provider) {
+export function isProviderConfigured (provider) {
   const spec = VOICE_PROVIDERS[provider];
   if (!spec) return false;
   return Boolean(process.env[spec.keyEnv]);
 }
 
 // Распознать ли тип вложения как «присланный файл», для которого показываем распознанный текст пользователю.
-export function shouldEchoTranscript(kind) {
+export function shouldEchoTranscript (kind) {
   return ECHO_KINDS.has(kind);
 }
 
 // Определить тип вложения и собрать его описание из полей сообщения Telegram.
 // Возвращает описание вложения с речью либо null, если поддерживаемого вложения в сообщении нет.
 // Для документа берём только аудио- и видео-MIME-типы, прочие документы игнорируем.
-export function detectAttachment(message) {
+export function detectAttachment (message) {
   if (!message) return null;
   if (message.voice) {
     const v = message.voice;
@@ -108,7 +112,7 @@ export function detectAttachment(message) {
 // Проверить лимиты вложения до скачивания. Если длительность известна — сверяем её с пределом в секундах;
 // если длительность неизвестна (документ или сервис её не прислал) — сверяем размер файла с пределом в байтах.
 // Возвращает { ok: true } либо { ok: false, reason: 'too_long' | 'too_large' }.
-export function checkAttachmentLimits(attachment, { maxSeconds, maxBytes }) {
+export function checkAttachmentLimits (attachment, { maxSeconds, maxBytes }) {
   const duration = attachment.durationSeconds || 0;
   if (duration > 0 && duration > maxSeconds) return { ok: false, reason: 'too_long' };
   if (duration === 0 && attachment.fileSize > 0 && attachment.fileSize > maxBytes) {
@@ -118,7 +122,7 @@ export function checkAttachmentLimits(attachment, { maxSeconds, maxBytes }) {
 }
 
 // Угадать MIME-тип по расширению имени файла, чтобы корректно подписать файл в multipart-запросе.
-function guessMime(fileName) {
+function guessMime (fileName) {
   const ext = path.extname(fileName || '').toLowerCase();
   const map = {
     '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
@@ -133,7 +137,8 @@ function guessMime(fileName) {
 // форматов, хотя по содержимому это обычный OGG/OPUS. Поэтому имя для отправки приводим к расширению из
 // разрешённого списка: если расширение уже допустимо — оставляем как есть, иначе подбираем по MIME-типу.
 const ACCEPTED_UPLOAD_EXT = new Set(['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'opus', 'wav', 'webm']);
-function safeUploadName(fileName) {
+
+function safeUploadName (fileName) {
   const ext = path.extname(fileName || '').slice(1).toLowerCase();
   if (ACCEPTED_UPLOAD_EXT.has(ext)) return path.basename(fileName);
   const mimeToExt = {
@@ -148,7 +153,7 @@ function safeUploadName(fileName) {
 // Скачать файл Telegram по file_id в память процесса. Сначала методом getFile получаем относительный путь к
 // файлу на серверах Telegram, затем скачиваем его по файловому адресу. Прямую ссылку наружу не отдаём: она
 // содержит токен бота, поэтому стороннему сервису передаём уже сами байты, а не URL.
-async function downloadTelegramFile({ telegramApiBase, botToken, fileId }) {
+async function downloadTelegramFile ({ telegramApiBase, botToken, fileId }) {
   const infoRes = await fetch(`${telegramApiBase}/getFile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -170,7 +175,7 @@ async function downloadTelegramFile({ telegramApiBase, botToken, fileId }) {
 // Распознавание через OpenAI-совместимый интерфейс audio/transcriptions (подходит и для Groq, и для прокси).
 // Прокси периодически обрывает соединение по тайм-ауту (превышение времени ожидания), поэтому делаем несколько
 // повторных попыток одного и того же запроса.
-async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fileName, language }) {
+async function transcribeOpenAICompatible ({ baseURL, apiKey, model, fileBuf, fileName, language }) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -201,7 +206,7 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
 // Модель universal-2 поддерживает русский язык. Параметр speech_model устарел; текущий интерфейс принимает
 // приоритетный список speech_models. Код языка передаём подсказкой через language_code, если он задан, иначе
 // включаем автоопределение языка через language_detection.
-async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
+async function transcribeAssemblyAI ({ apiKey, fileBuf, language }) {
   // Шаг 1: загрузка файла. Заголовок авторизации у AssemblyAI — сам ключ без префикса Bearer.
   const up = await fetch(`${AAI_BASE}/v2/upload`, {
     method: 'POST',
@@ -223,7 +228,7 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   const created = await cr.json();
 
   // Шаг 3: опрос готовности раз в секунду, пока статус не станет completed или error.
-  for (;;) {
+  for (; ;) {
     await new Promise((r) => setTimeout(r, 1000));
     const pr = await fetch(`${AAI_BASE}/v2/transcript/${created.id}`, { headers: { Authorization: apiKey } });
     if (!pr.ok) throw new Error(`poll HTTP ${pr.status}: ${(await pr.text()).slice(0, 200)}`);
@@ -237,7 +242,7 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
 // со служебными сведениями: признак пустого результата, длительность, размер и имя распознавателя.
 // Контракт явный: модуль получает базовый адрес Telegram API и токен бота аргументами и не читает приватные
 // детали Telegram-адаптера.
-export async function transcribeTelegramAttachment({ attachment, telegramApiBase, botToken, provider, language }) {
+export async function transcribeTelegramAttachment ({ attachment, telegramApiBase, botToken, provider, language }) {
   const spec = VOICE_PROVIDERS[provider];
   if (!spec) throw new Error(`Неизвестный распознаватель речи: ${provider}`);
   const apiKey = process.env[spec.keyEnv];
@@ -252,7 +257,7 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
   if (spec.type === ASSEMBLYAI) {
     text = await transcribeAssemblyAI({ apiKey, fileBuf: buffer, language });
   } else {
-    const baseURL = (process.env[spec.baseEnv] || spec.defaultBase).replace(/\/$/, '');
+    const baseURL = (process.env[spec.baseEnv] || spec.defaultBase || '').replace(/\/$/, '') || undefined;
     text = await transcribeOpenAICompatible({
       baseURL, apiKey, model: spec.model, fileBuf: buffer, fileName, language,
     });

@@ -23,7 +23,7 @@ memory:
   scopes: [profile, domain, dialog]
   schema: domain-schema.json
 tools:
-  allowed: [search_flights, find_airports, get_booking_options]
+  allowed: [search_flights, resolve_place]
   base: true
 model:
   main: null

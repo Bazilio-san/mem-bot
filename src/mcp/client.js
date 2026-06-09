@@ -106,6 +106,11 @@ function wrapMcpTool(connection, server, mcpTool) {
   const requiresAdmin = server.requiresAdmin === true;
   return {
     name: prefixedName,
+    // «Голое» имя инструмента на сервере (без префикса псевдонима) и сам псевдоним. Нужны фильтру видимости
+    // по активному skill: skill перечисляет инструменты под логическим именем без префикса, поэтому сопоставление
+    // должно уметь сводить «yafly__search_flights» к «search_flights».
+    mcpName: mcpTool.name,
+    mcpAlias: server.alias,
     title: `Вызываю инструмент ${server.title}: ${mcpTool.name}...`,
     requiresAdmin,
     // Если инструмент только для администратора, прячем его и из справки о возможностях для остальных,
@@ -130,20 +135,54 @@ function wrapMcpTool(connection, server, mcpTool) {
   };
 }
 
+// Вывести в журнал список MCP-серверов, объявленных в конфигурации (.mcp.json), включая выключенные.
+// Это даёт на старте полную картину «что вообще заявлено к подключению» ещё до попыток соединения.
+function logDeclaredServers(servers) {
+  if (servers.length === 0) {
+    console.log('MCP: в конфигурации (.mcp.json) не объявлено ни одного сервера — внешние инструменты не подключаются.');
+    return;
+  }
+  console.log(`MCP: в конфигурации объявлено серверов — ${servers.length}. Полный список:`);
+  for (const s of servers) {
+    const state = s.enabled ? 'включён' : 'выключен (disabled)';
+    const admin = s.requiresAdmin ? ', доступен только администратору' : '';
+    console.log(`  • «${s.title}» [псевдоним ${s.alias}] — ${state}, транспорт HTTP, адрес ${s.url}${admin}.`);
+  }
+}
+
 // Подключиться ко всем включённым серверам и вернуть готовые к регистрации обёртки инструментов.
+// Перед подключением в журнал выводится полный объявленный список серверов, а затем по каждому
+// включённому серверу — факт подключения: успех (с временем и числом инструментов) либо причина сбоя.
 // Недоступный сервер логируется и пропускается: агент продолжает работать на остальных инструментах.
 export async function loadMcpTools() {
+  const servers = loadMcpServers();
+  logDeclaredServers(servers);
+
   const collected = [];
-  for (const server of loadMcpServers()) {
-    if (!server.enabled) continue;
+  let connectedCount = 0;
+  let failedCount = 0;
+  for (const server of servers) {
+    if (!server.enabled) {
+      console.log(`MCP «${server.title}»: пропущен, так как выключен в конфигурации.`);
+      continue;
+    }
     const connection = new McpConnection(server);
+    const startedAt = Date.now();
     try {
       const tools = await connection.listAllTools();
       for (const mcpTool of tools) collected.push(wrapMcpTool(connection, server, mcpTool));
-      console.log(`MCP «${server.title}»: подключено инструментов — ${tools.length}.`);
+      connectedCount += 1;
+      console.log(`MCP «${server.title}» (${server.url}): подключение успешно за ${Date.now() - startedAt} мс, `
+        + `получено инструментов — ${tools.length}.`);
     } catch (err) {
-      console.error(`MCP «${server.title}» не подключился (${server.url}): ${err.message}. Пропускаю.`);
+      failedCount += 1;
+      console.error(`MCP «${server.title}» (${server.url}): подключение не удалось за ${Date.now() - startedAt} мс — `
+        + `${err.message}. Сервер пропущен, остальные инструменты остаются доступны.`);
     }
   }
+
+  const enabledCount = servers.filter((s) => s.enabled).length;
+  console.log(`MCP: итог подключения — успешно ${connectedCount} из ${enabledCount} включённых `
+    + `(сбоев ${failedCount}), всего получено инструментов — ${collected.length}.`);
   return collected;
 }

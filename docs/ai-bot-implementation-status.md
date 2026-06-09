@@ -258,7 +258,7 @@
 
 | Плейсхолдер спецификации | Назначение | Значение в проекте | Переменная окружения |
 |--------------------------|------------|--------------------|----------------------|
-| `<OPENAI_BASE_URL>` | адрес OpenAI-compatible endpoint | `https://litellm.finam.ru/v1` или пусто | `OPENAI_BASE_URL` |
+| `<OPENAI_BASE_URL>` | адрес OpenAI-compatible endpoint | `https://litellm.my-proxy.com/v1` или пусто | `OPENAI_BASE_URL` |
 | `<MAIN_MODEL>` | основная модель ответа агента | `gpt-5.4-mini` | `MAIN_MODEL` |
 | `<AUX_MODEL>` | вспомогательная дешёвая модель (классификация, темы, суммаризатор) | `gpt-5.4-nano` | `AUX_MODEL` |
 | `<MAIN_MODEL>` (извлечение фактов) | извлечение фактов в память | `gpt-5.4-mini` | `EXTRACT_MODEL` |

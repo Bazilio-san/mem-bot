@@ -71,13 +71,4 @@ export const openAiModelMeta = {
 
   'text-embedding-3-small': { kT: 8.192, inp: 0.02, out: 0.02, inpB: 0.01, outB: 0.01, dimensions: [512, 1536], dimensionsAllowed: true },
   'text-embedding-3-large': { kT: 8.192, inp: 0.13, out: 0.13, inpB: 0.065, outB: 0.065, dimensions: [256, 1024, 1536, 3072], dimensionsAllowed: true },
-
-  // Finam embeddings - excluded from LLM list, only for embeddings
-  'Finam-Qwen3-Embedding-4B': {
-    kT: 8.192, inp: 0, out: 0, inpB: 0, outB: 0, dimensions: [1536], dimensionsAllowed: true,
-  },
-
-  // Internal Finam models
-  'developer': { kT: 128, inp: 0, out: 0, inpB: 0, outB: 0 },
-  'finam-minimax-2.1': { kT: 128, inp: 0, out: 0, inpB: 0, outB: 0 },
 };

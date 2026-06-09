@@ -36,3 +36,4 @@ playwright.config.js.map
 # конфигурация MCP-серверов (формат Claude Code), может содержать секреты — у каждого окружения своя
 .mcp.json
 /backups/
+/.claude/worktrees/

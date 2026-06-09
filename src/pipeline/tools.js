@@ -26,17 +26,26 @@ export function toolTitle(name) {
 // Разрешён ли инструмент при активном skill. Базовые (системные) инструменты доступны всегда. Предметный
 // инструмент доступен только если он перечислен в tools.allowed активного skill. Если активного skill в
 // контексте нет (служебные вызовы вне ответа агенту), ограничение не применяется.
-function allowedForActiveSkill(toolName, ctx) {
-  if (BASE_TOOL_NAMES.has(toolName)) return true;
+//
+// Инструменты внешних MCP-серверов регистрируются под префиксным именем «<псевдоним>__<имя>» (например,
+// «yafly__search_flights»), тогда как skill перечисляет их под логическим именем без префикса
+// («search_flights») — префикс существует только на стороне модели. Поэтому, кроме полного имени инструмента,
+// для инструментов MCP сверяем и «голое» имя (tool.mcpName): иначе разрешение в skill никогда не совпадёт с
+// префиксным именем и инструмент будет невидим для модели.
+function allowedForActiveSkill(tool, ctx) {
+  if (BASE_TOOL_NAMES.has(tool.name)) return true;
   const skill = ctx.activeSkill;
   if (!skill) return true;
-  return (skill.tools?.allowed || []).includes(toolName);
+  const allowed = skill.tools?.allowed || [];
+  if (allowed.includes(tool.name)) return true;
+  if (tool.mcpName && allowed.includes(tool.mcpName)) return true;
+  return false;
 }
 
 export function buildToolDefs(ctx = {}) {
   return registry
     .filter((tool) => (tool.isEnabled ? tool.isEnabled(ctx, config) : true))
-    .filter((tool) => allowedForActiveSkill(tool.name, ctx))
+    .filter((tool) => allowedForActiveSkill(tool, ctx))
     .map((tool) => tool.definition);
 }
 
