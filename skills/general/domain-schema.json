@@ -1,12 +1,12 @@
 {
   "domain_key": "general",
-  "title": "Универсальный помощник",
-  "description": "Базовый домен без узкой специализации. Предметные сущности общего назначения.",
+  "title": "General assistant",
+  "description": "Base domain without a narrow specialization. General-purpose domain entities.",
   "allowed_memory_kinds": ["fact", "preference", "constraint", "goal", "relationship", "state", "history", "instruction", "communication_style", "reminder"],
   "entities": [
     {
       "entity_type": "person",
-      "description": "Человек, о котором пользователь рассказал (родственник, коллега, знакомый).",
+      "description": "A person the user told about (relative, colleague, acquaintance).",
       "entity_key": { "mode": "slug" },
       "data_schema": {
         "type": "object",
@@ -21,7 +21,7 @@
     },
     {
       "entity_type": "note",
-      "description": "Произвольная предметная заметка о чём-то, что стоит запомнить.",
+      "description": "An arbitrary domain note about something worth remembering.",
       "entity_key": { "mode": "slug" },
       "data_schema": {
         "type": "object",
@@ -35,7 +35,7 @@
     },
     {
       "entity_type": "communication_style",
-      "description": "Устойчивый стиль общения пользователя и предпочтения формы ответа.",
+      "description": "The user's stable communication style and preferences about the form of the answer.",
       "entity_key": {
         "mode": "fixed_vocab",
         "vocabulary": [
@@ -67,7 +67,7 @@
     },
     {
       "entity_type": "feature_request",
-      "description": "Долгосрочное пожелание пользователя к возможностям ассистента.",
+      "description": "A long-term wish of the user regarding the assistant's capabilities.",
       "entity_key": {
         "mode": "fixed_vocab",
         "vocabulary": [

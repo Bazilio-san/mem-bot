@@ -1,12 +1,12 @@
 {
   "domain_key": "flight_search",
-  "title": "Поиск авиабилетов",
-  "description": "Авиабилеты, рейсы, аэропорты, даты вылета и пересадки.",
+  "title": "Flight search",
+  "description": "Flights, flight numbers, airports, departure dates and layovers.",
   "allowed_memory_kinds": ["preference", "constraint", "goal", "state", "history"],
   "entities": [
     {
       "entity_type": "city",
-      "description": "Город пользователя в контексте перелётов: домашний, вылета, назначения.",
+      "description": "The user's city in the context of flights: home, departure, destination.",
       "entity_key": {
         "mode": "fixed_vocab",
         "vocabulary": ["home_city", "departure", "destination"],
@@ -27,7 +27,7 @@
     },
     {
       "entity_type": "flight_preference",
-      "description": "Устойчивые предпочтения по перелётам.",
+      "description": "Stable flight preferences.",
       "entity_key": {
         "mode": "fixed_vocab",
         "vocabulary": ["cabin", "time", "airline", "baggage"],
@@ -50,7 +50,7 @@
     },
     {
       "entity_type": "trip",
-      "description": "Текущая или планируемая поездка.",
+      "description": "A current or planned trip.",
       "entity_key": { "mode": "slug" },
       "data_schema": {
         "type": "object",

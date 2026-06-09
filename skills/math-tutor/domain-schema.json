@@ -1,12 +1,12 @@
 {
   "domain_key": "math_tutor",
-  "title": "Репетитор по математике",
-  "description": "Темы, ошибки и прогресс ученика по математике.",
+  "title": "Math tutor",
+  "description": "The student's topics, mistakes and progress in mathematics.",
   "allowed_memory_kinds": ["preference", "goal", "progress", "state", "history"],
   "entities": [
     {
       "entity_type": "topic",
-      "description": "Тема, над которой работает ученик, и уровень его понимания.",
+      "description": "A topic the student is working on, and their level of understanding.",
       "entity_key": { "mode": "slug" },
       "data_schema": {
         "type": "object",
@@ -20,7 +20,7 @@
     },
     {
       "entity_type": "mistake",
-      "description": "Типичная ошибка ученика, которую стоит отрабатывать.",
+      "description": "A typical mistake of the student that is worth practicing.",
       "entity_key": { "mode": "slug" },
       "data_schema": {
         "type": "object",
@@ -34,7 +34,7 @@
     },
     {
       "entity_type": "goal",
-      "description": "Учебная цель ученика.",
+      "description": "The student's learning goal.",
       "entity_key": { "mode": "slug" },
       "data_schema": {
         "type": "object",

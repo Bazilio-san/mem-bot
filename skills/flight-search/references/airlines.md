@@ -1,14 +1,14 @@
-# Справочник: авиакомпании и багаж
+# Reference: airlines and baggage
 
-## Ручная кладь (типичные нормы)
+## Carry-on (typical allowances)
 
-- Лоукостеры обычно включают только одно небольшое место ручной клади; полноразмерная ручная кладь и багаж
-  оплачиваются отдельно.
-- Классические перевозчики чаще включают ручную кладь до 8–10 кг и одно место багажа в базовый тариф на
-  средних и дальних маршрутах.
+- Low-cost carriers usually include only one small carry-on item; full-size carry-on and checked baggage are
+  paid for separately.
+- Legacy carriers more often include carry-on up to 8–10 kg and one piece of checked baggage in the base fare on
+  medium- and long-haul routes.
 
-## На что обращать внимание при сравнении
+## What to watch for when comparing
 
-- Итоговая цена с учётом багажа, а не только базовый тариф.
-- Длительность и количество пересадок, а также время стыковок.
-- Аэропорт прилёта: основной или удалённый (это влияет на время и стоимость трансфера).
+- The final price including baggage, not just the base fare.
+- The duration and number of layovers, as well as connection times.
+- The arrival airport: main or remote (this affects the time and cost of the transfer).

@@ -125,7 +125,7 @@ console.log('\n=== Чтение справочников ===');
 
 check('getReference читает разрешённый справочник', () => {
   const text = getReference('flight-search', 'airlines.md');
-  assert.match(text, /багаж/i);
+  assert.match(text, /baggage/i);
 });
 
 check('getReference запрещает выход через ..', () => {

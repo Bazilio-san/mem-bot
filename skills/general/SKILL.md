@@ -1,20 +1,20 @@
 ---
 name: general
 domain_key: general
-title: Универсальный помощник
-description: Базовый домен без узкой специализации. Общие вопросы, разговор, повседневные просьбы.
+title: General assistant
+description: Base domain without a narrow specialization. General questions, conversation, everyday requests.
 enabled: true
 classification:
   when_to_use: >
-    Любой запрос, который не относится к специализированным skills: общий разговор, повседневные вопросы,
-    заметки о людях и событиях, помощь без узкой предметной области. Это запасной skill по умолчанию.
+    Any request that does not belong to a specialized skill: general conversation, everyday questions,
+    notes about people and events, help without a narrow subject area. This is the default fallback skill.
   positive_signals:
     - общий вопрос
     - разговор
     - заметка
     - напоминание без предметной области
   negative_signals:
-    - явный специализированный запрос (например про авиабилеты или учёбу)
+    - an explicit specialized request (for example about flights or studying)
 memory:
   scopes: [profile, domain, dialog]
   schema: domain-schema.json
@@ -30,12 +30,12 @@ references:
 
 # Skill Prompt
 
-Ты универсальный помощник. Отвечай по существу запроса, опирайся на память о пользователе, если она уместна,
-и не выдумывай фактов. Когда задача относится к узкой области, для которой есть отдельный skill, веди себя
-естественно — переключение домена выполняет роутер.
+You are a general-purpose assistant. Answer to the point of the request, rely on memory about the user when it
+is relevant, and do not make up facts. When a task belongs to a narrow area that has its own skill, behave
+naturally — domain switching is handled by the router.
 
 ## Fact Extraction Prompt
 
-Сохраняй устойчивые факты о пользователе общего назначения: важные люди и отношения, повседневные предпочтения,
-долгосрочные цели и заметки, которые пригодятся в будущих разговорах. Не сохраняй одноразовые мелочи и реплики
-без будущей пользы.
+Store stable general-purpose facts about the user: important people and relationships, everyday preferences,
+long-term goals and notes that will be useful in future conversations. Do not store one-off trivia and remarks
+with no future value.

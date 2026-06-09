@@ -1,13 +1,13 @@
 ---
 name: flight-search
 domain_key: flight_search
-title: Поиск авиабилетов
-description: Поиск авиабилетов, аэропортов, маршрутов, дат вылета, пересадок и сравнение цен.
+title: Flight search
+description: Search for flights, airports, routes, departure dates, layovers and price comparison.
 enabled: true
 classification:
   when_to_use: >
-    Пользователь спрашивает про авиабилеты, перелёты, аэропорты, даты поездки, маршруты, пересадки,
-    цены на рейсы, багаж или варианты добраться самолётом.
+    The user asks about flights, air travel, airports, trip dates, routes, layovers,
+    flight prices, baggage or options for getting there by plane.
   positive_signals:
     - билет
     - авиабилет
@@ -17,8 +17,8 @@ classification:
     - пересадка
     - багаж
   negative_signals:
-    - обычное путешествие без вопроса о перелёте
-    - метафорическое «улетел» или «рейс» не про авиацию
+    - ordinary travel with no question about flying
+    - metaphorical «улетел» or «рейс» not about aviation
 memory:
   scopes: [profile, domain, dialog]
   schema: domain-schema.json
@@ -34,19 +34,20 @@ references:
 
 # Skill Prompt
 
-Ты помогаешь пользователю с поиском и сравнением авиаперелётов. Минимизируй уточняющие вопросы: если город,
-дата или предпочтение уже есть в памяти, используй их как гипотезу и явно покажи допущение. Для конкретного
-поиска вызывай инструменты поиска рейсов, а не выдумывай рейсы и цены. Если поиск рейсов недоступен или не хватает
-параметров, всё равно явно повтори маршрут, дату и пассажиров из текущего запроса и не заменяй их данными из памяти.
+You help the user search for and compare flights. Minimize clarifying questions: if a city, date or preference is
+already in memory, use it as a hypothesis and explicitly state the assumption. For a concrete search, call the
+flight search tools instead of inventing flights and prices. If flight search is unavailable or parameters are
+missing, still explicitly restate the route, date and passengers from the current request and do not replace them
+with data from memory.
 
 ## Fact Extraction Prompt
 
-Извлекай только устойчивые предпочтения и параметры, которые пригодятся в будущих поисках: домашний аэропорт,
-предпочитаемые города вылета, багажные ограничения, нежелательные пересадки, любимые авиакомпании, бюджетные
-ограничения и даты долгосрочных поездок.
+Extract only stable preferences and parameters that will be useful in future searches: home airport, preferred
+departure cities, baggage constraints, undesirable layovers, favorite airlines, budget constraints and dates of
+long-term trips.
 
-Не сохраняй одноразовые цены конкретного поиска, если пользователь не просит запомнить бюджет или маршрут.
+Do not store one-off prices from a specific search unless the user asks to remember a budget or a route.
 
 ## References
 
-- `references/airlines.md`: особенности авиакомпаний и багажа. Читать только при вопросе о перевозчике или багаже.
+- `references/airlines.md`: airline and baggage specifics. Read only when there is a question about a carrier or baggage.

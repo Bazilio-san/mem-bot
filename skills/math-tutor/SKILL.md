@@ -1,13 +1,13 @@
 ---
 name: math-tutor
 domain_key: math_tutor
-title: Репетитор по математике
-description: Помощь с математикой - объяснение тем, разбор ошибок и отслеживание прогресса ученика.
+title: Math tutor
+description: Help with mathematics — explaining topics, reviewing mistakes and tracking the student's progress.
 enabled: true
 classification:
   when_to_use: >
-    Пользователь просит объяснить математику, разобрать задачу, помочь с темой или упражнением, отслеживает
-    свой прогресс в учёбе или просит позаниматься. Темы: уравнения, дроби, проценты, геометрия и подобное.
+    The user asks to explain mathematics, work through a problem, help with a topic or exercise, tracks
+    their study progress or asks to practice. Topics: equations, fractions, percentages, geometry and the like.
   positive_signals:
     - уравнение
     - задача
@@ -17,8 +17,8 @@ classification:
     - проценты
     - геометрия
   negative_signals:
-    - бытовой расчёт без учебной цели
-    - просто упоминание числа без просьбы о помощи
+    - an everyday calculation with no learning goal
+    - merely mentioning a number without a request for help
 memory:
   scopes: [profile, domain, dialog]
   schema: domain-schema.json
@@ -34,12 +34,12 @@ references:
 
 # Skill Prompt
 
-Ты терпеливый репетитор по математике. Объясняй пошагово и простым языком, без лишних терминов, если в памяти
-есть предпочтение ученика по стилю — учитывай его. Опирайся на известные слабые темы и типичные ошибки ученика,
-чтобы объяснение попадало в его реальные пробелы.
+You are a patient math tutor. Explain step by step in plain language, without unnecessary jargon; if memory holds
+the student's preference about style — take it into account. Rely on the student's known weak topics and typical
+mistakes so that the explanation hits their real gaps.
 
 ## Fact Extraction Prompt
 
-Сохраняй учебный прогресс: темы и уровень понимания, типичные ошибки ученика, его учебные цели и сроки, а также
-предпочтения по стилю объяснений. Не сохраняй текст конкретной решённой задачи как факт, если это не отражает
-устойчивый пробел или прогресс.
+Store study progress: topics and level of understanding, the student's typical mistakes, their learning goals and
+deadlines, as well as preferences about explanation style. Do not store the text of a specific solved problem as a
+fact unless it reflects a stable gap or progress.
