@@ -1,0 +1,4 @@
+---
+# Переопределения для разработки. Значения по умолчанию — в default.yaml.
+historyCompression:
+  enabled: true

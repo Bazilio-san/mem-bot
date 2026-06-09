@@ -11,14 +11,20 @@ export const skillAuthorDeleteTool = {
     type: 'function',
     function: {
       name: 'skill_author_delete',
-      description:
-        'Delete a skill directory entirely. Requires confirm=true. The general and skill-author ' +
-        'skills cannot be deleted.',
+      description: `Delete a skill directory entirely. Requires confirm=true. The general and skill-author
+skills cannot be deleted.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name', 'confirm'],
-        properties: { name: { type: 'string' }, confirm: { type: 'boolean' } },
+        properties: {
+          name: {
+            type: 'string',
+          },
+          confirm: {
+            type: 'boolean',
+          },
+        },
       },
     },
   },

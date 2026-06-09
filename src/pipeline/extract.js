@@ -62,6 +62,7 @@ memory_text — короткая человеческая фраза о факт
   try {
     const filled = await chatJSON({
       model,
+      kind: 'fact_extract',
       schema,
       schemaName: spec.entity_type,
       system,
@@ -213,6 +214,7 @@ export async function extractCandidates({ skillName = null, domainKey, recentMes
     : '';
   const result = await chatJSON({
     model: extractModel,
+    kind: 'fact_extract',
     schema: SCHEMA,
     schemaName: 'memory_candidates',
     system: SYSTEM + skillBlock + schemaHint,
@@ -275,6 +277,7 @@ export async function extractTopics({ recentMessages }) {
   try {
     const res = await chatJSON({
       model: config.llm.auxModel,
+      kind: 'topic_extract',
       schema: TOPICS_SCHEMA,
       schemaName: 'dialog_topics',
       system: TOPICS_SYSTEM,

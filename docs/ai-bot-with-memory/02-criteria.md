@@ -27,11 +27,11 @@
 
 | ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
 |---------|----------|-------------------------------|----------------|
-| CRIT-13 | Бот не зацикливается на темах (тематический трекинг) | `mem.topic_mentions` + `src/pipeline/topics.js` | `COMPANION_MODE` |
-| CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | дата/время/пояс — всегда; настрой момента — `COMPANION_MODE` |
-| CRIT-15 | Бот пишет первым по уместному поводу, учитывая молчание пользователя | `mem.proactive_triggers` + `mem.proactive_contact_state` + `src/pipeline/proactiveContactPolicy.js` | `PROACTIVE_ENABLED` |
-| CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | входящий `welcome_back`-сигнал в `src/agent.js` + `src/pipeline/proactiveMessage.js` | `PROACTIVE_ENABLED` |
-| CRIT-17 | Внешние события превращаются в персональные поводы | `src/pipeline/events.js` + `mem.event_deliveries` | `PROACTIVE_EVENTS_ENABLED` |
+| CRIT-13 | Бот не зацикливается на темах (тематический трекинг) | `mem.topic_mentions` + `src/pipeline/topics.js` | `config.companion.enabled` |
+| CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | дата/время/пояс — всегда; настрой момента — `config.companion.enabled` |
+| CRIT-15 | Бот пишет первым по уместному поводу, учитывая молчание пользователя | `mem.proactive_triggers` + `mem.proactive_contact_state` + `src/pipeline/proactiveContactPolicy.js` | `config.proactive.enabled` |
+| CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | входящий `welcome_back`-сигнал в `src/agent.js` + `src/pipeline/proactiveMessage.js` | `config.proactive.enabled` |
+| CRIT-17 | Внешние события превращаются в персональные поводы | `src/pipeline/events.js` + `mem.event_deliveries` | `config.proactive.events.enabled` |
 
 всех пяти — в [09-proactivity.md](09-proactivity.md).
 
@@ -41,7 +41,7 @@
 
 | ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
 |---------|----------|-------------------------------|----------------|
-| CRIT-18 | Сжатая история: горячее окно дословно, холодная зона в дайджест, без дублей с памятью | `mem.conversation_summaries` + `src/pipeline/history-context.js` и `history-compress.js` | `HISTORY_COMPRESSION_ENABLED` |
+| CRIT-18 | Сжатая история: горячее окно дословно, холодная зона в дайджест, без дублей с памятью | `mem.conversation_summaries` + `src/pipeline/history-context.js` и `history-compress.js` | `config.historyCompression.enabled` |
 
 Критерий считается выполненным, когда последние `N` сообщений всегда уходят дословно, старая история сворачивается в
 `HISTORY_CONTEXT` заданного размера с градиентом «ближнее подробнее дальнего», история не повторяет факты из
@@ -55,8 +55,8 @@
 
 | ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
 |---------|----------|-------------------------------|----------------|
-| CRIT-19 | Глобальные факты подмешиваются в каждый запрос, ограничены по числу | `mem.global_facts` + сборка `GLOBAL_FACTS` в `src/agent.js` | `GLOBAL_MEMORY_ENABLED` |
-| CRIT-20 | Общая база знаний (RAG): тексты видны всем, подмешиваются по релевантности, ищутся и удаляются по идентификатору | `mem.global_knowledge` + `src/pipeline/global-memory.js` | `GLOBAL_RAG_ENABLED` |
+| CRIT-19 | Глобальные факты подмешиваются в каждый запрос, ограничены по числу | `mem.global_facts` + сборка `GLOBAL_FACTS` в `src/agent.js` | `config.globalMemory.factsEnabled` |
+| CRIT-20 | Общая база знаний (RAG): тексты видны всем, подмешиваются по релевантности, ищутся и удаляются по идентификатору | `mem.global_knowledge` + `src/pipeline/global-memory.js` | `config.globalMemory.ragEnabled` |
 | CRIT-21 | Наполнять и чистить глобальную память может только администратор (пометка `is_admin`) | проверка в `executeTool` + `isAdmin` в `src/pipeline/admin.js` | оба флага |
 
 Глобальная память общая для всех пользователей: глобальные факты присутствуют в каждом ответе, фрагменты базы знаний
@@ -69,7 +69,7 @@
 
 | ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
 |---------|----------|-------------------------------|----------------|
-| CRIT-22 | Потоковая выдача финального текста и абстрактные события хода обработки через `onEvent` | `chatStream` в `src/llm.js` + контур событий в `src/agent.js` | `LLM_STREAMING_ENABLED` (по умолчанию включено) |
+| CRIT-22 | Потоковая выдача финального текста и абстрактные события хода обработки через `onEvent` | `chatStream` в `src/llm.js` + контур событий в `src/agent.js` | `config.streaming.enabled` (по умолчанию `true`) |
 
 Критерий считается выполненным, когда `chatStream` собирает из потоковых дельт такой же финальный объект сообщения (с
 полями `content` и `tool_calls`), какой даёт непотоковый `chat`; ядро испускает события `assistant.delta`,

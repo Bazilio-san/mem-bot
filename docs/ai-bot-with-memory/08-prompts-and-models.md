@@ -160,19 +160,20 @@ ${list}
 ### [PROMPT-4a] Пользовательские настройки ответа
 
 Форму ответа и тембр голосового ответа меняет сама модель основного диалога через инструменты. В стабильном системном
-промпте есть явное правило: запросы на голосовой или текстовый формат вызывают `set_reply_mode`, а запросы на конкретный
-голос, тембр или мужской/женский/нейтральный голос вызывают `set_voice_preference`. Эти инструменты не являются
+промпте есть явное правило: запросы на включение или выключение озвучивания (смена формата текст↔голос) вызывают
+`voice_or_text`, а запросы на конкретный голос, тембр или мужской/женский/нейтральный голос вызывают
+`voice_set_preference`. Эти инструменты не являются
 экстракторами памяти: они синхронно меняют управляющие поля пользователя, чтобы настройка действовала уже на текущий
 ответ.
 
-`set_reply_mode` принимает `mode = "voice" | "text"`. `set_voice_preference` принимает строку `selection`: это может
+`voice_or_text` принимает `mode = "voice" | "text"`. `voice_set_preference` принимает строку `selection`: это может
 быть конкретный идентификатор голоса (`nova`, `onyx`, `ash`) или категория (`male`, `female`, `neutral` и русские
 аналоги). Handler валидирует выбор по каталогу голосов; неизвестные значения возвращают ошибку и список допустимых
 вариантов, но не записываются в состояние пользователя.
 
 ### [PROMPT-5] Извлечение тем диалога (режим собеседника)
 
-Параллельно с извлечением фактов при `COMPANION_MODE` отдельный вызов возвращает темы диалога с оценкой вовлечённости.
+Параллельно с извлечением фактов при `config.companion.enabled` отдельный вызов возвращает темы диалога с оценкой вовлечённости.
 Схема `dialog_topics`: массив объектов с `topic_key` (короткий ключ латиницей в snake_case) и `user_engagement` (0..1).
 Промпт требует не создавать слишком общие темы (`life`, `things`, `stuff`), не дробить каждое предложение в отдельную
 тему, объединять близкие темы и использовать шкалу вовлечённости: 0.1–0.3 для односложных ответов без интереса, 0.4–0.6
@@ -181,7 +182,7 @@ ${list}
 
 ### [PROMPT-5a] Companion prompt основного ответа
 
-При `COMPANION_MODE` основной ответ получает дополнительный стабильный system-блок `COMPANION_SYSTEM`. Он не заменяет
+При `config.companion.enabled` основной ответ получает дополнительный стабильный system-блок `COMPANION_SYSTEM`. Он не заменяет
 `MAIN_SYSTEM`: правила инструментов, безопасности, памяти и приоритета текущего запроса остаются первым системным
 сообщением. `COMPANION_SYSTEM` задаёт роль и стиль живого собеседника:
 
@@ -220,7 +221,7 @@ ${list}
 
 ### [PROMPT-6] Суммаризатор истории диалога (поджатие истории)
 
-При `HISTORY_COMPRESSION_ENABLED` отдельный вызов сжимает холодную часть диалога. Промпт требует сохранить только то, что
+При `config.historyCompression.enabled` отдельный вызов сжимает холодную часть диалога. Промпт требует сохранить только то, что
 нужно для продолжения разговора, не трогать последние сообщения (они не переданы и добавятся отдельно), не дублировать
 факты из `active_memory`, описывать ближний контекст подробнее дальнего, выносить устойчивые факты в `facts_to_memory`,
 не сохранять секреты в открытом виде и не выдумывать факты.
@@ -323,59 +324,65 @@ prompt-блоки и при необходимости определение с
 
 ## [PROMPT-8] Конфигурация
 
-Конфигурация (`src/config.js`) читается из `.env`. Модели можно переопределить переменными окружения, флаги собеседника и
-проактивности по умолчанию выключены. Полный список флагов — в [03-quickstart.md](03-quickstart.md).
+Конфигурация собирается пакетом `node-config` из каталога `config/` и доступна в коде как объект `config`, который
+отдаёт модуль `src/config.js`. Дерево настроек складывается из `config/default.yaml` (значения по умолчанию), файла
+окружения (`development.yaml` или `production.yaml`, выбор по `NODE_ENV`) и `config/local.yaml` (локальные секреты);
+карта `config/custom-environment-variables.yaml` позволяет переопределить любое значение одноимённой переменной
+окружения. Модели задаются ветвью `config.llm.*`; флаги собеседника, проактивности, глобальной памяти и поджатия
+истории по умолчанию включены, а контур внешних событий — выключен. Полный список настроек —
+в [03-quickstart.md](03-quickstart.md).
 
 ```js
 export const config = {
-  databaseUrl: ..., memDbName: ...,
   llm: {
-    apiKey: env.OPENAI_API_KEY,
-    // undefined означает прямой OpenAI API; заданное значение ведёт в OpenAI-совместимый прокси.
-    baseURL: env.OPENAI_BASE_URL?.trim() || undefined,
-    mainModel: env.MAIN_MODEL || '<MAIN_MODEL>',
-    auxModel: env.AUX_MODEL || '<AUX_MODEL>',
-    extractModel: env.EXTRACT_MODEL || '<MAIN_MODEL>',
-    embedModel: env.EMBED_MODEL || '<EMBED_MODEL>',
+    apiKey: '...',
+    // пустое значение означает прямой OpenAI API; заданное значение ведёт в OpenAI-совместимый прокси.
+    baseURL: '...',
+    mainModel: '<MAIN_MODEL>',
+    auxModel: '<AUX_MODEL>',
+    extractModel: '<MAIN_MODEL>',
+    embedModel: '<EMBED_MODEL>',
     embedDim: 1536,
   },
-  authSecret: env.AUTH_SECRET || 'dev-insecure-secret-change-me',
-  timezone: env.TZ_DEFAULT || 'Europe/Moscow',
-  debug: (env.DEBUG || '').split(',').map((s) => s.trim()).filter(Boolean),
-  companion: { enabled: flag(env.COMPANION_MODE, false) },
+  authSecret: 'dev-insecure-secret-change-me',
+  timezone: 'Europe/Moscow',
+  debug: ['...'],
+  companion: { enabled: true },
   streaming: {
-    enabled: flag(env.LLM_STREAMING_ENABLED, true), // потоковый вызов модели (chatStream) и события onEvent
+    enabled: true, // потоковый вызов модели (chatStream) и события onEvent
   },
   globalMemory: {
-    factsEnabled: flag(env.GLOBAL_MEMORY_ENABLED, false), // глобальные факты (always-on)
-    factsLimit: Number(env.GLOBAL_FACTS_LIMIT || 5),
-    ragEnabled: flag(env.GLOBAL_RAG_ENABLED, false),       // общая база знаний (RAG)
-    ragLimit: Number(env.GLOBAL_RAG_LIMIT || 5),
-    ragMinRelevance: Number(env.GLOBAL_RAG_MIN_RELEVANCE || 0.3),
+    factsEnabled: true, // глобальные факты (always-on)
+    factsLimit: 5,
+    ragEnabled: true,   // общая база знаний (RAG)
+    ragLimit: 5,
+    ragMinRelevance: 0.3,
   },
   proactive: {
-    enabled: flag(env.PROACTIVE_ENABLED, false),
-    intervalMs: Number(env.PROACTIVE_INTERVAL_MS || 300000),
-    inactivityMinutes: Number(env.PROACTIVE_INACTIVITY_MIN || 1440),
-    checkinHour: Number(env.PROACTIVE_CHECKIN_HOUR || 10),
-    goalIntervalMinutes: Number(env.PROACTIVE_GOAL_INTERVAL_MIN || 2880),
-    welcomeBackGapMinutes: Number(env.PROACTIVE_WELCOME_GAP_MIN || 60),
-    events: { enabled: flag(env.PROACTIVE_EVENTS_ENABLED, false),
-              relevanceThreshold: Number(env.NEWS_RELEVANCE_THRESHOLD || 0.6) },
+    enabled: true,
+    intervalMs: 300000,
+    inactivityMinutes: 1440,
+    checkinHour: 10,
+    goalIntervalMinutes: 2880,
+    welcomeBackGapMinutes: 60,
+    events: { enabled: false, relevanceThreshold: 0.6 },
   },
   historyCompression: {
-    enabled: flag(env.HISTORY_COMPRESSION_ENABLED, false),
-    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8),
-    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000),
-    shrinkTokens: Number(env.HISTORY_SHRINK_TOKENS || 800),
-    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15').split(',').map(Number),
-    model: env.HISTORY_SUMMARY_MODEL || env.AUX_MODEL || '<AUX_MODEL>',
-    minCompressGain: Number(env.HISTORY_MIN_COMPRESS_GAIN || 0.35),
+    enabled: true,
+    hotWindow: 8,
+    maxTokens: 2000,
+    shrinkTokens: 800,
+    zoneWeights: [0.55, 0.30, 0.15],
+    model: '<AUX_MODEL>',
+    minCompressGain: 0.35,
   },
+  // Параметры подключения к PostgreSQL живут в ветви config.db.postgres.dbs.<id>
+  // и читаются пакетом af-db-ts (рабочая база — алиас main).
 };
 ```
 
-При старте проверяется инвариант гистерезиса: `shrinkTokens` должен быть строго меньше `maxTokens`.
+При старте проверяется инвариант гистерезиса: значение `config.historyCompression.shrinkTokens` должно быть строго
+меньше `config.historyCompression.maxTokens`.
 
 ---
 
@@ -384,16 +391,16 @@ export const config = {
 Принцип: основной ответ даёт модель среднего уровня, все вспомогательные JSON-задачи — самая дешёвая быстрая модель,
 память пишется асинхронно, чтобы не тормозить ответ.
 
-| Этап | Что используется | Переменная |
-|------|------------------|------------|
-| Основной ответ агента | `<MAIN_MODEL>` | `MAIN_MODEL` |
-| Классификация запроса | `<AUX_MODEL>` | `AUX_MODEL` |
-| Выбор намерения доставки | `<AUX_MODEL>` | `AUX_MODEL` |
-| Извлечение фактов в память | `<MAIN_MODEL>` | `EXTRACT_MODEL` |
-| Извлечение тем диалога | `<AUX_MODEL>` | `AUX_MODEL` |
-| Суммаризатор истории диалога | `<AUX_MODEL>` | `HISTORY_SUMMARY_MODEL` |
+| Этап | Что используется | Путь в `config` |
+|------|------------------|-----------------|
+| Основной ответ агента | `<MAIN_MODEL>` | `llm.mainModel` |
+| Классификация запроса | `<AUX_MODEL>` | `llm.auxModel` |
+| Выбор намерения доставки | `<AUX_MODEL>` | `llm.auxModel` |
+| Извлечение фактов в память | `<MAIN_MODEL>` | `llm.extractModel` |
+| Извлечение тем диалога | `<AUX_MODEL>` | `llm.auxModel` |
+| Суммаризатор истории диалога | `<AUX_MODEL>` | `historyCompression.model` |
 | Слияние фактов | детерминированные правила, без вызова модели | — |
-| Эмбеддинги | `<EMBED_MODEL>` (1536) | `EMBED_MODEL` |
+| Эмбеддинги | `<EMBED_MODEL>` (1536) | `llm.embedModel` |
 
 Перед выводом в продакшен следует проверить доступность и возможности выбранных моделей (чат, строгий JSON, вызов
 инструментов и эмбеддинги) через выбранный endpoint скриптом проверки `tests/check-llm.js` (`npm run check:llm`).

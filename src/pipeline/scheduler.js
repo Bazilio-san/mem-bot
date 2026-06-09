@@ -16,7 +16,7 @@ import {
 } from './proactiveContactPolicy.js';
 import { runMemoryDedupe } from './memory-dedupe.js';
 
-const WORKER_ID = process.env.WORKER_ID || 'scheduler-1';
+const WORKER_ID = config.scheduler.workerId;
 const { rrulestr } = rrulePkg;
 
 class ScheduleError extends Error {

@@ -1,0 +1,21 @@
+---
+# Скопируйте этот файл в config/local.yaml и впишите реальные секреты.
+# config/local.yaml в .gitignore и не коммитится. Это рекомендуемый способ хранения секретов локально.
+authSecret: 'СГЕНЕРИРУЙТЕ_ДЛИННУЮ_СЛУЧАЙНУЮ_СТРОКУ'
+db:
+  postgres:
+    dbs:
+      bootstrap:
+        host: 'localhost'
+        password: 'ПАРОЛЬ_БД'
+        user: 'ПОЛЬЗОВАТЕЛЬ_БД'
+      main:
+        database: 'mem_bot'
+        host: 'localhost'
+        password: 'ПАРОЛЬ_БД'
+        user: 'ПОЛЬЗОВАТЕЛЬ_БД'
+llm:
+  apiKey: 'sk-...'
+  baseURL: 'https://litellm.my-proxy.com/v1'
+telegram:
+  apiKey: 'ТОКЕН_БОТА'

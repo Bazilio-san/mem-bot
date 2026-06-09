@@ -11,16 +11,18 @@ export const skillAuthorReadTool = {
     type: 'function',
     function: {
       name: 'skill_author_read',
-      description:
-        'Read a parsed skill, fully or one part. Use to inspect current content before editing. ' +
-        'part: "all" (default), "frontmatter", "skill_prompt", "fact_extraction_prompt", "domain_schema", ' +
-        '"references".',
+      description: `Read a parsed skill, fully or one part. Use to inspect current content before editing.
+part: "all" (default), "frontmatter", "skill_prompt", "fact_extraction_prompt", "domain_schema",
+"references".`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name'],
         properties: {
-          name: { type: 'string', description: 'Skill name (kebab-case).' },
+          name: {
+            type: 'string',
+            description: 'Skill name (kebab-case).',
+          },
           part: {
             type: 'string',
             enum: ['all', 'frontmatter', 'skill_prompt', 'fact_extraction_prompt', 'domain_schema', 'references'],

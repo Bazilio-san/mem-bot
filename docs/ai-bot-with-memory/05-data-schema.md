@@ -25,11 +25,15 @@ CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed
 ## [DATA-2] Пользователи и домены
 
 `mem.users` хранит пользователей; `external_id` связывает запись с внешней системой (например, идентификатор в
-мессенджере, CRM или системе авторизации); `timezone` нужен планировщику и темпоральному контексту. Колонку `is_admin`
-(права на запись в глобальную память) добавляет миграция `005`, а мастер-переключатель проактивности
-`proactivity_enabled` — миграция `007`. Колонку `reply_mode` (предпочитаемая форма ответа — текст или голос)
-добавляет миграция `009`, а `voice_output_voice` (выбранный тембр голосового ответа) — миграция `016`; это управляющие
-настройки пользователя, которые канал доставки читает на каждом ответе (см. [MEM-8]).
+мессенджере, CRM или системе авторизации); `timezone` нужен планировщику и темпоральному контексту. Колонка `is_admin`
+даёт права на запись в глобальную память, мастер-переключатель проактивности `proactivity_enabled` управляет всем
+проактивным контуром у пользователя, `reply_mode` хранит предпочитаемую форму ответа (текст или голос), а
+`voice_output_voice` — выбранный тембр голосового ответа; это управляющие настройки пользователя, которые канал
+доставки читает на каждом ответе (см. [MEM-8]). Колонка `is_test` помечает технических пользователей, которых заводят
+автотесты: точка входа `ensureUser` выставляет её из условия `NODE_ENV === 'test'`, поэтому любой пользователь,
+созданный во время прогона тестов (в том числе неявно через `handleMessage`), помечается тестовым; на уже существующего
+пользователя флаг повторно не переустанавливается. По этому признаку тестовые данные затем выборочно вычищаются, как и
+тестовые записи журнала обращений к модели в схеме `log` (см. [DATA-12]).
 `mem.agent_domains` — тонкий справочник соответствия `domain_key` → числовой `domain_id`, на который ссылаются внешние
 ключи таблиц памяти. Содержательное описание домена живёт в реестре skills (см.
 [11-per-domain-schema.md](11-per-domain-schema.md)); строки этого справочника заводятся из skills (командой `sync`) и
@@ -53,6 +57,7 @@ CREATE TABLE IF NOT EXISTS mem.users (
     voice_output_voice text                             -- выбранный тембр голосового ответа или NULL = fallback
                  CHECK (voice_output_voice IS NULL OR voice_output_voice IN
                    ('alloy','ash','ballad','cedar','coral','marin','nova','fable','onyx','sage','verse')),
+    is_test      boolean NOT NULL DEFAULT false,         -- технический пользователь автотестов (NODE_ENV=test)
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
@@ -129,12 +134,11 @@ CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
 CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversation_summaries (conversation_id, created_at DESC);
 ```
 
-Слой поджатия истории диалога наполняет именно `conversation_summaries`. Её служебные колонки определяет идемпотентная
-миграция `003_history_summaries.sql` через `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`:
+Слой поджатия истории диалога наполняет именно `conversation_summaries`. Её служебные колонки —
 `layer` (`near` / `middle` / `far` / `full`), `covered_from_message_id`, `covered_to_message_id`, `covered_until`,
 `source_message_count`, `source_token_count`, `summary_token_count`, `memory_dedupe`, `summary_version` и `is_active`
-(в каждом диалоге активна ровно одна сводка). Число таблиц при этом остаётся шестнадцать.
-Полный DDL миграции и смысл колонок — в [13-history-compression.md](13-history-compression.md).
+(в каждом диалоге активна ровно одна сводка). Полный DDL и смысл колонок — в
+[13-history-compression.md](13-history-compression.md).
 
 ---
 
@@ -366,9 +370,9 @@ CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_a
 
 ---
 
-## [DATA-8] Три таблицы проактивности (миграция `002_proactive.sql`)
+## [DATA-8] Таблицы проактивности
 
-Идемпотентная миграция `002_proactive.sql` определяет три таблицы проактивности. Назначение и поведение — в
+Схема инициализации определяет таблицы проактивности. Назначение и поведение — в
 [09-proactivity.md](09-proactivity.md).
 
 ```sql
@@ -442,7 +446,7 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 ```
 
 Признак `enabled` отдельного триггера выбирает активные поводы, а мастер-переключатель `mem.users.proactivity_enabled`
-(миграция `007_proactivity_flag.sql`) стоит над ним и управляет всем контуром у пользователя. Набор триггеров заводится
+стоит над ним и управляет всем контуром у пользователя. Набор триггеров заводится
 выключенным, когда пользователь включает проактивность. Таблица `proactive_contact_state` хранит общий режим контакта,
 
 [09-proactivity.md](09-proactivity.md).
@@ -451,10 +455,10 @@ CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (us
 
 ---
 
-## [DATA-9] Две таблицы глобальной памяти (миграция `005_global_memory.sql`)
+## [DATA-9] Две таблицы глобальной памяти
 
-Идемпотентная миграция `005_global_memory.sql` добавляет колонку `is_admin` в `mem.users`, определяет две таблицы
-глобальной памяти, общей для всех пользователей, и засевает базовый набор глобальных фактов. Назначение и поведение — в
+Схема инициализации заводит колонку `is_admin` в `mem.users`, определяет две таблицы глобальной памяти, общей для всех
+пользователей, и засевает базовый набор глобальных фактов. Назначение и поведение — в
 [14-global-memory.md](14-global-memory.md).
 
 ```sql
@@ -510,7 +514,7 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
 проверенный `data` и канонизированный `entity_key` записываются в `mem.memory_items`, а маркер источника схемы и
 замечания канонизации — в его `metadata`. Подробно слой описан в [11-per-domain-schema.md](11-per-domain-schema.md).
 
-## [DATA-11] Внешние ссылки сообщений (миграция `008`)
+## [DATA-11] Внешние ссылки сообщений
 
 Таблица `mem.message_external_refs` связывает внутреннюю строку истории с сообщением во внешнем канале доставки. Она
 нужна для событий, которые ссылаются на уже доставленное сообщение: реакции, прочтения, клики или другие канальные
@@ -533,7 +537,96 @@ CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
 ON mem.message_external_refs (conversation_message_id);
 ```
 
-Итого с глобальной памятью и внешними ссылками сообщений — девятнадцать таблиц.
+Итого с глобальной памятью и внешними ссылками сообщений — девятнадцать таблиц схемы `mem`.
+
+---
+
+## [DATA-12] Журнал обращений к языковой модели (схема `log`)
+
+Каждое обращение к языковой модели (LLM — large language model) и к смежным сервисам (получение эмбеддингов,
+распознавание речи STT и синтез речи TTS) записывается в отдельную схему `log`. Журнал состоит из двух таблиц: полной
+`log.llm_request` и узкой `log.llm_usage`. Полная таблица хранит весь контекст обращения — тип запроса `request_kind`,
+конечную точку, провайдера и модель, текстовый `payload` запроса и ответа (для бинарных данных вроде аудио — только
+метаданные файла в `binary_meta`, без содержимого), число входящих и исходящих токенов, рассчитанную стоимость в
+долларах США, длительность и идентификаторы корреляции. Узкая таблица содержит только то, что нужно для быстрого
+подсчёта затрат, и заполняется автоматически триггером `log.llm_request_to_usage` после каждой вставки в полную
+таблицу — но лишь когда есть что считать (известны токены или рассчитана цена), чтобы неудавшиеся обращения не засоряли
+агрегаты. Поведение журнала, пакетную выгрузку и расчёт стоимости см. в [10-operations.md](10-operations.md), раздел
+[OPS-5].
+
+```sql
+CREATE SCHEMA IF NOT EXISTS log;
+
+-- Полный журнал: одна строка на каждое обращение к модели или смежному сервису.
+CREATE TABLE IF NOT EXISTS log.llm_request (
+  llm_request_id    bigserial PRIMARY KEY,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  request_id        text,                              -- идентификатор корреляции одного хода диалога
+  request_kind      text,                              -- назначение обращения (см. ниже)
+  endpoint          text,                              -- chat.completions, embeddings, audio.transcriptions, audio.speech
+  provider          text,
+  model             text,                              -- имя модели, как его прислал вызов
+  model_priced      text,                              -- имя модели, по которому взята цена из прайс-листа
+  user_id           text,
+  conversation_id   text,
+  domain_key        text,
+  channel           text,
+  is_binary         boolean NOT NULL DEFAULT false,    -- обращение с бинарным телом (аудио)
+  payload           jsonb,                             -- запрос и ответ; усекается до config.llmLog.maxPayloadChars
+  binary_meta       jsonb,                             -- для аудио — только метаданные файла, без содержимого
+  payload_truncated boolean NOT NULL DEFAULT false,    -- payload был усечён по лимиту длины
+  prompt_tokens     integer,
+  completion_tokens integer,
+  total_tokens      integer,
+  price_usd         numeric(12,6),                     -- стоимость обращения; NULL, если модели нет в прайс-листе
+  duration_ms       integer,
+  status            text NOT NULL DEFAULT 'ok',
+  error             text,
+  is_test           boolean NOT NULL DEFAULT false     -- запись тестового прогона (NODE_ENV=test)
+);
+
+-- Узкий журнал: только токены и стоимость для быстрых агрегатов по затратам.
+CREATE TABLE IF NOT EXISTS log.llm_usage (
+  llm_usage_id      bigserial PRIMARY KEY,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  llm_request_id    bigint,
+  request_kind      text,
+  model             text,
+  user_id           text,
+  prompt_tokens     integer,
+  completion_tokens integer,
+  total_tokens      integer,
+  price_usd         numeric(12,6),
+  duration_ms       integer,
+  is_test           boolean NOT NULL DEFAULT false
+);
+
+-- Триггер зеркалит биллинговую часть в узкий журнал, но только если есть что считать.
+CREATE OR REPLACE FUNCTION log.llm_request_to_usage() RETURNS trigger AS $$
+BEGIN
+  IF NEW.total_tokens IS NOT NULL OR NEW.price_usd IS NOT NULL THEN
+    INSERT INTO log.llm_usage (created_at, llm_request_id, request_kind, model, user_id,
+                               prompt_tokens, completion_tokens, total_tokens, price_usd, duration_ms, is_test)
+    VALUES (NEW.created_at, NEW.llm_request_id, NEW.request_kind, NEW.model_priced, NEW.user_id,
+            NEW.prompt_tokens, NEW.completion_tokens, NEW.total_tokens, NEW.price_usd, NEW.duration_ms, NEW.is_test);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER llm_request_to_usage_trg AFTER INSERT ON log.llm_request
+  FOR EACH ROW EXECUTE FUNCTION log.llm_request_to_usage();
+```
+
+Поле `request_kind` различает назначения обращений: `main_agent_answer` (главный ответ агента), `delivery_intent`
+(выбор формы доставки — текст или реакция), `intent_classify`, `fact_extract`, `topic_extract`, `event_relevance`,
+`proactive_message`, `history_compress`, `skill_authoring`, `voice_summary`, `embedding`, `stt`, `tts`. Для конечных
+точек со строго одним назначением (эмбеддинги, распознавание и синтез речи) тип выводится по самой конечной точке. У
+конечной точки `chat.completions` назначений много, поэтому тип обязан передавать вызывающий код явно; пропуск
+помечается отдельным типом `untyped` и служит сигналом об ошибке вызова.
+
+В отличие от схемы `mem`, таблицы журнала не удаляются и не пересоздаются при повторной инициализации (`CREATE TABLE IF
+NOT EXISTS`), иначе журнал стирался бы при каждом запуске.
 
 ---
 

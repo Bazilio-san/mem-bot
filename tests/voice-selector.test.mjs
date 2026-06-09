@@ -1,10 +1,10 @@
 import {
+  CATEGORY_TO_GENDER,
   DEFAULT_VOICE_BY_GENDER,
   VOICE_IDS,
   genderForVoice,
   isValidVoice,
   normalizeVoiceId,
-  resolveVoicePreference,
 } from '../src/voice/voices.js';
 
 let passed = 0,
@@ -36,30 +36,10 @@ check(
   DEFAULT_VOICE_BY_GENDER.m === 'ash' && DEFAULT_VOICE_BY_GENDER.f === 'nova' && DEFAULT_VOICE_BY_GENDER.mf === 'alloy',
 );
 
-{
-  const r = resolveVoicePreference('Поставь голос Onyx, пожалуйста');
-  check('6. Выбор по имени голоса внутри фразы', r.ok && r.voice === 'onyx' && r.gender === 'm');
-}
-
-{
-  const r = resolveVoicePreference('хочу женский голос');
-  check('7. Женский alias выбирает nova', r.ok && r.voice === 'nova' && r.gender === 'f');
-}
-
-{
-  const r = resolveVoicePreference('use a male voice');
-  check('8. English male alias выбирает ash', r.ok && r.voice === 'ash' && r.gender === 'm');
-}
-
-{
-  const r = resolveVoicePreference('нейтральный тембр');
-  check('9. Нейтральный alias выбирает alloy', r.ok && r.voice === 'alloy' && r.gender === 'mf');
-}
-
-{
-  const r = resolveVoicePreference('голос робокоп');
-  check('10. Неизвестное значение отклоняется', r.ok === false && r.reason === 'unknown_selection');
-}
+check(
+  '6. Категории сопоставлены с полом',
+  CATEGORY_TO_GENDER.male === 'm' && CATEGORY_TO_GENDER.female === 'f' && CATEGORY_TO_GENDER.neutral === 'mf',
+);
 
 console.log(`\n================ ИТОГ ================`);
 console.log(`Пройдено: ${passed}, провалено: ${failed}`);

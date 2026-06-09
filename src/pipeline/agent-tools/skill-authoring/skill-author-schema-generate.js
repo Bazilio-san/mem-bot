@@ -11,23 +11,31 @@ export const skillAuthorSchemaGenerateTool = {
     type: 'function',
     function: {
       name: 'skill_author_schema_generate',
-      description:
-        'Generate (or regenerate) the closed domain memory schema of a skill: entities, their data ' +
-        'fields and entity_key rules. Use to give a skill a structured memory from scratch. For small edits to ' +
-        'an existing schema use skill_author_schema_edit. Returns a preview and validation issues unless apply=true.',
+      description: `Generate (or regenerate) the closed domain memory schema of a skill: entities, their data
+fields and entity_key rules. Use to give a skill a structured memory from scratch. For small edits to
+an existing schema use skill_author_schema_edit. Returns a preview and validation issues unless apply=true.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name'],
         properties: {
-          name: { type: 'string' },
-          instruction: { type: ['string', 'null'], description: 'Optional guidance on what to model.' },
+          name: {
+            type: 'string',
+          },
+          instruction: {
+            type: ['string', 'null'],
+            description: 'Optional guidance on what to model.',
+          },
           samples: {
             type: ['array', 'null'],
-            items: { type: 'string' },
+            items: {
+              type: 'string',
+            },
             description: 'Optional example user phrases.',
           },
-          apply: { type: ['boolean', 'null'] },
+          apply: {
+            type: ['boolean', 'null'],
+          },
         },
       },
     },

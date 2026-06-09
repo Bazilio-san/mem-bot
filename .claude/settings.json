@@ -47,7 +47,7 @@
     "BASH_MAX_OUTPUT_LENGTH": "5000000",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "true",
     "DISABLE_COST_WARNINGS": "0",
-    "DISABLE_TELEMETRY": "1"
+    "DISABLE_TELEMETRY": "0"
   },
   "hasCompletedOnboarding": true,
   "hasTrustDialogAccepted": true,

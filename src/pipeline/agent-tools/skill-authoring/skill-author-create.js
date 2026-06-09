@@ -20,25 +20,33 @@ export const skillAuthorCreateTool = {
     type: 'function',
     function: {
       name: 'skill_author_create',
-      description:
-        'Create a NEW skill from a natural-language description: the model drafts name, domain_key, ' +
-        'classification, prompts and (if relevant) the memory schema. By default returns a preview and ' +
-        'validation issues without writing. Set apply=true to write it to disk and hot-reload the registry. ' +
-        'Use for a brand-new domain, not for editing an existing skill.',
+      description: `Create a NEW skill from a natural-language description: the model drafts name, domain_key,
+classification, prompts and (if relevant) the memory schema. By default returns a preview and
+validation issues without writing. Set apply=true to write it to disk and hot-reload the registry.
+Use for a brand-new domain, not for editing an existing skill.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
-        required: ['description'],
+        required: ['skillDescription'],
         properties: {
-          description: { type: 'string', description: 'What the skill is for, in natural language.' },
-          hints: { type: ['string', 'null'], description: 'Optional extra constraints or preferences.' },
-          apply: { type: ['boolean', 'null'], description: 'Write to disk when true; otherwise preview only.' },
+          skillDescription: {
+            type: 'string',
+            description: 'What the skill is for, in natural language.',
+          },
+          hints: {
+            type: ['string', 'null'],
+            description: 'Optional extra constraints or preferences.',
+          },
+          apply: {
+            type: ['boolean', 'null'],
+            description: 'Write to disk when true; otherwise preview only.',
+          },
         },
       },
     },
   },
   async handler(ctx, args) {
-    const draft = await generateSkillDraft({ description: args.description, hints: args.hints || '' });
+    const draft = await generateSkillDraft({ description: args.skillDescription, hints: args.hints || '' });
     const skill = buildSkillFromDraft(draft);
 
     if (getSkill(skill.name)) {

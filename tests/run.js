@@ -49,6 +49,7 @@ import {
   classifyTriggerCandidate,
 } from '../src/pipeline/proactiveContactPolicy.js';
 import { runMemoryDedupe } from '../src/pipeline/memory-dedupe.js';
+import { flushLlmLog } from '../src/pipeline/llm-log.js';
 
 const TRIGGER_DEFAULTS = [
   { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
@@ -2028,7 +2029,7 @@ async function layerGlobalMemory() {
 
 // ========== СЛОЙ 9. Голосовой ответ: предпочтение формы ответа (при VOICE_OUTPUT_ENABLED) ==========
 // Проверяется только при включённом голосовом выводе, чтобы базовый прогон остался прежним (36/36). Здесь
-// проверяется ядровая часть функции: колонка предпочтения, инструмент set_reply_mode и возврат replyMode.
+// проверяется ядровая часть функции: колонка предпочтения, инструмент voice_or_text и возврат replyMode.
 // Сам синтез речи и доставка голосом относятся к Telegram-каналу и проверяются отдельно (npm run test:voice-output).
 async function layerVoiceOutput() {
   section('Слой 9. Голосовой ответ: предпочтение формы ответа');
@@ -2048,26 +2049,35 @@ async function layerVoiceOutput() {
         WHERE table_schema='mem' AND table_name='users' AND column_name='voice_output_voice'`,
     );
     check('9.1c. Колонка mem.users.voice_output_voice есть', voiceCols.length === 1);
+    const { rows: testCols } = await query(
+      `SELECT column_default FROM information_schema.columns
+        WHERE table_schema='mem' AND table_name='users' AND column_name='is_test'`,
+    );
+    check(
+      '9.1e. Колонка mem.users.is_test есть со значением по умолчанию false',
+      testCols.length === 1 && /false/.test(testCols[0].column_default || ''),
+    );
     const u = await freshUser('tvo_default');
     check('9.1b. Новый пользователь по умолчанию в текстовом режиме', u.reply_mode === 'text');
     check('9.1d. Новый пользователь без выбранного тембра', u.voice_output_voice === null);
+    check('9.1f. Пользователь, созданный в тестовом прогоне, помечен is_test', u.is_test === true);
   }
 
-  // 9.2. Инструмент set_reply_mode сохраняет предпочтение и помечает его в контексте текущего запроса;
+  // 9.2. Инструмент voice_or_text сохраняет предпочтение и помечает его в контексте текущего запроса;
   // обратное переключение на текст возвращает прежний режим.
   {
     const u = await freshUser('tvo_tool');
     const conv = await ensureConversation(u.id, 'general');
     const ctx = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
-    const res = await executeTool(ctx, 'set_reply_mode', { mode: 'voice' });
+    const res = await executeTool(ctx, 'voice_or_text', { mode: 'voice' });
     const saved = (await query('SELECT reply_mode FROM mem.users WHERE id=$1', [u.id])).rows[0].reply_mode;
     check(
-      '9.2. set_reply_mode(voice) сохраняет предпочтение и метит контекст',
+      '9.2. voice_or_text(voice) сохраняет предпочтение и метит контекст',
       res.reply_mode === 'voice' && ctx.replyMode === 'voice' && saved === 'voice',
     );
 
     const ctx2 = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
-    await executeTool(ctx2, 'set_reply_mode', { mode: 'text' });
+    await executeTool(ctx2, 'voice_or_text', { mode: 'text' });
     const back = (await query('SELECT reply_mode FROM mem.users WHERE id=$1', [u.id])).rows[0].reply_mode;
     check(
       '9.2b. Обратное переключение на текст возвращает прежний режим',
@@ -2075,22 +2085,24 @@ async function layerVoiceOutput() {
     );
   }
 
-  // 9.3. Инструмент set_voice_preference сохраняет тембр и помечает его в контексте текущего запроса.
+  // 9.3. Инструмент voice_set_preference сохраняет тембр и помечает его в контексте текущего запроса.
   {
     const u = await freshUser('tvo_voice_pref');
     const conv = await ensureConversation(u.id, 'general');
     const ctx = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
-    const res = await executeTool(ctx, 'set_voice_preference', { selection: 'женский голос' });
+    const res = await executeTool(ctx, 'voice_set_preference', { voice: 'female' });
     const saved = (await query('SELECT voice_output_voice FROM mem.users WHERE id=$1', [u.id])).rows[0]
       .voice_output_voice;
     check(
-      '9.3. set_voice_preference сохраняет тембр и метит контекст',
-      res.voice_output_voice === 'nova' && ctx.voiceOutputVoice === 'nova' && saved === 'nova',
+      '9.3. voice_set_preference сохраняет тембр и метит контекст',
+      res.voice_output_voice === 'sage' && ctx.voiceOutputVoice === 'sage' && saved === 'sage',
     );
 
-    const bad = await executeTool(ctx, 'set_voice_preference', { selection: 'робокоп' });
+    const bad = await executeTool(ctx, 'voice_set_preference', { voice: 'робокоп' });
     check('9.3b. Неизвестный голос не сохраняется', !!bad.error && Array.isArray(bad.allowed_voices));
 
+    // Инструмент больше не угадывает намерение по тексту сообщения: он доступен при включённом
+    // голосовом выводе независимо от формулировки запроса, а выбор голоса делает сама модель.
     const withVoiceRequest = buildToolDefs({ isAdmin: false, userMessage: 'выбери голос onyx' }).map(
       (def) => def.function.name,
     );
@@ -2098,8 +2110,8 @@ async function layerVoiceOutput() {
       (def) => def.function.name,
     );
     check(
-      '9.3c. set_voice_preference доступен только для запроса о голосе',
-      withVoiceRequest.includes('set_voice_preference') && !withoutVoiceRequest.includes('set_voice_preference'),
+      '9.3c. voice_set_preference доступен при включённом голосовом выводе независимо от формулировки',
+      withVoiceRequest.includes('voice_set_preference') && withoutVoiceRequest.includes('voice_set_preference'),
     );
   }
 
@@ -2167,6 +2179,10 @@ async function main() {
   if (failures.length) {
     console.log('Провалены:', failures.join('; '));
   }
+  // Интеграционный прогон писал в журнал LLM-запросов записи с флагом is_test. Их не подчищаем —
+  // только сливаем остаток буфера в БД, чтобы тестовые записи журнала сохранились (как и тестовые
+  // пользователи). Отличать и при необходимости вычищать их можно по флагу is_test.
+  await flushLlmLog();
   await closePool();
   process.exit(failed > 0 ? 1 : 0);
 }

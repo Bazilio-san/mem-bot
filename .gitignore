@@ -27,6 +27,10 @@ playwright.config.js.map
 # секреты окружения
 .env
 .env.local
+
+# локальные секреты и переопределения node-config (не коммитятся)
+config/local.yaml
+config/local-*.yaml
 /.idea/
 /_tmp/
 **/node_modules/

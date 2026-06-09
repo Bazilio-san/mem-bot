@@ -4,6 +4,7 @@ import readline from 'node:readline';
 import { handleMessage } from './agent.js';
 import { tick } from './pipeline/scheduler.js';
 import { closePool } from './db.js';
+import { flushLlmLog } from './pipeline/llm-log.js';
 import { ensureUser } from './repo.js';
 import { isAdmin } from './pipeline/admin.js';
 import {
@@ -24,8 +25,7 @@ const ask = (q) => new Promise((res) => rl.question(q, res));
 console.log(`Чат-бот с памятью. Пользователь: ${externalId}, домен: ${domainKey}.`);
 console.log('Команды: /domain <key> — сменить домен, /tick — прогнать планировщик, /exit — выход.');
 console.log(
-  'Глобальная память (запись — только администратору): /fact-add <текст>, /fact-list, /fact-del <id>, ' +
-    '/kb-add <текст>, /kb-find <запрос>, /kb-del <id>.\n',
+  `Глобальная память (запись — только администратору): /fact-add <текст>, /fact-list, /fact-del <id>, /kb-add <текст>, /kb-find <запрос>, /kb-del <id>.\n`,
 );
 
 // Проверить, что текущий пользователь — администратор. Возвращает идентификатор пользователя или null.
@@ -166,6 +166,7 @@ async function main() {
   }
   clearInterval(schedulerTimer);
   rl.close();
+  await flushLlmLog();
   await closePool();
 }
 

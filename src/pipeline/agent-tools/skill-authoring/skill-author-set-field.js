@@ -74,20 +74,29 @@ export const skillAuthorSetFieldTool = {
     type: 'function',
     function: {
       name: 'skill_author_set_field',
-      description:
-        'Set a frontmatter field of a skill to a direct value. Use for non-text settings and lists: ' +
-        'title, description, enabled, when_to_use, positive_signals, negative_signals, tools_allowed, ' +
-        'tools_base, model_main, model_extract, references_allowed. For prompt wording use ' +
-        'skill_author_write_prompt; for the memory schema use the schema tools. Returns a preview unless apply=true.',
+      description: `Set a frontmatter field of a skill to a direct value. Use for non-text settings and lists:
+title, description, enabled, when_to_use, positive_signals, negative_signals, tools_allowed,
+tools_base, model_main, model_extract, references_allowed. For prompt wording use
+skill_author_write_prompt; for the memory schema use the schema tools. Returns a preview unless apply=true.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name', 'field', 'value'],
         properties: {
-          name: { type: 'string' },
-          field: { type: 'string', enum: FIELDS },
-          value: { description: 'New value: string, boolean, or array of strings depending on the field.' },
-          apply: { type: ['boolean', 'null'], description: 'Write to disk when true; otherwise preview only.' },
+          name: {
+            type: 'string',
+          },
+          field: {
+            type: 'string',
+            enum: FIELDS,
+          },
+          value: {
+            description: 'New value: string, boolean, or array of strings depending on the field.',
+          },
+          apply: {
+            type: ['boolean', 'null'],
+            description: 'Write to disk when true; otherwise preview only.',
+          },
         },
       },
     },

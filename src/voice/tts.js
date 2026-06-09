@@ -7,6 +7,7 @@
 // Поставщик и модель скрыты внутри: при необходимости их меняют через конфигурацию, не трогая адаптер.
 import { config } from '../config.js';
 import { chat } from '../llm.js';
+import { logLlmRequest } from '../pipeline/llm-log.js';
 
 // Снять разметку перед синтезом речи. Ответ может прийти с разметкой канала (теги HTML для Telegram либо
 // Markdown для веб-чата), и эти знаки нельзя отдавать в синтез — иначе бот зачитает теги и звёздочки вслух.
@@ -63,7 +64,7 @@ async function summarizeForVoice(answer, summaryLimit) {
     },
     { role: 'user', content: answer },
   ];
-  const msg = await chat({ model: config.voiceOutput.summaryModel, messages });
+  const msg = await chat({ model: config.voiceOutput.summaryModel, messages, kind: 'voice_summary' });
   return (msg.content || '').trim();
 }
 
@@ -105,7 +106,13 @@ export async function synthesizeSpeech(text, opts = {}) {
   const fetchImpl = opts.fetch || globalThis.fetch;
   const baseURL = (config.llm.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
   const url = `${baseURL}/audio/speech`;
+  const { model, format } = config.voiceOutput;
+  const voice = opts.voice || config.voiceOutput.voice;
+  // Для журнала вход — это текст (он сохраняется в payload), а синтезированное аудио на выходе описывается
+  // только метаданными в binary_meta. Сами байты аудио в журнал не попадают.
+  const logPayload = { model, voice, format, input: text };
   let lastErr;
+  const startedAt = Date.now();
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetchImpl(url, {
@@ -115,10 +122,10 @@ export async function synthesizeSpeech(text, opts = {}) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: config.voiceOutput.model,
+          model,
           input: text,
-          voice: opts.voice || config.voiceOutput.voice,
-          response_format: config.voiceOutput.format,
+          voice,
+          response_format: format,
         }),
       });
       if (!res.ok) {
@@ -129,10 +136,37 @@ export async function synthesizeSpeech(text, opts = {}) {
       if (!buf.length) {
         throw new Error('провайдер TTS вернул пустой аудиоответ');
       }
+      try {
+        logLlmRequest({
+          endpoint: 'audio.speech',
+          kind: 'tts',
+          model,
+          isBinary: true,
+          payload: logPayload,
+          binaryMeta: { format, byteLength: buf.length },
+          durationMs: Date.now() - startedAt,
+        });
+      } catch {
+        // журнал не должен влиять на синтез
+      }
       return buf;
     } catch (err) {
       lastErr = err;
     }
+  }
+  try {
+    logLlmRequest({
+      endpoint: 'audio.speech',
+      kind: 'tts',
+      model,
+      isBinary: true,
+      payload: logPayload,
+      durationMs: Date.now() - startedAt,
+      status: 'error',
+      error: lastErr?.message || lastErr,
+    });
+  } catch {
+    // журнал не должен влиять на синтез
   }
   throw lastErr;
 }

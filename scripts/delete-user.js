@@ -26,6 +26,10 @@
 //   node scripts/delete-user.js --prefix sandbox-          (все, чей external_id начинается с "sandbox-")
 //   node scripts/delete-user.js --prefix t --yes           (без интерактивного подтверждения)
 //
+// Запуск (удаление всех тестовых пользователей):
+//   node scripts/delete-user.js --test-users               (все, у кого mem.users.is_test = true)
+//   node scripts/delete-user.js --test-users --yes         (без интерактивного подтверждения)
+//
 // Значения можно перечислять через запятую и повторять флаги — всё объединяется.
 // Без флага --yes скрипт запрашивает подтверждение и удаляет только при вводе "yes".
 // Всё удаление выполняется в одной транзакции: при ошибке изменения откатываются.
@@ -44,11 +48,13 @@ function splitList(value) {
 // Разбор аргументов командной строки. Значения накапливаются в массивы,
 // чтобы поддержать и перечисление через запятую, и повторение флагов.
 function parseArgs(argv) {
-  const args = { ids: [], externalIds: [], names: [], prefixes: [], yes: false };
+  const args = { ids: [], externalIds: [], names: [], prefixes: [], testUsers: false, yes: false };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '--yes' || token === '-y') {
       args.yes = true;
+    } else if (token === '--test-users') {
+      args.testUsers = true;
     } else if (token === '--id') {
       args.ids.push(...splitList(argv[++i]));
     } else if (token === '--external-id' || token === '--ext') {
@@ -64,14 +70,20 @@ function parseArgs(argv) {
 
 // Найти всех пользователей по объединённому набору критериев. Возвращает массив
 // уникальных строк (дедупликация по id). Бросает ошибку, если критерии не заданы.
-async function findUsers({ ids, externalIds, names, prefixes }) {
-  if (!ids.length && !externalIds.length && !names.length && !prefixes.length) {
-    throw new Error('Не указан ни один критерий поиска. Используйте --id, --external-id, --name или --prefix.');
+async function findUsers({ ids, externalIds, names, prefixes, testUsers }) {
+  if (!ids.length && !externalIds.length && !names.length && !prefixes.length && !testUsers) {
+    throw new Error(
+      'Не указан ни один критерий поиска. Используйте --id, --external-id, --name, --prefix или --test-users.',
+    );
   }
 
   const byId = new Map();
   const addRows = (rows) => rows.forEach((r) => byId.set(r.id, r));
 
+  if (testUsers) {
+    const { rows } = await query('SELECT * FROM mem.users WHERE is_test = true');
+    addRows(rows);
+  }
   if (ids.length) {
     const { rows } = await query('SELECT * FROM mem.users WHERE id = ANY($1::uuid[])', [ids]);
     addRows(rows);
@@ -191,7 +203,8 @@ async function main() {
 
   // Всё удаление — в одной транзакции. Каскадные внешние ключи убирают связанные строки,
   // правила SET NULL обнуляют ссылки в сохраняемых таблицах.
-  const client = await getPool().connect();
+  const pool = await getPool();
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rowCount } = await client.query('DELETE FROM mem.users WHERE id = ANY($1::uuid[])', [userIds]);

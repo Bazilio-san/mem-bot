@@ -131,7 +131,7 @@ async function checkRelevance(userId, domainId, event) {
 ${facts}`;
   const user = `Заголовок: ${event.title}\nКатегория: ${event.category}\nСодержание: ${event.summary}`;
   try {
-    return await chatJSON({ system, user, schema, schemaName: 'news_relevance' });
+    return await chatJSON({ system, user, schema, schemaName: 'news_relevance', kind: 'event_relevance' });
   } catch {
     return { isRelevant: false, relevanceScore: 0, reason: 'Ошибка анализа.' };
   }
@@ -155,6 +155,7 @@ async function deliverEvent(user, domainId, event, relevance, candidate) {
 ${facts}`;
   const msg = await chat({
     model: config.llm.mainModel,
+    kind: 'proactive_message',
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: `${event.title}\n\n${event.summary}` },

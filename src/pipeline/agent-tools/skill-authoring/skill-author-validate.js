@@ -11,15 +11,19 @@ export const skillAuthorValidateTool = {
     type: 'function',
     function: {
       name: 'skill_author_validate',
-      description:
-        'Validate a skill without writing it: checks frontmatter shape, required blocks, schema ' +
-        'meta-validation, that allowed tools exist, and domain_key uniqueness. Validates the draft prepared ' +
-        'in this conversation if any, otherwise the on-disk skill. Returns ok and a list of issues.',
+      description: `Validate a skill without writing it: checks frontmatter shape, required blocks, schema
+meta-validation, that allowed tools exist, and domain_key uniqueness. Validates the draft prepared
+in this conversation if any, otherwise the on-disk skill. Returns ok and a list of issues.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name'],
-        properties: { name: { type: 'string', description: 'Skill name to validate.' } },
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Skill name to validate.',
+          },
+        },
       },
     },
   },

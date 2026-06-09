@@ -11,18 +11,24 @@ export const skillAuthorWritePromptTool = {
     type: 'function',
     function: {
       name: 'skill_author_write_prompt',
-      description:
-        'Rewrite or improve the skill response prompt (the "# Skill Prompt" block) following an ' +
-        'instruction. Use to change HOW the bot answers in this domain, not what it remembers. Returns a ' +
-        'preview unless apply=true.',
+      description: `Rewrite or improve the skill response prompt (the "# Skill Prompt" block) following an
+instruction. Use to change HOW the bot answers in this domain, not what it remembers. Returns a
+preview unless apply=true.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name', 'instruction'],
         properties: {
-          name: { type: 'string' },
-          instruction: { type: 'string', description: 'How to change the response prompt.' },
-          apply: { type: ['boolean', 'null'] },
+          name: {
+            type: 'string',
+          },
+          instruction: {
+            type: 'string',
+            description: 'How to change the response prompt.',
+          },
+          apply: {
+            type: ['boolean', 'null'],
+          },
         },
       },
     },

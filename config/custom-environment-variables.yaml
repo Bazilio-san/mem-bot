@@ -1,0 +1,260 @@
+---
+# Карта обратной совместимости: путь в дереве конфигурации → имя переменной окружения.
+# Если переменная окружения задана (в т. ч. из .env через dotenv), её значение переопределяет файлы.
+# Числа помечаются __format: number, флаги — __format: boolean ("true"/"false"), массивы/объекты — __format: json.
+# Ключи каждого уровня отсортированы по алфавиту (соглашение проекта).
+authSecret: AUTH_SECRET
+
+companion:
+  enabled:
+    __name: COMPANION_MODE
+    __format: boolean
+
+db:
+  postgres:
+    dbs:
+      bootstrap:               # те же креды/хост, БД фиксирована как 'postgres'
+        host: DB_HOST
+        password: DB_PASSWORD
+        port:
+          __name: DB_PORT
+          __format: number
+        user: DB_USER
+      main:
+        database: DB_NAME
+        host: DB_HOST
+        password: DB_PASSWORD
+        port:
+          __name: DB_PORT
+          __format: number
+        user: DB_USER
+
+debug: DEBUG
+
+globalMemory:
+  factsEnabled:
+    __name: GLOBAL_MEMORY_ENABLED
+    __format: boolean
+  factsLimit:
+    __name: GLOBAL_FACTS_LIMIT
+    __format: number
+  ragEnabled:
+    __name: GLOBAL_RAG_ENABLED
+    __format: boolean
+  ragLimit:
+    __name: GLOBAL_RAG_LIMIT
+    __format: number
+  ragMinRelevance:
+    __name: GLOBAL_RAG_MIN_RELEVANCE
+    __format: number
+
+historyCompression:
+  enabled:
+    __name: HISTORY_COMPRESSION_ENABLED
+    __format: boolean
+  hotWindow:
+    __name: HISTORY_HOT_WINDOW
+    __format: number
+  maxTokens:
+    __name: HISTORY_MAX_TOKENS
+    __format: number
+  minCompressGain:
+    __name: HISTORY_MIN_COMPRESS_GAIN
+    __format: number
+  model: HISTORY_SUMMARY_MODEL
+  shrinkTokens:
+    __name: HISTORY_SHRINK_TOKENS
+    __format: number
+  zoneWeights:
+    __name: HISTORY_ZONE_WEIGHTS    # JSON-массив, например [0.55,0.30,0.15]
+    __format: json
+
+llm:
+  apiKey: OPENAI_API_KEY
+  auxModel: AUX_MODEL
+  baseURL: OPENAI_BASE_URL
+  embedModel: EMBED_MODEL
+  extractModel: EXTRACT_MODEL
+  mainModel: MAIN_MODEL
+
+llmLog:
+  batchSize:
+    __name: LLM_LOG_BATCH_SIZE
+    __format: number
+  enabled:
+    __name: LLM_LOG_ENABLED
+    __format: boolean
+  flushIntervalMs:
+    __name: LLM_LOG_FLUSH_INTERVAL_MS
+    __format: number
+  maxPayloadChars:
+    __name: LLM_LOG_MAX_PAYLOAD_CHARS
+    __format: number
+
+mcp:
+  configPath: MCP_CONFIG_PATH
+
+memoryLimits:
+  dialog:
+    __name: MEMORY_LIMIT_DIALOG
+    __format: number
+  domain:
+    __name: MEMORY_LIMIT_DOMAIN
+    __format: number
+  profile:
+    __name: MEMORY_LIMIT_PROFILE
+    __format: number
+  reminder:
+    __name: MEMORY_LIMIT_REMINDER
+    __format: number
+  secure:
+    __name: MEMORY_LIMIT_SECURE
+    __format: number
+  total:
+    __name: MEMORY_LIMIT_TOTAL
+    __format: number
+
+proactive:
+  checkinHour:
+    __name: PROACTIVE_CHECKIN_HOUR
+    __format: number
+  contactPolicy:
+    minSoftPauseMinutes:
+      __name: PROACTIVE_MIN_SOFT_PAUSE_MIN
+      __format: number
+    quietAfterUnanswered:
+      __name: PROACTIVE_QUIET_AFTER_UNANSWERED
+      __format: number
+    quietHoursAfterIgnores:
+      __name: PROACTIVE_QUIET_HOURS_AFTER_IGNORES
+      __format: number
+    requestedReminderDailyLimit:
+      __name: PROACTIVE_REQUESTED_REMINDER_DAILY_LIMIT
+      __format: number
+    softDailyLimit:
+      __name: PROACTIVE_SOFT_DAILY_LIMIT
+      __format: number
+    softWeeklyLimit:
+      __name: PROACTIVE_SOFT_WEEKLY_LIMIT
+      __format: number
+  enabled:
+    __name: PROACTIVE_ENABLED
+    __format: boolean
+  events:
+    enabled:
+      __name: PROACTIVE_EVENTS_ENABLED
+      __format: boolean
+    relevanceThreshold:
+      __name: NEWS_RELEVANCE_THRESHOLD
+      __format: number
+  goalIntervalMinutes:
+    __name: PROACTIVE_GOAL_INTERVAL_MIN
+    __format: number
+  inactivityMinutes:
+    __name: PROACTIVE_INACTIVITY_MIN
+    __format: number
+  intervalMs:
+    __name: PROACTIVE_INTERVAL_MS
+    __format: number
+  welcomeBackGapMinutes:
+    __name: PROACTIVE_WELCOME_GAP_MIN
+    __format: number
+
+providers:
+  assemblyaiApiKey: ASSEMBLYAI_API_KEY
+  groqApiKey: GROQ_API_KEY
+  groqBaseURL: GROQ_BASE_URL
+  tavilyApiKey: TAVILY_API_KEY
+
+sandbox:
+  port:
+    __name: SANDBOX_PORT
+    __format: number
+
+schema:
+  keyEmbedThreshold:
+    __name: SCHEMA_KEY_EMBED_THRESHOLD
+    __format: number
+
+scheduler:
+  maxSleepMs:
+    __name: SCHEDULER_MAX_SLEEP_MS
+    __format: number
+  minSleepMs:
+    __name: SCHEDULER_MIN_SLEEP_MS
+    __format: number
+  workerId: SCHEDULER_WORKER_ID    # замена старой переменной WORKER_ID
+
+skills:
+  authoring:
+    enabled:
+      __name: SKILL_AUTHORING_ENABLED
+      __format: boolean
+    model: SKILL_AUTHORING_MODEL
+  dir: SKILLS_DIR
+  referenceMaxBytes:
+    __name: SKILL_REFERENCE_MAX_BYTES
+    __format: number
+  switchThreshold:
+    __name: SKILLS_SWITCH_THRESHOLD
+    __format: number
+
+streaming:
+  enabled:
+    __name: STREAMING_ENABLED        # замена старой переменной LLM_STREAMING_ENABLED
+    __format: boolean
+
+telegram:
+  apiKey: TELEGRAM_API_KEY
+  maxConcurrency:
+    __name: TELEGRAM_MAX_CONCURRENCY
+    __format: number
+  outboxSafetyIntervalMs:
+    __name: TELEGRAM_OUTBOX_SAFETY_INTERVAL_MS   # замена старой переменной OUTBOX_SAFETY_INTERVAL_MS
+    __format: number
+  streaming:
+    editIntervalMs:
+      __name: TELEGRAM_STREAMING_EDIT_INTERVAL_MS    # замена TELEGRAM_STREAM_EDIT_INTERVAL_MS
+      __format: number
+    enabled:
+      __name: TELEGRAM_STREAMING_ENABLED
+      __format: boolean
+    minEditChars:
+      __name: TELEGRAM_STREAMING_MIN_EDIT_CHARS      # замена TELEGRAM_STREAM_MIN_EDIT_CHARS
+      __format: number
+    minFirstDraftChars:
+      __name: TELEGRAM_STREAMING_MIN_FIRST_DRAFT_CHARS   # замена TELEGRAM_STREAM_MIN_FIRST_DRAFT_CHARS
+      __format: number
+    toolStatuses:
+      __name: TELEGRAM_STREAMING_TOOL_STATUSES       # замена TELEGRAM_TOOL_STATUS_ENABLED
+      __format: boolean
+
+timezone: TZ_DEFAULT
+
+voiceInput:
+  enabled:
+    __name: VOICE_INPUT_ENABLED
+    __format: boolean
+  language: VOICE_INPUT_LANG
+  maxBytes:
+    __name: VOICE_INPUT_MAX_BYTES
+    __format: number
+  maxSeconds:
+    __name: VOICE_INPUT_MAX_SECONDS
+    __format: number
+  provider: VOICE_INPUT_PROVIDER
+
+voiceOutput:
+  enabled:
+    __name: VOICE_OUTPUT_ENABLED
+    __format: boolean
+  format: VOICE_OUTPUT_FORMAT
+  maxChars:
+    __name: VOICE_OUTPUT_MAX_CHARS
+    __format: number
+  model: VOICE_OUTPUT_MODEL
+  summaryMaxChars:
+    __name: VOICE_OUTPUT_SUMMARY_MAX_CHARS
+    __format: number
+  summaryModel: VOICE_OUTPUT_SUMMARY_MODEL
+  voice: VOICE_OUTPUT_VOICE

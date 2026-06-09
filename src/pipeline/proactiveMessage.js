@@ -24,9 +24,7 @@ async function loadFacts(userId, domainId) {
 const TASK_BY_TRIGGER = {
   daily_checkin: 'Утренний короткий тёплый чек-ин, чтобы по-доброму начать день.',
   goal_reminder: 'Аккуратно напомни про цель или мягко спроси о прогрессе, без давления.',
-  welcome_back:
-    'Пользователь вернулся после паузы. Поприветствуй возвращение и предложи ОДНУ интересную тему ' +
-    'на основе его интересов — не перечисляй всё, что знаешь.',
+  welcome_back: `Пользователь вернулся после паузы. Поприветствуй возвращение и предложи ОДНУ интересную тему на основе его интересов — не перечисляй всё, что знаешь.`,
   inactivity: 'Пользователь давно не писал. Мягко начни разговор без давления и без упрёка за молчание.',
 };
 
@@ -160,6 +158,7 @@ ${facts}`;
 Задача: ${TASK_BY_TRIGGER[triggerType] || TASK_BY_TRIGGER.inactivity}`;
   const msg = await chat({
     model: config.llm.mainModel,
+    kind: 'proactive_message',
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: userPrompt },

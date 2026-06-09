@@ -1,5 +1,14 @@
--- Стартовая миграция: схема mem, типы, таблицы, индексы, базовые домены.
+-- Единая стартовая миграция: полная схема памяти в конечном состоянии.
 -- Рассчитана на PostgreSQL 16 + pgvector. Идемпотентна: повторный запуск не ломает БД.
+--
+-- Этот файл — результат схлопывания прежних миграций 001–016 в одну. Сведение выполнено к КОНЕЧНОМУ
+-- состоянию схемы, а не к простой конкатенации:
+--   * таблица mem.domain_schemas (прежние 006 + 014) исключена — она создавалась и тут же удалялась;
+--   * companion-виды памяти (прежняя 013) уже включены в определение типа mem.memory_kind ниже;
+--   * RAG-статья «Что умеет бот» (прежние 011 + 012) засевается сразу в финальном виде;
+--   * колонки, прежде добавлявшиеся через ALTER (003/005/007/009/015/016), встроены в CREATE TABLE.
+-- Журнала применённых миграций в проекте нет: src/migrate.js прогоняет все .sql каждый раз, поэтому
+-- все операторы здесь идемпотентны (IF NOT EXISTS / ON CONFLICT / WHERE NOT EXISTS).
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -15,6 +24,8 @@ DO $$ BEGIN
   CREATE TYPE mem.sensitivity_level AS ENUM ('public','low','normal','high','secret');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Включает виды для режима собеседника (прежняя миграция 013): emotional_pattern, activity_rhythm,
+-- communication_style, open_loop, topic_energy, discovery_seed.
 DO $$ BEGIN
   CREATE TYPE mem.memory_kind AS ENUM
     ('fact','preference','constraint','goal','history','state','progress','instruction','relationship','reminder',
@@ -35,16 +46,38 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ---- Пользователи -----------------------------------------------------------
+-- Колонки is_admin (005), proactivity_enabled (007), reply_mode (009), voice_output_voice (016)
+-- встроены сразу в определение таблицы.
+-- Флаг is_test помечает технических пользователей, создаваемых автотестами, по аналогии с
+-- log.llm_request.is_test. Он позволяет отличать и при необходимости вычищать тестовые записи,
+-- не затрагивая реальных пользователей.
 CREATE TABLE IF NOT EXISTS mem.users (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id  text UNIQUE,
     display_name text,
     locale       text NOT NULL DEFAULT 'ru',
     timezone     text NOT NULL DEFAULT 'Europe/Moscow',
+    is_admin     boolean NOT NULL DEFAULT false,
+    proactivity_enabled boolean NOT NULL DEFAULT false,
+    reply_mode   text NOT NULL DEFAULT 'text' CHECK (reply_mode IN ('text', 'voice')),
+    voice_output_voice text
+      CONSTRAINT users_voice_output_voice_check CHECK (
+        voice_output_voice IS NULL
+        OR voice_output_voice IN (
+          'alloy', 'ash', 'ballad', 'cedar', 'coral', 'marin',
+          'nova', 'fable', 'onyx', 'sage', 'verse'
+        )
+      ),
+    is_test      boolean NOT NULL DEFAULT false,
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
+
+-- Идемпотентное добавление is_test для уже существующих баз: CREATE TABLE IF NOT EXISTS выше
+-- не меняет схему существующей таблицы, поэтому колонку для ранее созданных баз добавляем
+-- отдельной инструкцией. ADD COLUMN IF NOT EXISTS с DEFAULT false не трогает данные.
+ALTER TABLE mem.users ADD COLUMN IF NOT EXISTS is_test boolean NOT NULL DEFAULT false;
 
 -- ---- Домены/специализации агента -------------------------------------------
 CREATE TABLE IF NOT EXISTS mem.agent_domains (
@@ -96,6 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON mem.conversation
 CREATE INDEX IF NOT EXISTS idx_messages_user_created ON mem.conversation_messages (user_id, created_at DESC);
 
 -- ---- Сводки диалога (сжатая краткосрочная память) ---------------------------
+-- Поля поджатия истории (прежняя миграция 003) встроены в определение таблицы.
 CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id uuid NOT NULL REFERENCES mem.conversations(id) ON DELETE CASCADE,
@@ -103,11 +137,35 @@ CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
     summary_text    text NOT NULL,
     state_json      jsonb NOT NULL DEFAULT '{}'::jsonb,
     importance      numeric(3,2) NOT NULL DEFAULT 0.50 CHECK (importance >= 0 AND importance <= 1),
+    -- Слой дайджеста. При зонировании активна одна строка 'full'; при послойном досжатии — near/middle/far.
+    layer           text NOT NULL DEFAULT 'full' CHECK (layer IN ('near','middle','far','full')),
+    -- Границы покрытой холодной зоны: от какого до какого сообщения и до какого момента времени.
+    covered_from_message_id uuid,
+    covered_to_message_id   uuid,
+    covered_until           timestamptz,
+    -- Сколько сообщений и токенов исходной холодной зоны вошло в дайджест (считается нашим кодом).
+    source_message_count integer NOT NULL DEFAULT 0,
+    source_token_count   integer NOT NULL DEFAULT 0,
+    -- Итоговый размер дайджеста в токенах (для контроля порога HISTORY_SHRINK_TOKENS).
+    summary_token_count  integer NOT NULL DEFAULT 0,
+    -- Какие факты не вошли в историю, потому что уже есть в долговременной памяти.
+    memory_dedupe jsonb NOT NULL DEFAULT '{}'::jsonb,
+    -- Версия записи дайджеста и признак активности (активна только последняя сводка диалога).
+    summary_version integer NOT NULL DEFAULT 1,
+    is_active boolean NOT NULL DEFAULT true,
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversation_summaries (conversation_id, created_at DESC);
+-- Быстрый доступ к активной сводке диалога.
+CREATE INDEX IF NOT EXISTS idx_summaries_active_conversation
+  ON mem.conversation_summaries (conversation_id, created_at DESC)
+  WHERE is_active = true;
+-- Поиск по покрытому моменту времени (для определения непокрытой холодной зоны).
+CREATE INDEX IF NOT EXISTS idx_summaries_covered_until
+  ON mem.conversation_summaries (conversation_id, covered_until DESC);
 
 -- ---- Главная таблица памяти: профиль + предметные знания --------------------
+-- Поля смысловой дедупликации (прежняя миграция 015) встроены в определение таблицы.
 CREATE TABLE IF NOT EXISTS mem.memory_items (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
@@ -135,6 +193,11 @@ CREATE TABLE IF NOT EXISTS mem.memory_items (
     last_used_at timestamptz,
     usage_count  integer NOT NULL DEFAULT 0,
 
+    -- Смысловая дедупликация: устойчивый ключ, каноническая группа и статус в группе.
+    dedupe_key         text,
+    canonical_group_id uuid,
+    dedupe_status      text NOT NULL DEFAULT 'candidate',
+
     embedding    vector(1536),
     search_tsv   tsvector GENERATED ALWAYS AS (
         to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(memory_text,''))
@@ -152,6 +215,12 @@ CREATE INDEX IF NOT EXISTS idx_memory_importance        ON mem.memory_items (use
 CREATE INDEX IF NOT EXISTS idx_memory_search_tsv        ON mem.memory_items USING gin (search_tsv);
 CREATE INDEX IF NOT EXISTS idx_memory_data_gin          ON mem.memory_items USING gin (data jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw    ON mem.memory_items USING hnsw (embedding vector_cosine_ops) WHERE embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_dedupe_key
+  ON mem.memory_items (user_id, dedupe_key)
+  WHERE status = 'active' AND dedupe_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_canonical_group
+  ON mem.memory_items (user_id, canonical_group_id)
+  WHERE canonical_group_id IS NOT NULL;
 
 -- ---- Защищённая память (шифрованные персональные данные) --------------------
 CREATE TABLE IF NOT EXISTS mem.secure_records (
@@ -258,6 +327,23 @@ CREATE TABLE IF NOT EXISTS mem.notification_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_attempt_at) WHERE status = 'pending';
 
+-- Событийная доставка очереди (прежняя миграция 004): при вставке строки со статусом «pending» база
+-- сама посылает уведомление PostgreSQL NOTIFY на канал «outbox_new». Адаптер слушает этот канал и
+-- опустошает очередь немедленно, а не по таймеру.
+CREATE OR REPLACE FUNCTION mem.notify_outbox() RETURNS trigger AS $$
+BEGIN
+  IF NEW.status = 'pending' THEN
+    PERFORM pg_notify('outbox_new', NEW.id::text);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notify_outbox ON mem.notification_outbox;
+CREATE TRIGGER trg_notify_outbox
+  AFTER INSERT ON mem.notification_outbox
+  FOR EACH ROW EXECUTE FUNCTION mem.notify_outbox();
+
 -- ---- Журнал вызовов инструментов агента ------------------------------------
 CREATE TABLE IF NOT EXISTS mem.tool_calls (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -292,3 +378,305 @@ CREATE TABLE IF NOT EXISTS mem.memory_jobs (
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_at) WHERE status = 'pending';
+
+-- ---- Проактивность (прежняя миграция 002): тематический трекинг, триггеры, журнал доставок --------
+-- 1. Тематический трекинг. Одна строка на пару «пользователь + домен + тема».
+CREATE TABLE IF NOT EXISTS mem.topic_mentions (
+    id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id               uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
+    domain_id             uuid REFERENCES mem.agent_domains(id),
+    topic_key             text NOT NULL,                 -- стабильный ключ темы: fitness, work_stress, sleep
+    mention_count         integer NOT NULL DEFAULT 1,
+    user_engagement_score real    NOT NULL DEFAULT 0.5 CHECK (user_engagement_score >= 0 AND user_engagement_score <= 1),
+    first_mentioned_at    timestamptz NOT NULL DEFAULT now(),
+    last_mentioned_at     timestamptz NOT NULL DEFAULT now(),
+    created_at            timestamptz NOT NULL DEFAULT now(),
+    updated_at            timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (user_id, domain_id, topic_key)
+);
+CREATE INDEX IF NOT EXISTS idx_topic_mentions_user_last       ON mem.topic_mentions (user_id, last_mentioned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_topic_mentions_user_engagement ON mem.topic_mentions (user_id, user_engagement_score DESC);
+
+-- 2. Триггеры проактивности. Набор триггеров на пользователя.
+CREATE TABLE IF NOT EXISTS mem.proactive_triggers (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
+    domain_id     uuid REFERENCES mem.agent_domains(id),
+    trigger_type  text NOT NULL,                          -- inactivity | daily_checkin | goal_reminder | welcome_back
+    config        jsonb NOT NULL DEFAULT '{}'::jsonb,      -- пороги срабатывания: {"minutes_inactive":1440}
+    enabled       boolean NOT NULL DEFAULT true,
+    last_fired_at timestamptz,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (user_id, trigger_type)
+);
+CREATE INDEX IF NOT EXISTS idx_proactive_triggers_enabled ON mem.proactive_triggers (enabled) WHERE enabled = true;
+
+-- 3. Журнал доставленных внешних событий. Защита от повторной доставки одного события.
+CREATE TABLE IF NOT EXISTS mem.event_deliveries (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
+    event_id        text NOT NULL,                         -- стабильный идентификатор события из источника
+    event_type      text NOT NULL DEFAULT 'news',
+    relevance_score real,
+    reason          text,
+    delivered_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (user_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (user_id, delivered_at DESC);
+
+-- ---- Глобальная память (прежняя миграция 005): глобальные факты и общая база знаний (RAG) ---------
+-- 1. Глобальные факты (always-on). Короткие записи, которые подмешиваются в каждый запрос как
+--    авторитетные общие сведения и политика. Источник доверенный (только администратор).
+CREATE TABLE IF NOT EXISTS mem.global_facts (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = факт действует во всех доменах
+    fact_text   text NOT NULL,
+    priority    integer NOT NULL DEFAULT 100,             -- меньше число — выше в списке при отборе под лимит
+    enabled     boolean NOT NULL DEFAULT true,
+    created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
+    metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_global_facts_enabled ON mem.global_facts (enabled, priority) WHERE enabled = true;
+
+-- 2. Общая база знаний (RAG). Тексты, видимые всем, подмешиваются по релевантности к запросу.
+CREATE TABLE IF NOT EXISTS mem.global_knowledge (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = знание общее для всех доменов
+    title       text,
+    content     text NOT NULL,
+    tags        text[] NOT NULL DEFAULT '{}',
+    importance  numeric(3,2) NOT NULL DEFAULT 0.50 CHECK (importance >= 0 AND importance <= 1),
+    status      mem.memory_status NOT NULL DEFAULT 'active',
+    source      text,                                     -- откуда взят текст (документ, ссылка, автор)
+    created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
+    embedding   vector(1536),
+    search_tsv  tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(content,''))
+    ) STORED,
+    metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_global_knowledge_domain_status ON mem.global_knowledge (domain_id, status);
+CREATE INDEX IF NOT EXISTS idx_global_knowledge_search_tsv    ON mem.global_knowledge USING gin (search_tsv);
+CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_knowledge
+                                                              USING hnsw (embedding vector_cosine_ops)
+                                                              WHERE embedding IS NOT NULL;
+
+-- 3. Засев базовых глобальных фактов. Идемпотентно: каждый факт вставляется, только если его ещё нет
+--    (сверка по тексту), поэтому повторный прогон дублей не создаёт.
+INSERT INTO mem.global_facts (fact_text, priority, metadata)
+SELECT v.fact_text, v.priority, '{"seed":"005"}'::jsonb
+FROM (VALUES
+  ('Создатель бота — Кот Базилио. Он создал бота 6 июня 2026 года в 12:00 по московскому времени.', 10),
+  ('Имя бота — Яша. Если пользователь дал боту другое имя, использовать имя, которое дал пользователь.', 10),
+  ('Создатель бота, Кот Базилио, — программист.', 20),
+  ('Стакан наполовину мангуст.', 100),
+  ('Перевёрнутая кружка — без дна и с запаянным верхом.', 100),
+  ('Вечером все кошки серые.', 100),
+  ('Солнце светит — это ясно.', 100),
+  ('Луна боится, что получит по жопе, поэтому всегда повёрнута к нам мордой.', 100)
+) AS v(fact_text, priority)
+WHERE NOT EXISTS (
+  SELECT 1 FROM mem.global_facts gf WHERE gf.fact_text = v.fact_text
+);
+
+-- ---- Внешние идентификаторы сообщений (прежняя миграция 008) ---------------
+-- Связь внутренней истории с сообщениями в каналах доставки. Используется обработчиками реакций.
+CREATE TABLE IF NOT EXISTS mem.message_external_refs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_message_id uuid NOT NULL REFERENCES mem.conversation_messages(id) ON DELETE CASCADE,
+    channel text NOT NULL,
+    chat_external_id text NOT NULL,
+    message_external_id text NOT NULL,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (channel, chat_external_id, message_external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
+ON mem.message_external_refs (conversation_message_id);
+
+-- ---- Состояние контакта для проактивности (прежняя миграция 010) -----------
+-- Каналонезависимое состояние контакта для человекоподобной проактивности.
+CREATE TABLE IF NOT EXISTS mem.proactive_contact_state (
+    user_id                           uuid PRIMARY KEY REFERENCES mem.users(id) ON DELETE CASCADE,
+    mode                              text NOT NULL DEFAULT 'active'
+                                      CHECK (mode IN ('active','cautious','quiet')),
+    last_proactive_sent_at            timestamptz,
+    last_soft_proactive_sent_at       timestamptz,
+    last_user_reply_after_proactive_at timestamptz,
+    unanswered_proactive_count        integer NOT NULL DEFAULT 0 CHECK (unanswered_proactive_count >= 0),
+    ignored_soft_count_7d             integer NOT NULL DEFAULT 0 CHECK (ignored_soft_count_7d >= 0),
+    daily_soft_count                  integer NOT NULL DEFAULT 0 CHECK (daily_soft_count >= 0),
+    daily_requested_reminder_count    integer NOT NULL DEFAULT 0 CHECK (daily_requested_reminder_count >= 0),
+    weekly_soft_count                 integer NOT NULL DEFAULT 0 CHECK (weekly_soft_count >= 0),
+    counters_day                      date NOT NULL DEFAULT CURRENT_DATE,
+    counters_week                     date NOT NULL DEFAULT date_trunc('week', now())::date,
+    quiet_until                       timestamptz,
+    last_trigger_type                 text,
+    last_topic_key                    text,
+    updated_at                        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_proactive_contact_state_mode
+    ON mem.proactive_contact_state (mode, quiet_until);
+
+-- ---- Засев RAG-статьи «Что умеет бот» (прежние миграции 011 + 012) ---------
+-- Финальный вид статьи (после правки 012, убравшей сведения о конкретных доменах). Идемпотентно:
+-- вставляется только если статьи с таким source/kind ещё нет, поэтому повторный прогон дублей не создаёт.
+INSERT INTO mem.global_knowledge (title, content, tags, importance, source, metadata)
+SELECT
+  'Что умеет бот',
+  $rag$
+Эта статья нужна для ответов на вопросы: "Что ты можешь?", "Что ты умеешь?", "Какие у тебя функции?",
+"Чем ты можешь помочь?", "Какие у тебя инструменты?".
+
+Бот - агентское приложение с долговременной памятью, общей базой знаний и подключаемыми инструментами. Он умеет
+поддерживать обычный диалог, помнить полезные факты о пользователе, искать по базе знаний, создавать напоминания и
+выполнять доступные в текущем запуске инструменты, когда это действительно нужно для ответа или действия.
+
+Основные возможности:
+- Отвечает на вопросы и ведёт диалог с учётом текущей даты, времени, часового пояса и недавней истории разговора.
+- Использует долговременную память: профиль пользователя, факты текущего диалога, активные напоминания и безопасные
+  ссылки на защищённые записи.
+- Управляет памятью по просьбе пользователя: может показать, что помнит, забыть конкретную сущность или полностью
+  очистить память после явного подтверждения.
+- Работает с общей базой знаний RAG: находит релевантные статьи и фрагменты, но не тащит весь корпус знаний в каждый
+  ответ.
+- Видит доступные инструменты во время ответа. Поэтому на вопрос о возможностях должен совмещать эту статью только с
+  фактическим списком подключённых инструментов, который видит в текущем запуске.
+- Домены агента — это внутренние области контекста и памяти. Они не являются умениями и не используются как источник
+  публичного списка возможностей.
+- Создаёт напоминания и задачи через планировщик, если пользователь просит напомнить, проверить или сделать что-то в
+  будущем.
+- Может переключать формат ответа между текстом и голосом, если в окружении включён голосовой вывод.
+- Может принимать голосовые сообщения, если включено распознавание речи.
+- Может работать проактивно, если пользователь явно включил проактивность: напоминать, возвращаться к целям или
+  аккуратно писать после паузы с учётом антиспама.
+- Для администратора доступны инструменты наполнения общей памяти: добавление и удаление глобальных фактов и статей
+  базы знаний.
+
+Как отвечать на вопрос "Что ты умеешь?":
+1. Не ограничиваться сухим списком инструментов. Дать красивый, понятный обзор человеческим языком.
+2. Сначала назвать главное: диалог, память, инструменты, напоминания и RAG.
+3. Затем привести несколько практических примеров запросов пользователя.
+4. Чётко отделять то, что включено сейчас, от того, что возможно только при включённом флаге или подключённом
+   инструменте.
+5. Не обещать недоступные функции. Если конкретный инструмент или флаг не виден в текущем контексте, формулировать
+   осторожно: "могу, если это подключено" или "в этой сборке вижу такие инструменты".
+6. Не выводить умения из доменов. Если в контексте есть домены, они обозначают только области памяти и классификации,
+   а не действия вроде "искать", "покупать", "решать" или "рассказывать".
+
+Пример хорошего тона ответа:
+"Я могу быть собеседником с памятью: помнить важные факты, помогать с задачами, создавать напоминания, искать по базе
+знаний и пользоваться подключёнными инструментами. Сейчас я вижу такие инструменты: ... Поэтому ты можешь спросить
+меня, например: 'напомни завтра', 'что ты обо мне помнишь?', 'объясни по базе знаний', 'забудь этот факт'."
+$rag$,
+  ARRAY['bot', 'capabilities', 'about', 'tools', 'rag'],
+  0.95,
+  'seed:011',
+  '{"seed":"011","kind":"bot_capabilities","seed_update":"012"}'::jsonb
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM mem.global_knowledge
+  WHERE source = 'seed:011'
+     OR (title = 'Что умеет бот' AND metadata->>'kind' = 'bot_capabilities')
+);
+
+-- ============================================================================
+-- Журнал обращений к LLM и смежным сервисам (распознавание речи, синтез речи, эмбеддинги).
+-- Схема log отделена от прикладной схемы mem: у журнальных таблиц нет внешних ключей на mem.*,
+-- они не участвуют в каскадах и устойчивы к удалению пользователей и разговоров.
+--
+-- Миграция применяется при КАЖДОМ старте (src/migrate.js прогоняет все файлы подряд), поэтому она
+-- полностью идемпотентна: только CREATE ... IF NOT EXISTS и CREATE OR REPLACE. DROP TABLE запрещён —
+-- иначе журнал стирался бы при каждом запуске бота. Триггер пересоздаётся через DROP TRIGGER IF EXISTS,
+-- это безопасно: пересоздаётся только сам триггер, данные таблиц не трогаются.
+-- ============================================================================
+
+CREATE SCHEMA IF NOT EXISTS log;
+
+-- Полный журнал: одна строка на каждое обращение к модели или смежному сервису.
+CREATE TABLE IF NOT EXISTS log.llm_request (
+  llm_request_id    bigserial PRIMARY KEY,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  request_id        text,
+  request_kind      text,
+  endpoint          text,
+  provider          text,
+  model             text,
+  model_priced      text,
+  user_id           text,
+  conversation_id   text,
+  domain_key        text,
+  channel           text,
+  is_binary         boolean NOT NULL DEFAULT false,
+  payload           jsonb,
+  binary_meta       jsonb,
+  payload_truncated boolean NOT NULL DEFAULT false,
+  prompt_tokens     integer,
+  completion_tokens integer,
+  total_tokens      integer,
+  price_usd         numeric(12,6),
+  duration_ms       integer,
+  status            text NOT NULL DEFAULT 'ok',
+  error             text,
+  is_test           boolean NOT NULL DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS llm_request_created_at_ix  ON log.llm_request (created_at);
+CREATE INDEX IF NOT EXISTS llm_request_request_id_ix  ON log.llm_request (request_id);
+CREATE INDEX IF NOT EXISTS llm_request_kind_ix        ON log.llm_request (request_kind);
+CREATE INDEX IF NOT EXISTS llm_request_user_ix        ON log.llm_request (user_id, created_at);
+CREATE INDEX IF NOT EXISTS llm_request_model_ix       ON log.llm_request (model);
+CREATE INDEX IF NOT EXISTS llm_request_is_test_ix     ON log.llm_request (is_test) WHERE is_test;
+
+-- Узкий журнал: только то, что нужно для быстрых агрегатов по токенам и стоимости.
+CREATE TABLE IF NOT EXISTS log.llm_usage (
+  llm_usage_id      bigserial PRIMARY KEY,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  llm_request_id    bigint,
+  request_kind      text,
+  model             text,
+  user_id           text,
+  prompt_tokens     integer,
+  completion_tokens integer,
+  total_tokens      integer,
+  price_usd         numeric(12,6),
+  duration_ms       integer,
+  is_test           boolean NOT NULL DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS llm_usage_created_at_ix ON log.llm_usage (created_at);
+CREATE INDEX IF NOT EXISTS llm_usage_user_ix       ON log.llm_usage (user_id, created_at);
+CREATE INDEX IF NOT EXISTS llm_usage_model_ix      ON log.llm_usage (model);
+CREATE INDEX IF NOT EXISTS llm_usage_kind_ix       ON log.llm_usage (request_kind);
+CREATE INDEX IF NOT EXISTS llm_usage_is_test_ix    ON log.llm_usage (is_test) WHERE is_test;
+
+-- Триггерная функция: при вставке в полный журнал переносит биллинговую часть в узкий журнал,
+-- но только если есть что считать (есть токены или рассчитанная цена). Неудавшиеся обращения
+-- без полезной нагрузки для биллинга в узкую таблицу не попадают и не засоряют агрегаты.
+CREATE OR REPLACE FUNCTION log.llm_request_to_usage() RETURNS trigger AS $$
+BEGIN
+  IF NEW.total_tokens IS NOT NULL OR NEW.price_usd IS NOT NULL THEN
+    INSERT INTO log.llm_usage (
+      created_at, llm_request_id, request_kind, model, user_id,
+      prompt_tokens, completion_tokens, total_tokens, price_usd, duration_ms, is_test
+    ) VALUES (
+      NEW.created_at, NEW.llm_request_id, NEW.request_kind, NEW.model_priced, NEW.user_id,
+      NEW.prompt_tokens, NEW.completion_tokens, NEW.total_tokens, NEW.price_usd, NEW.duration_ms, NEW.is_test
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS llm_request_to_usage_trg ON log.llm_request;
+CREATE TRIGGER llm_request_to_usage_trg
+  AFTER INSERT ON log.llm_request
+  FOR EACH ROW EXECUTE FUNCTION log.llm_request_to_usage();
+
+COMMENT ON TABLE log.llm_request IS 'Полный журнал обращений к LLM и смежным сервисам. Текст — целиком, бинарь — только метаданные файла';
+COMMENT ON TABLE log.llm_usage   IS 'Узкий журнал токенов и стоимости для быстрого подсчёта затрат на LLM';

@@ -6,7 +6,7 @@
 // Для каждой модели замеряется время синтеза, проверяется, что вернулись непустые аудиоданные,
 // и результат сохраняется в каталог _tmp/ для прослушивания. Ошибки каждой модели перехватываются
 // по отдельности, чтобы сбой одной не мешал проверить остальные.
-import 'dotenv/config';
+import { config } from '../src/config.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -22,26 +22,26 @@ const DEFAULT_TEXT =
 const TARGETS = [
   {
     label: 'proxy/openai/gpt-4o-mini-tts (opus)',
-    baseURL: process.env.OPENAI_BASE_URL || '',
-    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: config.llm.baseURL || '',
+    apiKey: config.llm.apiKey,
     model: 'openai/gpt-4o-mini-tts',
-    voice: 'alloy',
+    voice: 'ash',
     format: 'opus', // Telegram sendVoice ожидает OGG/OPUS — проверяем именно этот формат
   },
   {
     label: 'proxy/openai/gpt-4o-mini-tts (mp3)',
-    baseURL: process.env.OPENAI_BASE_URL || '',
-    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: config.llm.baseURL || '',
+    apiKey: config.llm.apiKey,
     model: 'openai/gpt-4o-mini-tts',
-    voice: 'alloy',
+    voice: 'ash',
     format: 'mp3', // запасной формат на случай, если прокси не поддерживает opus
   },
   {
     label: 'proxy/openai/tts-1 (opus)',
-    baseURL: process.env.OPENAI_BASE_URL || '',
-    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: config.llm.baseURL || '',
+    apiKey: config.llm.apiKey,
     model: 'openai/tts-1',
-    voice: 'alloy',
+    voice: 'ash',
     format: 'opus',
   },
 ];

@@ -1,210 +1,81 @@
-// Конфигурация приложения. Значения берутся из .env.
-// LLM-клиент использует OpenAI API напрямую, если OPENAI_BASE_URL не задан. Если переменная задана, все вызовы
-// идут в OpenAI-совместимый прокси по этому адресу, например в LiteLLM. Модели ниже проверялись на таком прокси
-// скриптом tests/check-llm.js (все отвечают 5/5: чат, JSON, инструменты, эмбеддинги):
-//   основной агент и извлечение фактов : gpt-5.4-mini
-//   классификация запроса              : gpt-5.4-nano
-//   эмбеддинги                         : text-embedding-3-small (1536 измерений)
-// Любую модель можно переопределить переменными окружения MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL/EMBED_MODEL.
-// Замечание по скорости относится к проверенному прокси: gpt-5.4-* отвечают за ~5–10 с, а gpt-4o-mini — за
-// ~1.2 с; если нужен максимально быстрый отклик, задайте MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL=gpt-4o-mini.
-import 'dotenv/config';
+// Конфигурация приложения. Полностью строится пакетом node-config из YAML-иерархии config/:
+// значения по умолчанию — config/default.yaml; окружение — development/production/test.yaml
+// (выбирается по NODE_ENV); секреты — config/local.yaml; переопределения окружением —
+// config/custom-environment-variables.yaml. Существующий .env по-прежнему читается (через bootstrap-загрузчик
+// ниже) и переопределяет значения через ту же карту переменных окружения.
+//
+// Здесь структура НЕ пересобирается: config — это снимок готового дерева node-config. Код добавляет лишь
+// проверку обязательных параметров и несколько инвариантов, которые невозможно выразить средствами YAML,
+// и в случае ошибки валит процесс с понятным сообщением.
+//
+// Модели по умолчанию: основной агент и извлечение фактов — gpt-5.4-mini, классификация запроса — gpt-5.4-nano,
+// эмбеддинги — text-embedding-3-small (1536 измерений). Любую модель можно переопределить переменными
+// окружения MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL/EMBED_MODEL или в config/local.yaml. Если задан llm.baseURL
+// (OPENAI_BASE_URL), клиент OpenAI шлёт запросы в OpenAI-совместимый прокси (например, LiteLLM); пустое
+// значение означает прямой вызов https://api.openai.com/v1.
+import './bootstrap/dotenv.js'; // ПЕРВОЙ строкой: наполняет process.env до загрузки node-config
+import nodeConfig from 'config'; // node-config читает каталог config/ при первом импорте
 import { normalizeVoiceId } from './voice/voices.js';
 
-const { env } = process;
-const openaiBaseURL = env.OPENAI_BASE_URL?.trim() || undefined;
-const defaultVoiceOutputModel = openaiBaseURL ? 'openai/gpt-4o-mini-tts' : 'gpt-4o-mini-tts';
-const defaultVoiceOutputVoice = normalizeVoiceId(env.VOICE_OUTPUT_VOICE) || 'alloy';
+// Готовое дерево конфигурации как обычный изменяемый объект. Форма совпадает со структурой config/default.yaml.
+export const config = nodeConfig.util.toObject();
 
-// Чтение булевых флагов из окружения. Включают значения 1/true/on/yes; всё прочее — выключено.
-const flag = (v, d = false) =>
-  v === undefined ? d : ['1', 'true', 'on', 'yes'].includes(String(v).trim().toLowerCase());
-
-// Базовая БД, к которой подключаемся для создания целевой БД памяти.
-const adminUrl = env.DATABASE_URL || 'postgresql://postgres:1@localhost:5432/postgres';
-
-// Целевая БД для памяти агента. Отдельная, чтобы не смешивать с прочими данными.
-const MEM_DB = env.MEM_DB_NAME || 'agent_mem';
-
-function withDb(url, dbName) {
-  return url.replace(/\/[^/]*$/, `/${dbName}`);
+// Падение с понятным сообщением, если обязательные параметры не заданы.
+// Пустая строка, null или отсутствие ключа считаются «не задано» (пустой host у af-db-ts = выключенная БД).
+export function requireConfig(paths) {
+  const missing = paths.filter((p) => {
+    const v = nodeConfig.has(p) ? nodeConfig.get(p) : undefined;
+    return v === undefined || v === null || v === '';
+  });
+  if (missing.length) {
+    throw new Error(
+      `Не заданы обязательные параметры конфигурации: ${missing.join(', ')}. ` +
+        `Задайте их в config/local.yaml или через переменные окружения ` +
+        `(см. config/custom-environment-variables.yaml).`,
+    );
+  }
 }
 
-export const config = {
-  // Строка подключения к серверной БД (для административных операций: CREATE DATABASE).
-  adminDatabaseUrl: withDb(adminUrl, 'postgres'),
-  // Строка подключения к рабочей БД памяти.
-  databaseUrl: env.MEM_DATABASE_URL || withDb(adminUrl, MEM_DB),
-  memDbName: MEM_DB,
+// Универсальный минимум для любого процесса: рабочая БД и доступ к LLM.
+// Канальные и частные требования каждая точка входа проверяет сама (например, telegram.apiKey в боте).
+requireConfig([
+  'db.postgres.dbs.main.host',
+  'db.postgres.dbs.main.database',
+  'db.postgres.dbs.main.user',
+  'db.postgres.dbs.main.password',
+  'llm.apiKey',
+]);
 
-  llm: {
-    apiKey: env.OPENAI_API_KEY,
-    // Адрес LLM-провайдера. Если OPENAI_BASE_URL задан, клиент OpenAI отправляет запросы в этот
-    // OpenAI-совместимый прокси. Если не задан, SDK использует прямой API https://api.openai.com/v1.
-    baseURL: openaiBaseURL,
-    // Основной агент: отвечает пользователю и вызывает инструменты.
-    mainModel: env.MAIN_MODEL || 'gpt-5.4-mini',
-    // Вспомогательная быстрая модель: классификация запроса.
-    auxModel: env.AUX_MODEL || 'gpt-5.4-nano',
-    // Модель извлечения фактов в память.
-    extractModel: env.EXTRACT_MODEL || 'gpt-5.4-mini',
-    // Модель эмбеддингов для смыслового поиска памяти.
-    embedModel: env.EMBED_MODEL || 'text-embedding-3-small',
-    embedDim: 1536,
-  },
+// --- Инварианты: тоже падаем с понятным сообщением ---
+// Гистерезис: целевой размер дайджеста строго меньше порога запуска, иначе сжатие будет срабатывать сразу
+// после самого себя и зациклится.
+if (config.historyCompression.shrinkTokens >= config.historyCompression.maxTokens) {
+  throw new Error('historyCompression.shrinkTokens должен быть строго меньше historyCompression.maxTokens.');
+}
+// Жёсткий потолок длины озвучиваемого текста.
+if (config.voiceOutput.maxChars > 500) {
+  throw new Error('voiceOutput.maxChars не может превышать 500.');
+}
 
-  // Ключ для шифрования защищённых данных (AES-256-GCM). Берётся из AUTH_SECRET.
-  authSecret: env.AUTH_SECRET || 'dev-insecure-secret-change-me',
+// --- Минимальные неизбежные нормализации (то, что нельзя выразить в YAML) ---
+// Пустой baseURL означает «прямой OpenAI API» — приводим '' к undefined для клиента OpenAI.
+if (!config.llm.baseURL) {
+  config.llm.baseURL = undefined;
+}
+// Тембр голоса канонизируем и проверяем на известность (только если синтез включён).
+if (config.voiceOutput.enabled) {
+  const v = normalizeVoiceId(config.voiceOutput.voice);
+  if (!v) {
+    throw new Error(`Неизвестный voiceOutput.voice: "${config.voiceOutput.voice}".`);
+  }
+  config.voiceOutput.voice = v;
+}
 
-  timezone: env.TZ_DEFAULT || 'Europe/Moscow',
-  debug: (env.DEBUG || '')
+// debug в YAML и окружении — строка категорий через запятую; разбираем её только здесь.
+export function debugEnabled(category) {
+  const list = String(config.debug || '')
     .split(',')
     .map((s) => s.trim())
-    .filter(Boolean),
-
-  // Режим собеседника: темпоральный и тематический контекст в онлайн-ответе + извлечение тем после ответа.
-  companion: {
-    enabled: flag(env.COMPANION_MODE, false),
-  },
-
-  // Проактивный контур: бот пишет первым по триггерам с анти-спамом. По умолчанию выключен.
-  proactive: {
-    enabled: flag(env.PROACTIVE_ENABLED, false),
-    intervalMs: Number(env.PROACTIVE_INTERVAL_MS || 300000), // как часто воркер проверяет триггеры
-    inactivityMinutes: Number(env.PROACTIVE_INACTIVITY_MIN || 1440),
-    checkinHour: Number(env.PROACTIVE_CHECKIN_HOUR || 10),
-    goalIntervalMinutes: Number(env.PROACTIVE_GOAL_INTERVAL_MIN || 2880),
-    welcomeBackGapMinutes: Number(env.PROACTIVE_WELCOME_GAP_MIN || 60),
-    contactPolicy: {
-      softDailyLimit: Number(env.PROACTIVE_SOFT_DAILY_LIMIT || 1),
-      softWeeklyLimit: Number(env.PROACTIVE_SOFT_WEEKLY_LIMIT || 3),
-      requestedReminderDailyLimit: Number(env.PROACTIVE_REQUESTED_REMINDER_DAILY_LIMIT || 2),
-      minSoftPauseMinutes: Number(env.PROACTIVE_MIN_SOFT_PAUSE_MIN || 360),
-      quietAfterUnanswered: Number(env.PROACTIVE_QUIET_AFTER_UNANSWERED || 2),
-      quietHoursAfterIgnores: Number(env.PROACTIVE_QUIET_HOURS_AFTER_IGNORES || 24),
-    },
-    events: {
-      // Контур внешних событий. Требует proactive.enabled (использует ту же доставку и анти-спам).
-      enabled: flag(env.PROACTIVE_EVENTS_ENABLED, false),
-      relevanceThreshold: Number(env.NEWS_RELEVANCE_THRESHOLD || 0.6),
-    },
-  },
-
-  // Слой per-domain схем data: валидация data по схеме домена и канонизация entity_key при записи факта.
-  // Схема обязательна: предметный факт (с entity_type) сохраняется только если у домена есть схема,
-  // в ней объявлена эта сущность, и data проходит валидацию. Иначе факт отклоняется, а не сохраняется.
-  schema: {
-    // Порог косинусной близости при канонизации ключа fixed_vocab по эмбеддингу: ниже — не канонизируем.
-    keyEmbedThreshold: Number(env.SCHEMA_KEY_EMBED_THRESHOLD || 0.82),
-  },
-
-  // Agent Skills — единый механизм домена. Каждый каталог skills/<name>/ с файлом SKILL.md задаёт доменный
-  // namespace памяти и всё поведение домена: признаки классификации, prompt основного ответа, prompt
-  // извлечения фактов, закрытую схему доменной памяти, набор инструментов и справочники. Источник схемы —
-  // файл рядом со skill. Реестр читается при старте из каталога skills.
-  skills: {
-    dir: env.SKILLS_DIR || 'skills',
-    // Порог уверенности классификатора для переключения на другой skill (анти-дребезг текущего skill диалога).
-    switchThreshold: Number(env.SKILLS_SWITCH_THRESHOLD || 0.65),
-    // Предел размера одного справочника, читаемого инструментом skill_read_reference (в байтах).
-    referenceMaxBytes: Number(env.SKILL_REFERENCE_MAX_BYTES || 50000),
-    // Инструментарий создания и редактирования навыков моделью. Доступен только администраторам и только при
-    // включённом флаге. Модель генерации пуста по умолчанию — тогда берётся config.llm.mainModel.
-    authoring: {
-      enabled: flag(env.SKILL_AUTHORING_ENABLED, false),
-      model: env.SKILL_AUTHORING_MODEL || null,
-    },
-  },
-
-  // Жёсткие лимиты минимизации памяти: сколько фактов каждой области попадает в промпт (раздел 10.7 архитектуры).
-  // Список ранжируется по релевантности и обрезается до этих значений. По умолчанию совпадают с прежними константами.
-  memoryLimits: {
-    profile: Number(env.MEMORY_LIMIT_PROFILE || 7), // устойчивые факты о пользователе и стиле общения
-    dialog: Number(env.MEMORY_LIMIT_DIALOG || 5), // факты текущего диалога
-    domain: Number(env.MEMORY_LIMIT_DOMAIN || 12), // факты предметной области
-    reminder: Number(env.MEMORY_LIMIT_REMINDER || 3), // активные напоминания
-    secure: Number(env.MEMORY_LIMIT_SECURE || 3), // безопасные резюме защищённых данных
-    total: Number(env.MEMORY_LIMIT_TOTAL || 30), // общий потолок числа фактов в промпте
-  },
-
-  // Глобальная память: общий для всех пользователей слой. Два независимых механизма, каждый со своим флагом.
-  // Глобальные факты подмешиваются в каждый запрос; общая база знаний (RAG) — только релевантные фрагменты.
-  // Наполнять и чистить оба хранилища может только администратор (пометка is_admin). По умолчанию всё выключено.
-  globalMemory: {
-    factsEnabled: flag(env.GLOBAL_MEMORY_ENABLED, false), // всегда-включённые глобальные факты + их инструменты
-    factsLimit: Number(env.GLOBAL_FACTS_LIMIT || 5), // сколько фактов подмешивать в каждый запрос
-    ragEnabled: flag(env.GLOBAL_RAG_ENABLED, false), // общая база знаний (RAG) + её инструменты
-    ragLimit: Number(env.GLOBAL_RAG_LIMIT || 5), // сколько фрагментов базы знаний подмешивать по релевантности
-    ragMinRelevance: Number(env.GLOBAL_RAG_MIN_RELEVANCE || 0.3), // порог отсечения слабых совпадений базы знаний
-  },
-
-  // Распознавание входящего аудио (речь в текст). По умолчанию выключено, как и прочие необязательные контуры.
-  // При выключенном флаге голосовые сообщения, кружки и присланные аудио/видео игнорируются, как и раньше.
-  voiceInput: {
-    enabled: flag(env.VOICE_INPUT_ENABLED, false),
-    // Выбор распознавателя из реестра src/voice/transcribe.js. По умолчанию — самый быстрый и дешёвый.
-    provider: env.VOICE_INPUT_PROVIDER || 'groq-whisper-large-v3-turbo',
-    maxSeconds: Number(env.VOICE_INPUT_MAX_SECONDS || 300), // предел длительности (пять минут)
-    maxBytes: Number(env.VOICE_INPUT_MAX_BYTES || 25000000), // предел размера, когда длительность неизвестна
-    language: env.VOICE_INPUT_LANG || 'ru', // код языка-подсказки для распознавателя
-  },
-
-  // Голосовой ответ бота (текст в речь, TTS). Канальная настройка Telegram-адаптера: ядро лишь хранит и
-  // возвращает предпочтение формы ответа, а сам синтез и доставка голосом живут в канале. По умолчанию
-  // выключено — при выключенном флаге инструмент set_reply_mode не подключается и бот отвечает текстом.
-  // Синтез использует тот же OpenAI-compatible base URL: OPENAI_BASE_URL ведёт в прокси, пустое значение —
-  // напрямую в OpenAI API. Проверенный LiteLLM-прокси отдаёт gpt-4o-mini-tts и OGG/OPUS без перекодировки.
-  voiceOutput: {
-    enabled: flag(env.VOICE_OUTPUT_ENABLED, false),
-    model: env.VOICE_OUTPUT_MODEL || defaultVoiceOutputModel, // модель TTS для выбранного base URL
-    voice: defaultVoiceOutputVoice, // тембр (язык подстраивается под текст ответа)
-    format: env.VOICE_OUTPUT_FORMAT || 'opus', // OGG/OPUS — прямая отправка в Telegram sendVoice
-    // Жёсткий предел длины текста, отправляемого в синтез. Значение по умолчанию и максимум — 500 символов:
-    // более длинный текст никогда не уходит в TTS, вместо него озвучивается резюме.
-    maxChars: Math.min(500, Number(env.VOICE_OUTPUT_MAX_CHARS || 500)),
-    // Порог длины самого резюме, чтобы голосовое сообщение оставалось коротким (не больше общего предела).
-    summaryMaxChars: Number(env.VOICE_OUTPUT_SUMMARY_MAX_CHARS || 500),
-    // Модель построения резюме для длинных ответов и ответов с кодом или списками (быстрая вспомогательная).
-    summaryModel: env.VOICE_OUTPUT_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
-  },
-
-  // Потоковая обратная связь. Ядро стримит финальный текст модели по частям и испускает абстрактные
-  // события этапов и вызовов инструментов через callback onEvent (см. src/agent.js). Telegram-адаптер —
-  // лишь один потребитель этих событий. По умолчанию включено: новый UX работает без настройки .env.
-  // streaming.enabled управляет ядром (потоковый вызов модели), telegramEnabled — отображением в Telegram.
-  streaming: {
-    enabled: flag(env.LLM_STREAMING_ENABLED, true), // потоковый вызов модели в ядре агента
-    telegramEnabled: flag(env.TELEGRAM_STREAMING_ENABLED, true), // редактируемый черновик ответа в Telegram
-    editIntervalMs: Number(env.TELEGRAM_STREAM_EDIT_INTERVAL_MS || 500), // не чаще одного редактирования за это время
-    minEditChars: Number(env.TELEGRAM_STREAM_MIN_EDIT_CHARS || 20), // и не реже, чем накопится столько новых символов
-    // Первый видимый пузырь-черновик создаём только когда накопился осмысленный объём текста. Иначе пользователь
-    // видит мигающий пузырь из одной-двух букв («Я»), который тут же переписывается. Короткий ответ, который
-    // завершится раньше этого порога, доставляется целиком методом complete() — без промежуточного черновика.
-    minFirstDraftChars: Number(env.TELEGRAM_STREAM_MIN_FIRST_DRAFT_CHARS || 50),
-    toolStatuses: flag(env.TELEGRAM_TOOL_STATUS_ENABLED, true), // показывать ли статус вызова инструмента
-  },
-
-  // Поджатие старой части истории диалога. По умолчанию выключено, как и прочие необязательные контуры.
-  // Последние hotWindow сообщений всегда передаются дословно; всё, что старше, сжимается в дайджест.
-  historyCompression: {
-    enabled: flag(env.HISTORY_COMPRESSION_ENABLED, false),
-    hotWindow: Number(env.HISTORY_HOT_WINDOW || 8), // сколько последних сообщений не сжимать вообще
-    maxTokens: Number(env.HISTORY_MAX_TOKENS || 2000), // порог запуска сжатия холодной зоны
-    shrinkTokens: Number(env.HISTORY_SHRINK_TOKENS || 800), // целевой максимум размера дайджеста
-    zoneWeights: String(env.HISTORY_ZONE_WEIGHTS || '0.55,0.30,0.15')
-      .split(',')
-      .map(Number), // ближняя/средняя/дальняя
-    model: env.HISTORY_SUMMARY_MODEL || env.AUX_MODEL || 'gpt-5.4-nano',
-    minCompressGain: Number(env.HISTORY_MIN_COMPRESS_GAIN || 0.35), // минимальный выигрыш сжатия, иначе не перезаписываем
-  },
-};
-
-// Гистерезис: целевой размер дайджеста должен быть строго меньше порога запуска,
-// иначе сжатие будет срабатывать сразу после самого себя и зациклится.
-if (config.historyCompression.shrinkTokens >= config.historyCompression.maxTokens) {
-  throw new Error('HISTORY_SHRINK_TOKENS должен быть меньше HISTORY_MAX_TOKENS');
-}
-
-export function debugEnabled(category) {
-  return config.debug.includes('*') || config.debug.includes(category);
+    .filter(Boolean);
+  return list.includes('*') || list.includes(category);
 }

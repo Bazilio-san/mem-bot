@@ -14,10 +14,10 @@ import { initTools } from './pipeline/tools.js';
 import { config } from './config.js';
 
 // Нижняя граница сна не даёт воркеру крутиться слишком часто, когда задачи идут вплотную.
-const MIN_SLEEP_MS = Number(process.env.SCHEDULER_MIN_SLEEP_MS || 250);
+const MIN_SLEEP_MS = config.scheduler.minSleepMs;
 // Верхняя граница ограничивает максимальный сон, чтобы воркер периодически перепроверял базу
 // и соблюдал интервал проактивности даже при полном отсутствии задач планировщика.
-const MAX_SLEEP_MS = Number(process.env.SCHEDULER_MAX_SLEEP_MS || 30000);
+const MAX_SLEEP_MS = config.scheduler.maxSleepMs;
 
 let lastProactiveAt = 0;
 // Функция досрочного пробуждения текущего сна. Устанавливается на время сна, иначе null.

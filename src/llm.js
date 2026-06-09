@@ -2,8 +2,12 @@
 // вроде LiteLLM; если не задан, обращается напрямую к OpenAI API.
 // Используется Chat Completions API (а не Responses API), потому что он совместим с обоими режимами.
 // Доступны три операции: обычный чат с инструментами, чат со строгим JSON по схеме и получение эмбеддингов.
+// Каждая операция как побочный эффект логирует обращение в журнал (src/pipeline/llm-log.js): замеряет время,
+// извлекает токены из ответа провайдера и кладёт запись в буфер. Логирование обёрнуто в защиту от исключений,
+// поэтому сбой журнала не влияет на возвращаемый результат, а форма возвращаемого значения не меняется.
 import OpenAI from 'openai';
 import { config, debugEnabled } from './config.js';
+import { logLlmRequest } from './pipeline/llm-log.js';
 
 const client = new OpenAI({ apiKey: config.llm.apiKey, baseURL: config.llm.baseURL });
 
@@ -13,9 +17,32 @@ function dbg(...args) {
   }
 }
 
+// Безопасно залогировать обращение: любая ошибка журналирования гасится, чтобы не повлиять на ответ модели.
+function safeLog(input) {
+  try {
+    logLlmRequest(input);
+  } catch {
+    // журнал не должен ломать основной поток
+  }
+}
+
+// Извлечь токены из объекта usage ответа провайдера в единый вид. Поля могут отсутствовать (тогда null).
+function extractUsage(usage) {
+  if (!usage) {
+    return { promptTokens: null, completionTokens: null, totalTokens: null, cachedTokens: 0 };
+  }
+  return {
+    promptTokens: usage.prompt_tokens ?? null,
+    completionTokens: usage.completion_tokens ?? null,
+    totalTokens: usage.total_tokens ?? null,
+    cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+  };
+}
+
 // Чат с поддержкой инструментов. Возвращает объект message ответа модели
 // (с полями content и tool_calls), чтобы вызывающий код мог отработать цикл инструментов.
-export async function chat({ model = config.llm.mainModel, messages, tools, toolChoice }) {
+// Необязательный параметр kind задаёт тип запроса для журнала (по умолчанию выводится по конечной точке).
+export async function chat({ model = config.llm.mainModel, messages, tools, toolChoice, kind }) {
   const body = { model, messages };
   if (tools && tools.length) {
     body.tools = tools;
@@ -24,7 +51,24 @@ export async function chat({ model = config.llm.mainModel, messages, tools, tool
     body.tool_choice = toolChoice;
   }
   dbg('chat ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
-  const res = await client.chat.completions.create(body);
+  const startedAt = Date.now();
+  let res;
+  try {
+    res = await client.chat.completions.create(body);
+  } catch (err) {
+    safeLog({
+      endpoint: 'chat.completions',
+      kind,
+      model,
+      payload: body,
+      durationMs: Date.now() - startedAt,
+      status: 'error',
+      error: err.message || err,
+    });
+    throw err;
+  }
+  const usage = extractUsage(res.usage);
+  safeLog({ endpoint: 'chat.completions', kind, model, payload: body, durationMs: Date.now() - startedAt, ...usage });
   const msg = res.choices[0].message;
   dbg('chat <-', JSON.stringify(msg).slice(0, 400));
   return msg;
@@ -90,8 +134,21 @@ export function finalizeChatMessage(acc) {
 // но по мере поступления текста вызывает onDelta(chunkText), чтобы канал мог показывать ответ постепенно.
 // Если инструменты не вызываются, onDelta получает текст ответа по частям; на ходу аргументы инструментов
 // не разбираются — это делает вызывающий код после получения готового сообщения.
-export async function chatStream({ model = config.llm.mainModel, messages, tools, toolChoice, onDelta }) {
-  const body = { model, messages, stream: true };
+// stream_options.include_usage просит провайдера прислать финальный чанк с заполненным usage, чтобы по
+// завершении потока залогировать фактические токены. Откат на непотоковый chat при ошибке делает вызывающий
+// код (см. runModelTurn в src/agent.js) — там логирование выполняет уже сам chat, поэтому здесь повторно не
+// логируем путь ошибки.
+export async function chatStream({
+  model = config.llm.mainModel,
+  messages,
+  tools,
+  toolChoice,
+  onDelta,
+  kind,
+  client: clientArg,
+}) {
+  const api = clientArg || client;
+  const body = { model, messages, stream: true, stream_options: { include_usage: true } };
   if (tools && tools.length) {
     body.tools = tools;
   }
@@ -100,12 +157,18 @@ export async function chatStream({ model = config.llm.mainModel, messages, tools
   }
   dbg('chatStream ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
 
-  const stream = await client.chat.completions.create(body);
+  const startedAt = Date.now();
+  const stream = await api.chat.completions.create(body);
   const acc = createDeltaAccumulator();
   let chunks = 0;
   let finishReason = null;
+  let usageRaw = null;
   for await (const chunk of stream) {
     chunks++;
+    // Финальный чанк с usage обычно приходит с пустым choices — забираем последний непустой usage.
+    if (chunk.usage) {
+      usageRaw = chunk.usage;
+    }
     const choice = chunk.choices?.[0];
     if (!choice) {
       continue;
@@ -120,6 +183,14 @@ export async function chatStream({ model = config.llm.mainModel, messages, tools
     }
   }
   const message = finalizeChatMessage(acc);
+  safeLog({
+    endpoint: 'chat.completions',
+    kind,
+    model,
+    payload: body,
+    durationMs: Date.now() - startedAt,
+    ...extractUsage(usageRaw),
+  });
   dbg('chatStream <-', 'chunks:', chunks, 'finish:', finishReason, 'tool_calls:', message.tool_calls?.length || 0);
   return message;
 }
@@ -128,7 +199,8 @@ export async function chatStream({ model = config.llm.mainModel, messages, tools
 // Используется режим json_object с описанием схемы прямо в промпте: строгий режим
 // json_schema в strict-режиме отклоняет схемы со свободными полями (data, entities),
 // поэтому надёжнее задавать схему текстом и требовать соответствия ей.
-export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result' }) {
+// Необязательный параметр kind задаёт тип запроса для журнала.
+export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result', kind }) {
   const schemaText = JSON.stringify(schema);
   const sys = `${system || ''}
 
@@ -136,14 +208,38 @@ export async function chatJSON({ model = config.llm.auxModel, system, user, sche
 ${schemaText}
 Без markdown, без пояснений, без текста до или после JSON. Только сам объект.`;
 
-  dbg('chatJSON ->', model, schemaName);
-  const res = await client.chat.completions.create({
+  const body = {
     model,
     messages: [
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ],
     response_format: { type: 'json_object' },
+  };
+  dbg('chatJSON ->', model, schemaName);
+  const startedAt = Date.now();
+  let res;
+  try {
+    res = await client.chat.completions.create(body);
+  } catch (err) {
+    safeLog({
+      endpoint: 'chat.completions',
+      kind,
+      model,
+      payload: body,
+      durationMs: Date.now() - startedAt,
+      status: 'error',
+      error: err.message || err,
+    });
+    throw err;
+  }
+  safeLog({
+    endpoint: 'chat.completions',
+    kind,
+    model,
+    payload: body,
+    durationMs: Date.now() - startedAt,
+    ...extractUsage(res.usage),
   });
   const { content } = res.choices[0].message;
   try {
@@ -160,11 +256,32 @@ ${schemaText}
 
 // Получить эмбеддинг текста для смыслового поиска памяти. При ошибке возвращает null,
 // тогда система откатывается на полнотекстовый и структурный поиск без векторов.
-export async function embed(text) {
+// Необязательный параметр kind задаёт тип запроса для журнала (по умолчанию 'embedding').
+export async function embed(text, { kind } = {}) {
+  const model = config.llm.embedModel;
+  const startedAt = Date.now();
   try {
-    const res = await client.embeddings.create({ model: config.llm.embedModel, input: text });
+    const res = await client.embeddings.create({ model, input: text });
+    const usage = extractUsage(res.usage);
+    safeLog({
+      endpoint: 'embeddings',
+      kind,
+      model,
+      payload: { model, input: text },
+      durationMs: Date.now() - startedAt,
+      ...usage,
+    });
     return res.data[0].embedding;
   } catch (err) {
+    safeLog({
+      endpoint: 'embeddings',
+      kind,
+      model,
+      payload: { model, input: text },
+      durationMs: Date.now() - startedAt,
+      status: 'error',
+      error: err.message || err,
+    });
     dbg('эмбеддинг недоступен:', err.message);
     return null;
   }

@@ -5,13 +5,21 @@ import { estimateTokens } from './pipeline/token-counter.js';
 import { normalizeVoiceId } from './voice/voices.js';
 
 // Найти или создать пользователя по внешнему идентификатору (например, Telegram ID).
-export async function ensureUser(externalId, { displayName = null, locale = 'ru', timezone = 'Europe/Moscow' } = {}) {
+// Флаг is_test помечает технических пользователей автотестов так же, как log.llm_request.is_test
+// помечает журнальные записи тестового прогона: по умолчанию он берётся из NODE_ENV === 'test',
+// поэтому каждый пользователь, созданный во время прогона тестов (в том числе неявно через
+// handleMessage), помечается тестовым без правок в каждом тесте. На существующего пользователя
+// флаг не переустанавливается: ветка ON CONFLICT обновляет только updated_at.
+export async function ensureUser(
+  externalId,
+  { displayName = null, locale = 'ru', timezone = 'Europe/Moscow', isTest = process.env.NODE_ENV === 'test' } = {},
+) {
   const { rows } = await query(
-    `INSERT INTO mem.users (external_id, display_name, locale, timezone)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO mem.users (external_id, display_name, locale, timezone, is_test)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (external_id) DO UPDATE SET updated_at = now()
      RETURNING *`,
-    [externalId, displayName, locale, timezone],
+    [externalId, displayName, locale, timezone, isTest],
   );
   return rows[0];
 }

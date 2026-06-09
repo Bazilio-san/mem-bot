@@ -8,10 +8,37 @@
 // поддерживаемые сервисы принимают сжатые форматы Telegram (OGG/OPUS, MP4, M4A, WebM) напрямую. Рабочие
 // реализации адаптеров перенесены из проверочного скрипта scripts/stt-experiment.js практически без изменений.
 import path from 'node:path';
+import { config } from '../config.js';
+import { logLlmRequest } from '../pipeline/llm-log.js';
 
 const OPENAI_COMPATIBLE = 'openai-compatible';
 const ASSEMBLYAI = 'assemblyai';
 const AAI_BASE = 'https://api.assemblyai.com';
+
+// Реестр распознавателей хранит имена переменных окружения (keyEnv/baseEnv) как историческую метку для
+// диагностических сообщений. Сами значения читаются только через config — прямого process.env здесь нет.
+// Эти таблицы сопоставляют имя переменной с местом значения в дереве конфигурации.
+const KEY_RESOLVERS = {
+  GROQ_API_KEY: () => config.providers.groqApiKey,
+  ASSEMBLYAI_API_KEY: () => config.providers.assemblyaiApiKey,
+  OPENAI_API_KEY: () => config.llm.apiKey,
+};
+const BASE_RESOLVERS = {
+  GROQ_BASE_URL: () => config.providers.groqBaseURL,
+  OPENAI_BASE_URL: () => config.llm.baseURL,
+};
+
+// Значение ключа доступа для распознавателя по имени его переменной окружения (или undefined, если нет).
+function resolveProviderKey(envName) {
+  const resolver = KEY_RESOLVERS[envName];
+  return resolver ? resolver() : undefined;
+}
+
+// Базовый URL для распознавателя по имени его переменной окружения (или undefined, если не задан).
+function resolveProviderBase(envName) {
+  const resolver = BASE_RESOLVERS[envName];
+  return resolver ? resolver() : undefined;
+}
 
 // Реестр поддерживаемых распознавателей. Значение переменной окружения VOICE_INPUT_PROVIDER выбирает строку.
 // Группа openai-compatible использует единый интерфейс audio/transcriptions (Groq и LiteLLM-прокси), поэтому
@@ -64,7 +91,7 @@ export function isProviderConfigured(provider) {
   if (!spec) {
     return false;
   }
-  return Boolean(process.env[spec.keyEnv]);
+  return Boolean(resolveProviderKey(spec.keyEnv));
 }
 
 // Распознать ли тип вложения как «присланный файл», для которого показываем распознанный текст пользователю.
@@ -317,7 +344,7 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
   if (!spec) {
     throw new Error(`Неизвестный распознаватель речи: ${provider}`);
   }
-  const apiKey = process.env[spec.keyEnv];
+  const apiKey = resolveProviderKey(spec.keyEnv);
   if (!apiKey) {
     throw new Error(`Не задан ключ ${spec.keyEnv} для распознавателя ${provider}`);
   }
@@ -329,19 +356,70 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
   });
   const fileName = attachment.fileName || (filePath ? filePath.split('/').pop() : 'audio');
 
+  // Сведения о распознавателе для журнала. Имя модели и провайдер зависят от типа распознавателя.
+  const isAssembly = spec.type === ASSEMBLYAI;
+  const logModel = isAssembly ? 'universal-2' : spec.model;
+  const logProvider = isAssembly ? 'assemblyai' : spec.keyEnv === 'GROQ_API_KEY' ? 'groq' : 'openai';
+  // Журнал бинарного обращения: содержимое файла и распознанный текст не сохраняются — только метаданные
+  // файла в binary_meta и нетекстовые параметры запроса в payload (распознанный текст — пользовательские
+  // данные, он и так попадает в обычную историю сообщений).
+  const binaryMeta = {
+    kind: attachment.kind,
+    mimeType: attachment.mimeType,
+    fileName,
+    fileSize: attachment.fileSize,
+    durationSeconds: attachment.durationSeconds,
+  };
+  const logPayload = { model: logModel, language: language || null, response_format: 'json' };
+  const startedAt = Date.now();
+
   let text;
-  if (spec.type === ASSEMBLYAI) {
-    text = await transcribeAssemblyAI({ apiKey, fileBuf: buffer, language });
-  } else {
-    const baseURL = (process.env[spec.baseEnv] || spec.defaultBase || '').replace(/\/$/, '') || undefined;
-    text = await transcribeOpenAICompatible({
-      baseURL,
-      apiKey,
-      model: spec.model,
-      fileBuf: buffer,
-      fileName,
-      language,
+  try {
+    if (isAssembly) {
+      text = await transcribeAssemblyAI({ apiKey, fileBuf: buffer, language });
+    } else {
+      const baseURL = (resolveProviderBase(spec.baseEnv) || spec.defaultBase || '').replace(/\/$/, '') || undefined;
+      text = await transcribeOpenAICompatible({
+        baseURL,
+        apiKey,
+        model: spec.model,
+        fileBuf: buffer,
+        fileName,
+        language,
+      });
+    }
+  } catch (err) {
+    try {
+      logLlmRequest({
+        endpoint: 'audio.transcriptions',
+        kind: 'stt',
+        model: logModel,
+        provider: logProvider,
+        isBinary: true,
+        payload: logPayload,
+        binaryMeta,
+        durationMs: Date.now() - startedAt,
+        status: 'error',
+        error: err?.message || err,
+      });
+    } catch {
+      // журнал не должен влиять на распознавание
+    }
+    throw err;
+  }
+  try {
+    logLlmRequest({
+      endpoint: 'audio.transcriptions',
+      kind: 'stt',
+      model: logModel,
+      provider: logProvider,
+      isBinary: true,
+      payload: logPayload,
+      binaryMeta,
+      durationMs: Date.now() - startedAt,
     });
+  } catch {
+    // журнал не должен влиять на распознавание
   }
 
   const clean = (text || '').trim();

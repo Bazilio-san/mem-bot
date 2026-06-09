@@ -10,6 +10,7 @@
 // таблиц памяти.
 import { loadSkills, listSkillRoutes, getSkill } from './registry.js';
 import { query, closePool } from '../../db.js';
+import { flushLlmLog } from '../llm-log.js';
 
 function cmdValidate() {
   const { byName } = loadSkills({ force: true });
@@ -78,6 +79,7 @@ async function main() {
     console.error('Ошибка:', err.message);
     process.exitCode = 1;
   } finally {
+    await flushLlmLog();
     await closePool();
   }
 }

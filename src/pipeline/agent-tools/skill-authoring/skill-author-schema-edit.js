@@ -11,19 +11,25 @@ export const skillAuthorSchemaEditTool = {
     type: 'function',
     function: {
       name: 'skill_author_schema_edit',
-      description:
-        'Edit the existing domain memory schema by instruction: add or remove an entity, a data field, ' +
-        'a vocabulary value, a synonym, or change the entity_key mode. Use for targeted schema changes; to ' +
-        'create a schema from scratch use skill_author_schema_generate. Returns a preview and validation issues ' +
-        'unless apply=true.',
+      description: `Edit the existing domain memory schema by instruction: add or remove an entity, a data field,
+a vocabulary value, a synonym, or change the entity_key mode. Use for targeted schema changes; to
+create a schema from scratch use skill_author_schema_generate. Returns a preview and validation issues
+unless apply=true.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name', 'instruction'],
         properties: {
-          name: { type: 'string' },
-          instruction: { type: 'string', description: 'What to change in the schema.' },
-          apply: { type: ['boolean', 'null'] },
+          name: {
+            type: 'string',
+          },
+          instruction: {
+            type: 'string',
+            description: 'What to change in the schema.',
+          },
+          apply: {
+            type: ['boolean', 'null'],
+          },
         },
       },
     },

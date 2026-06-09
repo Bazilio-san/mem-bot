@@ -1,4 +1,0 @@
-interface:
-  display_name: "AI Memory Bot Python"
-  short_description: "Build Python agents with memory"
-  default_prompt: "Use $ai-memory-bot-python to create a full Python AI bot with memory, PostgreSQL, migrations, and tests."

@@ -4,10 +4,12 @@
 // Отсутствие файла или ошибка разбора не должны ронять процесс — в этом случае серверов просто нет.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { config } from '../config.js';
 
-// Путь к файлу конфигурации. По умолчанию .mcp.json в корне проекта; можно переопределить переменной
-// окружения MCP_CONFIG_PATH, если файл лежит в другом месте.
-const CONFIG_PATH = resolve(process.cwd(), process.env.MCP_CONFIG_PATH || '.mcp.json');
+// Путь к файлу конфигурации. По умолчанию .mcp.json в корне проекта; можно переопределить параметром
+// config.mcp.configPath (переменная окружения MCP_CONFIG_PATH), если файл лежит в другом месте.
+// Путь резолвится относительно текущего рабочего каталога процесса (process.cwd()).
+const CONFIG_PATH = resolve(process.cwd(), config.mcp.configPath);
 
 // Привести одну запись из секции mcpServers формата Claude Code к внутреннему описанию сервера.
 // Поддерживается только транспорт по HTTP (StreamableHTTP): для записи нужен url. Поля title,

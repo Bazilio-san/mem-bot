@@ -15,7 +15,7 @@
 // Важное наблюдение: все перечисленные сервисы принимают сжатые форматы (ogg/opus, mp3, mp4, m4a, wav,
 // webm) напрямую, поэтому для пути «распознавание готового файла» внешняя утилита ffmpeg НЕ требуется.
 // ffmpeg нужен только для потокового whisper-rt, где на вход идёт сырой PCM.
-import 'dotenv/config';
+import { config } from '../src/config.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -27,8 +27,8 @@ if (!FILE) {
   process.exit(1);
 }
 
-const OPENAI_BASE = (process.env.OPENAI_BASE_URL || '').replace(/\/$/, '');
-const GROQ_BASE = (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+const OPENAI_BASE = (config.llm.baseURL || '').replace(/\/$/, '');
+const GROQ_BASE = (config.providers.groqBaseURL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
 const AAI_BASE = 'https://api.assemblyai.com';
 
 // Угадать MIME-тип по расширению, чтобы корректно подписать файл в multipart-запросе.
@@ -142,20 +142,20 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
 // --- Перечень проверяемых распознавателей ------------------------------------------------------------
 function buildTargets() {
   const targets = [];
-  if (process.env.ASSEMBLYAI_API_KEY) {
+  if (config.providers.assemblyaiApiKey) {
     targets.push({
       label: 'AssemblyAI/universal-2',
-      run: (fileBuf) => transcribeAssemblyAI({ apiKey: process.env.ASSEMBLYAI_API_KEY, fileBuf, language: LANG }),
+      run: (fileBuf) => transcribeAssemblyAI({ apiKey: config.providers.assemblyaiApiKey, fileBuf, language: LANG }),
     });
   }
-  if (process.env.OPENAI_API_KEY) {
+  if (config.llm.apiKey) {
     for (const model of ['openai/gpt-4o-transcribe', 'openai/gpt-4o-mini-transcribe']) {
       targets.push({
         label: `proxy/${model}`,
         run: (fileBuf, fileName) =>
           transcribeOpenAICompatible({
             baseURL: OPENAI_BASE,
-            apiKey: process.env.OPENAI_API_KEY,
+            apiKey: config.llm.apiKey,
             model,
             fileBuf,
             fileName,
@@ -164,14 +164,14 @@ function buildTargets() {
       });
     }
   }
-  if (process.env.GROQ_API_KEY) {
+  if (config.providers.groqApiKey) {
     for (const model of ['whisper-large-v3', 'whisper-large-v3-turbo']) {
       targets.push({
         label: `groq/${model}`,
         run: (fileBuf, fileName) =>
           transcribeOpenAICompatible({
             baseURL: GROQ_BASE,
-            apiKey: process.env.GROQ_API_KEY,
+            apiKey: config.providers.groqApiKey,
             model,
             fileBuf,
             fileName,

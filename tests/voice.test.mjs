@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config } from '../src/config.js';
 import {
   detectAttachment,
   checkAttachmentLimits,
@@ -144,31 +145,29 @@ function layerLimits() {
 }
 
 // ---- 4. Готовность распознавателя по ключу -----------------------------------
+// Ключи провайдеров читаются из config (снимок дерева node-config). Тест управляет готовностью, меняя
+// значение прямо в config, а не в process.env: прямого чтения окружения в коде больше нет.
 function layerConfigured() {
   section('4. Готовность распознавателя по наличию ключа');
-  const saved = process.env.GROQ_API_KEY;
-  delete process.env.GROQ_API_KEY;
+  const saved = config.providers.groqApiKey;
+  config.providers.groqApiKey = '';
   check('4.1. Без ключа распознаватель не готов', isProviderConfigured('groq-whisper-large-v3-turbo') === false);
-  process.env.GROQ_API_KEY = 'test-key';
+  config.providers.groqApiKey = 'test-key';
   check('4.2. С ключом распознаватель готов', isProviderConfigured('groq-whisper-large-v3-turbo') === true);
   check('4.3. Неизвестный распознаватель не готов', isProviderConfigured('nonexistent') === false);
-  if (saved === undefined) {
-    delete process.env.GROQ_API_KEY;
-  } else {
-    process.env.GROQ_API_KEY = saved;
-  }
+  config.providers.groqApiKey = saved;
 }
 
 // ---- 5. Сквозное распознавание через заглушку сети ---------------------------
 async function layerTranscribe() {
   section('5. Сквозное распознавание (заглушка сети)');
   const savedFetch = globalThis.fetch;
-  const savedGroq = process.env.GROQ_API_KEY;
-  const savedOpenai = process.env.OPENAI_API_KEY;
+  const savedGroq = config.providers.groqApiKey;
+  const savedOpenai = config.llm.apiKey;
 
   // 5.1. Распознанный текст доходит без искажений (OpenAI-совместимый путь, Groq).
   {
-    process.env.GROQ_API_KEY = 'test-key';
+    config.providers.groqApiKey = 'test-key';
     const calls = installFetch([
       ['/getFile', fakeResponse({ json: { ok: true, result: { file_path: 'voice/file_1.oga' } } })],
       ['/file/bot', fakeResponse({ bytes: 16 })],
@@ -196,7 +195,7 @@ async function layerTranscribe() {
 
   // 5.2. Пустой результат распознавания помечается признаком empty.
   {
-    process.env.GROQ_API_KEY = 'test-key';
+    config.providers.groqApiKey = 'test-key';
     installFetch([
       ['/getFile', fakeResponse({ json: { ok: true, result: { file_path: 'voice/file_2.oga' } } })],
       ['/file/bot', fakeResponse({ bytes: 16 })],
@@ -231,7 +230,7 @@ async function layerTranscribe() {
 
   // 5.4. Отсутствие ключа доступа отклоняется до скачивания.
   {
-    delete process.env.OPENAI_API_KEY;
+    config.llm.apiKey = '';
     let threw = false;
     try {
       await transcribeTelegramAttachment({
@@ -248,16 +247,8 @@ async function layerTranscribe() {
   }
 
   globalThis.fetch = savedFetch;
-  if (savedGroq === undefined) {
-    delete process.env.GROQ_API_KEY;
-  } else {
-    process.env.GROQ_API_KEY = savedGroq;
-  }
-  if (savedOpenai === undefined) {
-    delete process.env.OPENAI_API_KEY;
-  } else {
-    process.env.OPENAI_API_KEY = savedOpenai;
-  }
+  config.providers.groqApiKey = savedGroq;
+  config.llm.apiKey = savedOpenai;
 }
 
 // ---- 6. Реестр распознавателей и сохранность инлайн-кнопок --------------------

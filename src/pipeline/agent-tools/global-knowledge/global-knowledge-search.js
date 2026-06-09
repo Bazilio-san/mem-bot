@@ -8,9 +8,8 @@ export const globalKnowledgeSearchTool = {
     type: 'function',
     function: {
       name: 'global_knowledge_search',
-      description:
-        'Find relevant text fragments in the shared knowledge base. Use this when the user asks for ' +
-        'documented bot capabilities, policies, manuals, or knowledge-base content.',
+      description: `Find relevant text fragments in the shared knowledge base. Use this when the user asks for
+documented bot capabilities, policies, manuals, or knowledge-base content.`,
       parameters: {
         type: 'object',
         additionalProperties: false,

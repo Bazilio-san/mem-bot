@@ -67,6 +67,7 @@ export async function classifyIntent(userMessage, currentDomainKey = 'general', 
   const routeNames = routes.map((r) => r.name);
   return chatJSON({
     model: config.llm.auxModel,
+    kind: 'intent_classify',
     schema: buildSchema(routeNames),
     schemaName: 'skill_classification',
     system: buildSystemPrompt(routes),

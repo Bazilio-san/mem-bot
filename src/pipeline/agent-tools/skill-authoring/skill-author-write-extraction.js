@@ -11,18 +11,24 @@ export const skillAuthorWriteExtractionTool = {
     type: 'function',
     function: {
       name: 'skill_author_write_extraction',
-      description:
-        'Rewrite or improve the fact-extraction prompt (the "## Fact Extraction Prompt" block) ' +
-        'following an instruction. Use to change WHICH durable facts the skill remembers. Returns a preview ' +
-        'unless apply=true.',
+      description: `Rewrite or improve the fact-extraction prompt (the "## Fact Extraction Prompt" block)
+following an instruction. Use to change WHICH durable facts the skill remembers. Returns a preview
+unless apply=true.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
         required: ['name', 'instruction'],
         properties: {
-          name: { type: 'string' },
-          instruction: { type: 'string', description: 'How to change the fact-extraction prompt.' },
-          apply: { type: ['boolean', 'null'] },
+          name: {
+            type: 'string',
+          },
+          instruction: {
+            type: 'string',
+            description: 'How to change the fact-extraction prompt.',
+          },
+          apply: {
+            type: ['boolean', 'null'],
+          },
         },
       },
     },

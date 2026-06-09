@@ -18,9 +18,15 @@ The path must be relative inside references/** (no absolute paths or "..").`,
         additionalProperties: false,
         required: ['name', 'path', 'confirm'],
         properties: {
-          name: { type: 'string' },
-          path: { type: 'string' },
-          confirm: { type: 'boolean' },
+          name: {
+            type: 'string',
+          },
+          path: {
+            type: 'string',
+          },
+          confirm: {
+            type: 'boolean',
+          },
         },
       },
     },

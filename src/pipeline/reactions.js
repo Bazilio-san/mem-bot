@@ -1,3 +1,5 @@
+import { REQUEST_KINDS } from './llm-log.js';
+
 export const REACTION_KEYS = ['like', 'okay', 'heart', 'laugh', 'fire', 'smile', '100', 'sad'];
 
 export const REACTION_FALLBACK_TEXT = {
@@ -106,6 +108,7 @@ export async function decideDeliveryIntent({ userMessage, deliveryCapabilities =
 
   const result = await classifier({
     model,
+    kind: REQUEST_KINDS.DELIVERY_INTENT,
     schema: SCHEMA,
     schemaName: 'delivery_intent',
     system: SYSTEM,

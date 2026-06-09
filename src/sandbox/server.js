@@ -5,12 +5,14 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config } from '../config.js';
 import { closePool } from '../db.js';
+import { flushLlmLog } from '../pipeline/llm-log.js';
 import { listUsers, getUserMemory, runFilter, chat, getProactivity, deleteItem } from './data.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PAGE_PATH = path.join(__dirname, 'page.html');
-const PORT = Number(process.env.SANDBOX_PORT || 3000);
+const PORT = config.sandbox.port;
 
 // Прочитать тело запроса как JSON (с защитой от слишком больших тел).
 function readJson(req) {
@@ -134,6 +136,7 @@ server.listen(PORT, () => {
 // Корректное завершение: закрываем пул подключений к базе при остановке процесса.
 async function shutdown() {
   server.close();
+  await flushLlmLog();
   await closePool();
   process.exit(0);
 }

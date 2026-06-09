@@ -308,6 +308,7 @@ ${renderZone(zones.far) || '(нет сообщений)'}`;
   try {
     raw = await chatJSON({
       model: config.historyCompression.model,
+      kind: 'history_compress',
       schema: SUMMARY_SCHEMA,
       schemaName: 'history_summary',
       system: SUMMARY_SYSTEM,
