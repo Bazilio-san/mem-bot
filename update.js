@@ -380,8 +380,16 @@ function reinstallDependencies () {
   logIt('INSTALL ROOT DEPENDENCIES', true);
   installWithFallback('root', 'npm ci', 'npm install');
 
-  if (fs.existsSync(path.join(CWD, 'web', 'package.json'))) {
+  const webDir = path.join(CWD, 'web');
+  const webLock = path.join(webDir, 'package-lock.json');
+  const hasWebLock = fs.existsSync(webLock);
+  if (fs.existsSync(path.join(webDir, 'package.json'))) {
+    if (hasWebLock) {
     installWithFallback('web', 'npm --prefix web ci', 'npm --prefix web install');
+    } else {
+      logIt('web: root workspace lockfile not found, running npm install');
+      installWithFallback('web', 'npm --prefix web install', 'npm --prefix web install');
+    }
   }
 }
 
