@@ -177,7 +177,7 @@ onMounted(loadUsers);
             data-key="id"
             size="small"
             removable-sort
-            filter-display="menu"
+            filter-display="row"
             striped-rows
           >
             <Column field="factText" header="Факт" sortable />
@@ -187,10 +187,9 @@ onMounted(loadUsers);
                 :field="c.field"
                 :header="c.header"
                 sortable
-                :show-filter-match-modes="false"
-                :filter-menu-style="{ width: '16rem' }"
+                :show-filter-menu="false"
               >
-                <template #filter="{ filterModel }">
+                <template #filter="{ filterModel, filterCallback }">
                   <MultiSelect
                     v-model="filterModel.value"
                     :options="optionsFor(grp.key, c.field)"
@@ -198,6 +197,7 @@ onMounted(loadUsers);
                     :max-selected-labels="2"
                     filter
                     fluid
+                    @change="filterCallback()"
                   />
                 </template>
               </Column>
