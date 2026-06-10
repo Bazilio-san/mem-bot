@@ -18,7 +18,7 @@ import {
   findMessageByExternalRef,
   getUserReplyMode,
 } from '../repo.js';
-import { query, getPool, closePool } from '../db.js';
+import { assertDatabasesAvailable, query, getPool, closePool } from '../db.js';
 import { flushLlmLog } from '../pipeline/llm-log.js';
 import { flushAgentEventLog } from '../pipeline/agent-event-log.js';
 import { decideDeliveryIntent, shouldConsiderReaction } from '../pipeline/reactions.js';
@@ -1067,6 +1067,7 @@ const isDirectRun = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
   (async () => {
     await startupInfo({ customStartupInfo: [['Startup mode', 'telegram']] });
+    await assertDatabasesAvailable();
     await startTelegram();
   })().catch((err) => {
     console.error('Critical error starting the Telegram bot:', err.message);

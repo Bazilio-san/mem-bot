@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { startupInfo } from '../bootstrap/startup-info.js';
 import { config } from '../config.js';
-import { closePool } from '../db.js';
+import { assertDatabasesAvailable, closePool } from '../db.js';
 import { createAdminApi } from './admin-api.js';
 import { createAuthApi, requireAdminSession, isAdminAuthRequired } from './admin-auth.js';
 import { createNotesApi } from './notes-api.js';
@@ -95,6 +95,7 @@ function listen(app) {
 
 async function main() {
   await startupInfo({ customStartupInfo: [['Startup mode', 'server']] });
+  await assertDatabasesAvailable();
   const app = buildApp();
   const server = await listen(app);
   console.log(`Admin web server is listening on http://${HOST}:${PORT}/# (API available at /api).`);

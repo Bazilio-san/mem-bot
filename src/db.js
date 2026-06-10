@@ -36,6 +36,81 @@ const registerTypesFunctions = config.db.postgres.dbs[CONNECTION_ID]?.usedExtens
   ? [registerPgvector]
   : [];
 
+const REQUIRED_CONNECTIONS = [
+  { id: CONNECTION_ID, title: 'main memory database (main)' },
+  { id: LOG_CONNECTION_ID, title: 'LLM/events log database (logs)' },
+];
+
+function getDbHintByCode(code, dbConfig) {
+  if (code === '3D000') {
+    return `База "${dbConfig.database}" не существует. Создайте её в PostgreSQL или исправьте db.postgres.dbs.${dbConfig.id}.database.`;
+  }
+  if (code === '28P01') {
+    return `Неверный пароль для пользователя "${dbConfig.user}".`;
+  }
+  if (code === '3D01' || code === '28000') {
+    return `Неверная роль/метод аутентификации для пользователя "${dbConfig.user}".`;
+  }
+  if (code === 'ECONNREFUSED') {
+    return `PostgreSQL недоступен по ${dbConfig.host}:${dbConfig.port}.`;
+  }
+  if (code === 'ENOTFOUND') {
+    return `Host "${dbConfig.host}" неразрешим.`;
+  }
+  return 'Проверьте host/port/database/user/password и доступность PostgreSQL.';
+}
+
+function normalizePgError(connectionId, err) {
+  const cfg = getDbConfigPg(connectionId, false, true);
+  const dbConfig = {
+    id: connectionId,
+    database: cfg?.database || '<not set>',
+    user: cfg?.user || '<not set>',
+    host: cfg?.host || '<not set>',
+    port: cfg?.port || '<not set>',
+  };
+  const code = err?.code || 'UNKNOWN';
+  const rawMessage = String(err?.message || '').split('\\n')[0];
+  const hint = getDbHintByCode(code, dbConfig);
+  return `[${connectionId}] ${rawMessage} (database="${dbConfig.database}", user="${dbConfig.user}", host="${dbConfig.host}:${dbConfig.port}", hint=${hint})`;
+}
+
+async function probeConnection(connectionId) {
+  const cfg = getDbConfigPg(connectionId, false, true);
+  if (!cfg?.host || !cfg?.database || !cfg?.user) {
+    throw new Error(`Неполная конфигурация PostgreSQL для ${connectionId}: host/database/user должны быть заданы.`);
+  }
+  const client = new pg.Client(cfg);
+  try {
+    await client.connect();
+    await client.query('SELECT 1');
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+export async function assertDatabasesAvailable() {
+  const failures = [];
+  for (const target of REQUIRED_CONNECTIONS) {
+    try {
+      await probeConnection(target.id);
+    } catch (err) {
+      failures.push(normalizePgError(target.id, err));
+    }
+  }
+
+  if (failures.length === 0) {
+    return;
+  }
+
+  const lines = [
+    'Не удалось пройти стартовую проверку доступа к базам: PostgreSQL недоступна.',
+    'Исправьте указанные проблемы и перезапустите сервис:',
+    ...failures.map((f) => `- ${f}`),
+  ];
+  throw new Error(lines.join('\\n'));
+}
+
 // Get the (cached) pg pool of the working memory DB. Asynchronous: on first access af-db-ts creates the pool
 // and immediately opens the first connection for early detection of connection errors.
 export function getPool() {

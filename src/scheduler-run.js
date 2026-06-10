@@ -7,7 +7,7 @@
 // PostgreSQL notification on the scheduler_wake channel, which the worker subscribes to via LISTEN. This
 // brings the firing latency close to zero, while when idle the database and CPU are barely loaded.
 import { tick, msUntilDueTask } from './pipeline/scheduler.js';
-import { createListener } from './db.js';
+import { assertDatabasesAvailable, createListener } from './db.js';
 import { checkProactiveTriggers } from './pipeline/proactive.js';
 import { processEvents } from './pipeline/events.js';
 import { initTools } from './pipeline/tools.js';
@@ -52,6 +52,8 @@ function computeSleepMs(nextTaskMs) {
 }
 
 async function loop() {
+  await assertDatabasesAvailable();
+
   // Startup diagnostics for external MCP servers: the proactive loop calls the agent, and the agent uses
   // MCP tools, so we print the declared list of servers and check the connection to each one right away
   // when the worker starts. initTools caches the promise, so there will be no repeated connection on first use.
@@ -110,4 +112,7 @@ async function loop() {
   }
 }
 
-loop();
+loop().catch((err) => {
+  console.error('Scheduler startup failed:', err.message);
+  process.exit(1);
+});

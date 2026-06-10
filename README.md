@@ -144,6 +144,15 @@ message. The full procedure for launching, testing, and debugging is described i
 [docs/telegram/telegram-bot.md](docs/telegram/telegram-bot.md). You can stop a running bot with the command
 `npm run telegram:stop`.
 
+### Admin web panel
+
+The `npm run server` command starts the web panel (`src/server/index.js`): the LLM-log viewer, an admin chat that runs
+the full agent pipeline, and the notes widget (build the frontend once with `npm run web:build`). Operators sign in
+through the official Telegram Login Widget as the bot's own admin users. The setup checklist for a public domain
+(`/setdomain` in BotFather, `config.telegram.botUsername`, `config.admin.auth.enabled`, `config.notes.mcpSecret`) is in
+[readme-docs/configuration.md](./readme-docs/configuration.md#admin-web-panel); the sign-in mechanics are in
+[docs/telegram/telegram-bot.md](docs/telegram/telegram-bot.md).
+
 ## Configuration
 
 The main configuration mechanism is a hierarchy of YAML files in the `config/` directory (the `node-config` package):

@@ -203,6 +203,37 @@ MCP (Model Context Protocol) is the protocol for connecting external tools to th
 | `mcp.configPath` | `MCP_CONFIG_PATH`    | Path to the file listing MCP servers (resolved relative to the working directory).         | `.mcp.json` |
 | `sandbox.port`   | `SANDBOX_PORT`       | Port of the web sandbox.                                                                   | `3000`      |
 
+## Admin Web Panel
+
+The `npm run server` command starts the web panel (`src/server/index.js`): the LLM-log viewer, an admin chat that runs
+the full agent pipeline, and the notes widget. Build the frontend once with `npm run web:build` before serving it.
+Operators sign in through the official **Telegram Login Widget** — admins are the bot's own users with
+`mem.users.is_admin = true`, so there is no separate password store. The sign-in mechanics (signature check, HMAC
+session cookie, route protection, the notes MCP endpoint guard) are described in
+[docs/telegram/telegram-bot.md](../docs/telegram/telegram-bot.md).
+
+To put the panel on a public domain you need:
+
+1. **Link the domain to the bot in BotFather** — `/setdomain` for the bot (for example `@tinter2_bot`) pointing at the
+   panel's host (for example `mem-bot.time-gold.com`). Without this Telegram refuses to issue the Login Widget
+   signature.
+2. **Set the bot username** — `config.telegram.botUsername` (env `TELEGRAM_BOT_USERNAME`), e.g. `tinter2_bot` without
+   the `@`. The login screen embeds the widget for exactly this bot; with no username the screen cannot render it.
+3. **Require sign-in** — `config.admin.auth.enabled` (env `ADMIN_AUTH_ENABLED`): `true` always, `false` never, `null`
+   (default) turns it on automatically as soon as `config.admin.host` is not a loopback address. A locally bound panel
+   therefore needs no login, while a publicly bound one demands it.
+4. **Optionally guard the notes MCP endpoint** — `config.notes.mcpSecret` (env `NOTES_MCP_SECRET`) is required only if
+   an external client must reach the MCP endpoint; the co-located agent connects over `localhost` and needs no secret.
+
+| `config` path                | Environment variable    | Purpose                                                                  | Default     |
+|------------------------------|-------------------------|--------------------------------------------------------------------------|-------------|
+| `admin.host`                 | `ADMIN_HOST`            | Bind address of the panel; a non-loopback value auto-enables sign-in.    | `localhost` |
+| `admin.port`                 | `ADMIN_PORT`            | Port of the panel web server.                                            | `9019`      |
+| `admin.auth.enabled`         | `ADMIN_AUTH_ENABLED`    | Require sign-in: `true`/`false`/`null` (auto when host is non-loopback). | `null`      |
+| `admin.auth.sessionTtlHours` | —                       | Lifetime of the HMAC session cookie, in hours.                           | `168`       |
+| `telegram.botUsername`       | `TELEGRAM_BOT_USERNAME` | Bot username for the Login Widget (without the `@`); required to sign in.| —           |
+| `notes.mcpSecret`            | `NOTES_MCP_SECRET`      | `X-Notes-Mcp-Secret` for external MCP callers (empty = local-only).      | —           |
+
 ## Telegram Adapter
 
 Telegram channel parameters. These are only needed when running the bot in Telegram and do not affect the core.

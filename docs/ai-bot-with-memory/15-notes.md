@@ -50,6 +50,12 @@ process as the HTTP server and registered in the MCP client configuration under 
 sees `notes__note_create`, `notes__note_update`, `notes__note_delete`, `notes__note_restore`,
 `notes__notes_search`, and `notes__notes_show_widget`.
 
+The endpoint is reserved for the co-located agent. A request is treated as external when it carries an
+`X-Forwarded-For` header (it arrived through a reverse proxy) or its socket address is not a loopback one
+(`127.0.0.1`, `::1`). An external request is accepted only when it presents `config.notes.mcpSecret` in the
+`X-Notes-Mcp-Secret` header; with no secret configured every external request is rejected with HTTP 403. The
+local agent connects to `localhost` directly — no proxy, no header — and therefore needs no configuration.
+
 Two MCP-client extensions make this safe and universally available:
 
 - **`forwardUserContext`** (per-server flag in the MCP configuration) — the client forwards
@@ -115,6 +121,7 @@ never breaks the CRUD operation it describes.
 notes:
   enabled: true            # master switch of the whole subsystem
   mcpPath: '/mcp/notes'    # MCP endpoint path on the HTTP server
+  mcpSecret: ''            # X-Notes-Mcp-Secret for external MCP callers (empty = local-only access)
   publicUrl: ''            # public https URL for channel-embedded widget pages (empty = none)
   search:
     vectorThreshold: 0.72  # max cosine distance counted as a semantic match
