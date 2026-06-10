@@ -1,6 +1,6 @@
-// Этап выборки памяти. Достаёт только релевантные и безопасные факты, ранжирует их
-// по комбинированному весу и применяет жёсткие лимиты минимизации перед сборкой промпта.
-// Чувствительные данные (high/secret) в обычную выборку не попадают.
+// Memory retrieval stage. Fetches only relevant and safe facts, ranks them
+// by a combined weight, and applies hard minimization limits before assembling the prompt.
+// Sensitive data (high/secret) does not make it into the regular retrieval.
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 import { getDomainId } from '../repo.js';
@@ -8,11 +8,11 @@ import { listSecureSummaries } from './secure.js';
 import { config } from '../config.js';
 import { formatLocalDateTime } from './scheduler.js';
 
-// Жёсткие лимиты минимизации (из раздела 10.7 архитектуры).
-// Значения берутся из конфигурации (переменные окружения MEMORY_LIMIT_*), по умолчанию — прежние константы.
+// Hard minimization limits (from architecture section 10.7).
+// Values come from configuration (MEMORY_LIMIT_* environment variables); defaults are the previous constants.
 const LIMITS = config.memoryLimits;
 
-// Веса итогового ранжирования (раздел 10.6).
+// Weights for the final ranking (section 10.6).
 function scoreItem(it, relevance) {
   const recency = it.updated_at ? recencyScore(it.updated_at) : 0.5;
   return (
@@ -27,16 +27,16 @@ function scoreItem(it, relevance) {
 
 function recencyScore(ts) {
   const days = (Date.now() - new Date(ts).getTime()) / 86400000;
-  return Math.max(0, 1 - days / 180); // линейное затухание за полгода
+  return Math.max(0, 1 - days / 180); // linear decay over half a year
 }
 
-// Основная выборка. Возвращает структуру по областям + активные напоминания + безопасные резюме.
+// Main retrieval. Returns a structure broken down by scopes + active reminders + safe summaries.
 export async function retrieveMemory({ userId, domainKey, query: userQuery, scopes, entityKeys = [] }) {
   const domainId = await getDomainId(domainKey);
   const wantSecure = scopes?.includes('secure');
   const wantReminder = scopes?.includes('reminder');
 
-  // Шаг 1. Дешёвый структурный фильтр кандидатов из БД (без чувствительных данных).
+  // Step 1. Cheap structural filter of candidates from the DB (without sensitive data).
   const { rows: candidates } = await query(
     `SELECT id, scope, memory_kind, entity_type, entity_key, memory_text, data,
             importance, confidence, sensitivity, usage_count, updated_at
@@ -51,7 +51,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     [userId, domainId],
   );
 
-  // Шаг 2. Смысловая релевантность через эмбеддинги (если доступны).
+  // Step 2. Semantic relevance via embeddings (if available).
   const queryVec = await embed(userQuery);
   let vecScores = new Map();
   if (queryVec) {
@@ -69,7 +69,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     vecScores = new Map(rows.map((r) => [r.id, Number(r.relevance)]));
   }
 
-  // Шаг 3. Полнотекстовая релевантность как запасной/дополняющий сигнал.
+  // Step 3. Full-text relevance as a fallback/complementary signal.
   const { rows: textRows } = await query(
     `SELECT id, ts_rank(search_tsv, plainto_tsquery('simple', $2)) AS rank
      FROM mem.memory_items
@@ -78,7 +78,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
   );
   const textScores = new Map(textRows.map((r) => [r.id, Math.min(Number(r.rank) * 4, 1)]));
 
-  // Шаг 4. Итоговый вес и разбивка по областям.
+  // Step 4. Final weight and breakdown by scopes.
   const byScope = { profile: [], dialog: [], domain: [] };
   for (const it of candidates) {
     const relevance = Math.max(vecScores.get(it.id) ?? 0, textScores.get(it.id) ?? 0, 0.15);
@@ -92,12 +92,12 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     byScope[k].sort((a, b) => b.score - a.score);
   }
 
-  // Шаг 5. Минимизация: жёсткие лимиты на каждую область.
+  // Step 5. Minimization: hard limits for each scope.
   const profile = byScope.profile.slice(0, LIMITS.profile);
   const dialog = byScope.dialog.slice(0, LIMITS.dialog);
   const domain = byScope.domain.slice(0, LIMITS.domain);
 
-  // Напоминания — только если запрошены (вопрос про сроки/задачи).
+  // Reminders — only if requested (a question about deadlines/tasks).
   let reminders = [];
   if (wantReminder) {
     const { rows } = await query(
@@ -110,14 +110,14 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     reminders = rows;
   }
 
-  // Безопасные резюме защищённых данных — только если запрошены и только в виде резюме.
+  // Safe summaries of protected data — only if requested and only as a summary.
   const secure = wantSecure ? await listSecureSummaries(userId, LIMITS.secure) : [];
 
   return { profile, dialog, domain, reminders, secure };
 }
 
-// Сборка компактного MEMORY_CONTEXT. Блок памяти всегда подаётся как справочные данные,
-// а не как инструкции — это защита от вредных записей в памяти (prompt injection).
+// Assembly of a compact MEMORY_CONTEXT. The memory block is always presented as reference data,
+// not as instructions — this is a defense against malicious records in memory (prompt injection).
 export function buildMemoryContext(mem, domainKey) {
   const lines = (arr) => (arr.length ? arr.join('\n') : '- (нет релевантных фактов)');
   const profile = lines(mem.profile.map((i) => `- ${i.memory_text}`));

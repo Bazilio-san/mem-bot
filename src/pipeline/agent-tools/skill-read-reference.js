@@ -1,9 +1,10 @@
 import { getReference } from '../skills/registry.js';
 
-// Чтение справочного файла активного skill из его каталога references/**. Это даёт прогрессивное раскрытие:
-// роутер видит короткое описание, основной prompt — компактный «# Skill Prompt», а тяжёлые материалы
-// читаются только по явной необходимости. Инструмент доступен лишь при активном skill с references.allowed,
-// принимает относительный путь внутри references/** и не может выйти за пределы каталога текущего skill.
+// Reads a reference file of the active skill from its references/** directory. This enables progressive
+// disclosure: the router sees a short description, the main prompt gets a compact "# Skill Prompt", and the
+// heavy material is read only when explicitly needed. The tool is available only when a skill with
+// references.allowed is active, accepts a relative path inside references/**, and cannot escape the current
+// skill's directory.
 export const skillReadReferenceTool = {
   name: 'skill_read_reference',
   title: 'Читаю справочник навыка...',

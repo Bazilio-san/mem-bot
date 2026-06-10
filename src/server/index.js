@@ -1,43 +1,43 @@
-// Объединённая точка входа: один процесс Node.js, в котором одновременно работают веб-сервер админки и
-// Telegram-канал (длинный опрос входящих сообщений плюс фоновый воркер планировщика и доставки).
-// Оба сервиса ввод-выводные и живут на одном цикле событий, не мешая друг другу. Запуск: npm run server.
+// Combined entry point: a single Node.js process running both the admin web server and the Telegram channel
+// (long polling of incoming messages plus a background scheduler-and-delivery worker) at the same time.
+// Both services are I/O-bound and live on the same event loop without interfering with each other. Run: npm run server.
 //
-// Порядок запуска: сначала поднимается HTTP-сервер (чтобы админка и проверка работоспособности были
-// доступны как можно раньше), затем запускается Telegram-бот. Завершение по сигналу останавливает оба
-// сервиса и единожды закрывает общий пул соединений с БД — пулом владеет именно этот процесс.
+// Startup order: first the HTTP server is brought up (so the admin panel and health check are available as
+// early as possible), then the Telegram bot is started. Shutdown on a signal stops both services and closes
+// the shared DB connection pool once — this process is the one that owns the pool.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { config } from '../config.js';
 import { closePool } from '../db.js';
 import { createAdminApi } from './admin-api.js';
-// Импорт bot.js регистрирует профиль канала Telegram и проверяет наличие токена. Сам бот при этом ещё не
-// запускается: автозапуск внутри bot.js срабатывает только при прямом вызове (npm run telegram), а здесь
-// мы управляем его жизненным циклом явно через startTelegram/stopTelegram.
+// Importing bot.js registers the Telegram channel profile and checks that the token is present. The bot
+// itself is not started yet: the auto-start inside bot.js only fires on a direct call (npm run telegram),
+// while here we manage its lifecycle explicitly via startTelegram/stopTelegram.
 import { startTelegram, stopTelegram } from '../telegram/bot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Каталог собранного фронтенда (Vue + Vite кладёт сборку сюда командой npm run web:build).
+// Directory of the built frontend (Vue + Vite places the build here via npm run web:build).
 const WEB_DIST = path.resolve(__dirname, '../../web/dist');
 const PORT = config.admin.port;
 const HOST = config.admin.host;
 
-// Собрать приложение express: JSON-разбор тела, маршруты админ-API под префиксом /api, отдача собранного
-// фронтенда и возврат index.html на любые прочие GET-маршруты (так одностраничное приложение Vue само
-// обрабатывает свою маршрутизацию на стороне браузера, не получая 404 при перезагрузке вложенной страницы).
+// Build the express app: JSON body parsing, admin API routes under the /api prefix, serving the built
+// frontend, and returning index.html for any other GET routes (so the Vue single-page app handles its own
+// routing in the browser without getting a 404 when reloading a nested page).
 function buildApp() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
   app.use('/api', createAdminApi());
 
-  // Статика собранного фронтенда. В режиме разработки каталога web/dist может не быть — это нормально:
-  // тогда фронтенд обслуживает сервер разработки Vite (npm run web:dev), а этот процесс отдаёт только API.
+  // Static files of the built frontend. In development mode the web/dist directory may be absent — that's
+  // fine: then the Vite dev server (npm run web:dev) serves the frontend and this process serves only the API.
   app.use(express.static(WEB_DIST));
 
-  // Возврат одностраничного приложения для любых не-API GET-маршрутов. Express 5 не принимает строковый
-  // шаблон '*', поэтому используем промежуточный слой: пропускаем запросы к /api, остальные GET отдаём
-  // index.html. Если сборки ещё нет, честно сообщаем об этом понятным текстом, а не отдаём пустой ответ.
+  // Return the single-page app for any non-API GET routes. Express 5 does not accept the string pattern '*',
+  // so we use a middleware: we pass through requests to /api and serve index.html for other GET requests.
+  // If the build is not there yet, we honestly report it with clear text rather than returning an empty response.
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api')) {
       return next();
@@ -58,7 +58,7 @@ function buildApp() {
   return app;
 }
 
-// Запустить HTTP-сервер и вернуть объект сервера (нужен для корректного закрытия при завершении).
+// Start the HTTP server and return the server object (needed to close it cleanly on shutdown).
 function listen(app) {
   return new Promise((resolve, reject) => {
     const server = app.listen(PORT, HOST, () => resolve(server));
@@ -69,27 +69,27 @@ function listen(app) {
 async function main() {
   const app = buildApp();
   const server = await listen(app);
-  console.log(`Веб-сервер админки слушает http://${HOST}:${PORT} (API доступен по пути /api).`);
+  console.log(`Admin web server is listening on http://${HOST}:${PORT} (API available at /api).`);
 
-  // Telegram запускаем после веб-сервера. Бот сам печатает в журнал, что длинный опрос активен.
+  // Telegram is started after the web server. The bot itself logs that long polling is active.
   const { username } = await startTelegram();
-  console.log(`Telegram-канал поднят в этом же процессе (бот @${username}).`);
+  console.log(`Telegram channel is up in the same process (bot @${username}).`);
 
-  // Аккуратное завершение по сигналу: останавливаем приём новых HTTP-запросов, гасим Telegram-часть и
-  // только потом закрываем общий пул соединений с БД. process.exit вызываем после освобождения ресурсов.
+  // Graceful shutdown on a signal: stop accepting new HTTP requests, shut down the Telegram part, and only
+  // then close the shared DB connection pool. process.exit is called after releasing resources.
   let shuttingDown = false;
   const shutdown = async (signal) => {
     if (shuttingDown) {
       return;
-    } // повторный сигнал во время завершения игнорируем
+    } // ignore a repeated signal during shutdown
     shuttingDown = true;
-    console.log(`\nПолучен сигнал ${signal}. Завершаю работу объединённого сервера…`);
-    await new Promise((resolve) => server.close(resolve)); // ждём закрытия HTTP-сервера
+    console.log(`\nReceived signal ${signal}. Shutting down the combined server…`);
+    await new Promise((resolve) => server.close(resolve)); // wait for the HTTP server to close
     await stopTelegram();
     try {
       await closePool();
     } catch {
-      /* пул мог быть не открыт */
+      /* the pool may not have been opened */
     }
     process.exit(0);
   };
@@ -98,6 +98,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Критическая ошибка запуска объединённого сервера:', err.message);
+  console.error('Critical error starting the combined server:', err.message);
   process.exit(1);
 });

@@ -1,15 +1,15 @@
-// Разбор файла SKILL.md на машинную часть (YAML-фронтматтер) и человеческие markdown-блоки.
+// Parsing of a SKILL.md file into a machine part (YAML frontmatter) and human markdown blocks.
 //
-// Runtime не угадывает смысл markdown произвольным парсингом: фронтматтер несёт строго заданные поля
-// реестра и роутера, а тело делится на блоки со стабильными заголовками (# Skill Prompt,
-// ## Fact Extraction Prompt, ## Domain Schema, ## References), которые извлекаются детерминированно.
+// The runtime does not guess the meaning of markdown via arbitrary parsing: the frontmatter carries the strictly
+// defined registry and router fields, while the body is split into blocks with stable headings (# Skill Prompt,
+// ## Fact Extraction Prompt, ## Domain Schema, ## References) that are extracted deterministically.
 //
-// YAML-фронтматтер мы разбираем своим компактным разборщиком намеренно ограниченного подмножества: в проекте
-// нет зависимости от внешней YAML-библиотеки, а формат самих файлов мы контролируем и покрываем тестами.
-// Поддерживаются: вложенные отображения по отступам, последовательности (- элемент и поточные [a, b, c]),
-// блочные скаляры «свёрнутый» (>) и «дословный» (|), а также скаляры — строка, число, true/false, null.
+// We parse the YAML frontmatter with our own compact parser of a deliberately limited subset: the project has no
+// dependency on an external YAML library, and we control the format of the files themselves and cover it with tests.
+// Supported: nested indentation-based mappings, sequences (- item and flow [a, b, c]),
+// block scalars "folded" (>) and "literal" (|), and scalars — string, number, true/false, null.
 
-// Привести один скаляр к значению нужного типа. Кавычки снимаются, [..] разбирается как поточный список.
+// Convert a single scalar to a value of the appropriate type. Quotes are stripped, [..] is parsed as a flow list.
 function parseScalar(token) {
   const t = String(token).trim();
   if (t === '' || t === 'null' || t === '~') {
@@ -40,7 +40,7 @@ function parseScalar(token) {
   return t;
 }
 
-// Разобрать YAML-подмножество фронтматтера в объект JavaScript.
+// Parse the YAML subset of the frontmatter into a JavaScript object.
 export function parseFrontmatter(text) {
   const lines = String(text).split(/\r?\n/);
   let pos = 0;
@@ -55,7 +55,7 @@ export function parseFrontmatter(text) {
     }
   };
 
-  // Разобрать узел (отображение или последовательность) с отступом не меньше minIndent.
+  // Parse a node (mapping or sequence) with an indent of at least minIndent.
   function parseNode(minIndent) {
     skipIgnorable();
     if (pos >= lines.length) {
@@ -68,7 +68,7 @@ export function parseFrontmatter(text) {
 
     const firstContent = lines[pos].slice(indent);
 
-    // Последовательность: строки вида «- значение» на одном отступе.
+    // Sequence: lines of the form "- value" at the same indent.
     if (firstContent.startsWith('- ') || firstContent === '-') {
       const arr = [];
       while (pos < lines.length) {
@@ -90,7 +90,7 @@ export function parseFrontmatter(text) {
       return arr;
     }
 
-    // Отображение: строки вида «ключ: значение» или «ключ:» с вложенным узлом ниже.
+    // Mapping: lines of the form "key: value" or "key:" with a nested node below.
     const obj = {};
     while (pos < lines.length) {
       skipIgnorable();
@@ -110,7 +110,7 @@ export function parseFrontmatter(text) {
       pos++;
 
       if (rest === '>' || rest === '|') {
-        // Блочный скаляр: забираем все строки с отступом строго больше текущего.
+        // Block scalar: take all lines indented strictly more than the current one.
         const block = [];
         while (pos < lines.length) {
           if (isBlank(lines[pos])) {
@@ -124,7 +124,7 @@ export function parseFrontmatter(text) {
           block.push(lines[pos].trim());
           pos++;
         }
-        // Свёрнутый (>) склеивает строки пробелом; дословный (|) сохраняет переносы строк.
+        // Folded (>) joins lines with a space; literal (|) preserves line breaks.
         obj[key] =
           rest === '>'
             ? block
@@ -133,7 +133,7 @@ export function parseFrontmatter(text) {
                 .join(' ')
             : block.join('\n').replace(/\s+$/, '');
       } else if (rest === '') {
-        // Вложенный узел на большем отступе. Если его нет, значение — null.
+        // Nested node at a greater indent. If there is none, the value is null.
         const child = parseNode(indent + 1);
         obj[key] = child === null ? null : child;
       } else {
@@ -147,8 +147,8 @@ export function parseFrontmatter(text) {
   return result && typeof result === 'object' && !Array.isArray(result) ? result : {};
 }
 
-// Разделить содержимое SKILL.md на фронтматтер (между первой парой строк «---») и тело markdown.
-// Возвращает { frontmatter: <объект>, body: <строка> }. Если фронтматтера нет, объект пустой.
+// Split SKILL.md contents into frontmatter (between the first pair of "---" lines) and the markdown body.
+// Returns { frontmatter: <object>, body: <string> }. If there is no frontmatter, the object is empty.
 export function splitSkillFile(raw) {
   const text = String(raw).replace(/^﻿/, '');
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -158,9 +158,9 @@ export function splitSkillFile(raw) {
   return { frontmatter: parseFrontmatter(m[1]), body: m[2] };
 }
 
-// Извлечь содержимое markdown-раздела по точному заголовку (например «# Skill Prompt» или
-// «## Fact Extraction Prompt»). Заголовки в SKILL.md трактуются как плоский список разделов: содержимое
-// идёт от строки после заголовка до следующего заголовка любого уровня. Пустая строка — «раздела нет».
+// Extract the contents of a markdown section by its exact heading (e.g. "# Skill Prompt" or
+// "## Fact Extraction Prompt"). Headings in SKILL.md are treated as a flat list of sections: the contents
+// run from the line after the heading to the next heading of any level. An empty string means "no such section".
 export function extractSection(body, heading) {
   const lines = String(body).split(/\r?\n/);
   const headMatch = heading.match(/^(#+)\s+(.*)$/);
@@ -186,13 +186,13 @@ export function extractSection(body, heading) {
   for (let i = start; i < lines.length; i++) {
     if (/^#+\s+/.test(lines[i])) {
       break;
-    } // следующий заголовок любого уровня закрывает раздел
+    } // the next heading of any level closes the section
     out.push(lines[i]);
   }
   return out.join('\n').trim();
 }
 
-// Достать первый блок ```json … ``` из текста раздела и разобрать его как JSON. null, если блока нет.
+// Take the first ```json … ``` block from the section text and parse it as JSON. null if there is no block.
 export function extractJsonBlock(sectionText) {
   const m = String(sectionText).match(/```json\s*\r?\n([\s\S]*?)```/);
   if (!m) {

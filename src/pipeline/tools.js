@@ -5,7 +5,7 @@ import { logToolCall } from '../repo.js';
 import { allTools } from './agent-tools/index.js';
 import { loadMcpTools } from '../mcp/client.js';
 
-// Перезаписываемый реестр: стартует из локальных инструментов, дополняется инструментами MCP в initTools().
+// Rewritable registry: starts from local tools, augmented with MCP tools in initTools().
 let registry = [...allTools];
 
 export let tools = registry;
@@ -14,24 +14,24 @@ export let toolMeta = Object.fromEntries(registry.map((tool) => [tool.name, { ti
 
 let TOOLS_BY_NAME = new Map(registry.map((tool) => [tool.name, tool]));
 
-// Имена базовых (системных) инструментов: память, планировщик, глобальная память, форма ответа, чтение
-// справочников. Они доступны всегда, если разрешены флагами и правами. Предметные инструменты (например,
-// инструменты MCP вроде search_flights) в реестр добавляются динамически и базовыми не считаются.
+// Names of the base (system) tools: memory, scheduler, global memory, response shaping, reading
+// reference data. They are always available if allowed by flags and permissions. Domain tools (for example,
+// MCP tools like search_flights) are added to the registry dynamically and are not considered base tools.
 const BASE_TOOL_NAMES = new Set(allTools.map((tool) => tool.name));
 
 export function toolTitle(name) {
   return toolMeta[name]?.title || name;
 }
 
-// Разрешён ли инструмент при активном skill. Базовые (системные) инструменты доступны всегда. Предметный
-// инструмент доступен только если он перечислен в tools.allowed активного skill. Если активного skill в
-// контексте нет (служебные вызовы вне ответа агенту), ограничение не применяется.
+// Whether a tool is allowed under the active skill. Base (system) tools are always available. A domain
+// tool is available only if it is listed in tools.allowed of the active skill. If there is no active skill in
+// the context (service calls outside of replying to the agent), the restriction does not apply.
 //
-// Инструменты внешних MCP-серверов регистрируются под префиксным именем «<псевдоним>__<имя>» (например,
-// «yafly__search_flights»), тогда как skill перечисляет их под логическим именем без префикса
-// («search_flights») — префикс существует только на стороне модели. Поэтому, кроме полного имени инструмента,
-// для инструментов MCP сверяем и «голое» имя (tool.mcpName): иначе разрешение в skill никогда не совпадёт с
-// префиксным именем и инструмент будет невидим для модели.
+// Tools of external MCP servers are registered under a prefixed name "<alias>__<name>" (for example,
+// "yafly__search_flights"), whereas a skill lists them under a logical name without the prefix
+// ("search_flights") — the prefix exists only on the model's side. Therefore, besides the full tool name,
+// for MCP tools we also check the "bare" name (tool.mcpName): otherwise the permission in the skill would never match
+// the prefixed name and the tool would be invisible to the model.
 function allowedForActiveSkill(tool, ctx) {
   if (BASE_TOOL_NAMES.has(tool.name)) {
     return true;
@@ -61,17 +61,17 @@ export function getTool(name) {
   return TOOLS_BY_NAME.get(name) || null;
 }
 
-let initPromise = null; // кэш промиса: инициализация выполняется ровно один раз на процесс
+let initPromise = null; // promise cache: initialization runs exactly once per process
 
-// Однократно подключает инструменты MCP и пересобирает реестр. Повторные вызовы возвращают тот же промис,
-// поэтому безопасно вызывать из любой точки входа и при каждом сообщении.
+// Connects MCP tools once and rebuilds the registry. Repeated calls return the same promise,
+// so it is safe to call from any entry point and on every message.
 export function initTools() {
   if (!initPromise) {
     initPromise = (async () => {
       const mcp = await loadMcpTools();
       if (mcp.length === 0) {
         return;
-      } // нечего добавлять — реестр остаётся прежним
+      } // nothing to add — the registry stays the same
       registry = [...registry, ...mcp];
       tools = registry;
       toolDefs = registry.map((t) => t.definition);
@@ -99,7 +99,7 @@ export async function executeTool(ctx, name, args) {
       input: args,
       status: 'blocked',
       latencyMs: Date.now() - started,
-      error: 'Требуются права администратора',
+      error: 'Administrator rights required',
     });
     return { error: 'Это действие доступно только администратору.' };
   }

@@ -1,11 +1,11 @@
-// Самостоятельный воркер. Циклически забирает и выполняет просроченные задачи планировщика,
-// а при включённом проактивном контуре — ещё и проверяет триггеры проактивности и внешние события.
-// Запуск: npm run scheduler
+// Standalone worker. In a loop it picks up and runs due scheduler tasks,
+// and when the proactive loop is enabled it also checks proactivity triggers and external events.
+// Run with: npm run scheduler
 //
-// Вместо опроса базы через фиксированный интервал воркер спит ровно до момента ближайшей задачи
-// (адаптивный сон) и просыпается мгновенно, когда создаётся новая задача: создание задачи шлёт
-// уведомление PostgreSQL по каналу scheduler_wake, на который воркер подписан через LISTEN. Так
-// задержка срабатывания приближается к нулю, а в простое база и процессор почти не нагружаются.
+// Instead of polling the database on a fixed interval, the worker sleeps exactly until the nearest task
+// (adaptive sleep) and wakes up instantly when a new task is created: task creation sends a
+// PostgreSQL notification on the scheduler_wake channel, which the worker subscribes to via LISTEN. This
+// brings the firing latency close to zero, while when idle the database and CPU are barely loaded.
 import { tick, msUntilDueTask } from './pipeline/scheduler.js';
 import { createListener } from './db.js';
 import { checkProactiveTriggers } from './pipeline/proactive.js';
@@ -13,17 +13,17 @@ import { processEvents } from './pipeline/events.js';
 import { initTools } from './pipeline/tools.js';
 import { config } from './config.js';
 
-// Нижняя граница сна не даёт воркеру крутиться слишком часто, когда задачи идут вплотную.
+// The lower sleep bound keeps the worker from spinning too often when tasks come back-to-back.
 const MIN_SLEEP_MS = config.scheduler.minSleepMs;
-// Верхняя граница ограничивает максимальный сон, чтобы воркер периодически перепроверял базу
-// и соблюдал интервал проактивности даже при полном отсутствии задач планировщика.
+// The upper bound caps the maximum sleep so the worker periodically rechecks the database
+// and honors the proactivity interval even when there are no scheduler tasks at all.
 const MAX_SLEEP_MS = config.scheduler.maxSleepMs;
 
 let lastProactiveAt = 0;
-// Функция досрочного пробуждения текущего сна. Устанавливается на время сна, иначе null.
+// Function that wakes the current sleep early. Set while sleeping, otherwise null.
 let wakeUp = null;
 
-// Прерываемый сон: завершается либо по тайм-ауту, либо когда пришло уведомление о новой задаче.
+// Interruptible sleep: finishes either on timeout or when a notification about a new task arrives.
 function sleep(ms) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -38,9 +38,9 @@ function sleep(ms) {
   });
 }
 
-// Сколько спать до следующего прохода. Если задач нет — спим до верхней границы; если задача есть —
-// ровно до её запуска, но в пределах нижней и верхней границ. При включённой проактивности сон
-// дополнительно укорачивается так, чтобы не пропустить очередную проверку триггеров.
+// How long to sleep until the next pass. If there are no tasks, sleep up to the upper bound; if there is a task,
+// sleep exactly until it is due, but within the lower and upper bounds. When proactivity is enabled, the sleep is
+// additionally shortened so as not to miss the next triggers check.
 function computeSleepMs(nextTaskMs) {
   const base = nextTaskMs === null ? MAX_SLEEP_MS : nextTaskMs;
   let ms = Math.max(MIN_SLEEP_MS, Math.min(base, MAX_SLEEP_MS));
@@ -52,13 +52,13 @@ function computeSleepMs(nextTaskMs) {
 }
 
 async function loop() {
-  // Стартовая диагностика внешних MCP-серверов: проактивный контур обращается к агенту, а тот пользуется
-  // инструментами MCP, поэтому выводим объявленный список серверов и проверяем подключение к каждому сразу
-  // при запуске воркера. initTools кэширует промис, повторного подключения при первом обращении не будет.
-  console.log('Проверяю подключение к объявленным MCP-серверам…');
+  // Startup diagnostics for external MCP servers: the proactive loop calls the agent, and the agent uses
+  // MCP tools, so we print the declared list of servers and check the connection to each one right away
+  // when the worker starts. initTools caches the promise, so there will be no repeated connection on first use.
+  console.log('Checking connection to the declared MCP servers…');
   await initTools();
 
-  // Подписка на уведомления о появлении новых задач: вставка задачи будит воркер немедленно.
+  // Subscribe to notifications about new tasks: inserting a task wakes the worker immediately.
   const listener = createListener('scheduler_wake', () => {
     if (wakeUp) {
       wakeUp();
@@ -67,15 +67,15 @@ async function loop() {
   await listener.ready;
 
   console.log(
-    'Воркер запущен. Адаптивный сон планировщика:',
+    'Worker started. Adaptive scheduler sleep:',
     MIN_SLEEP_MS,
     '…',
     MAX_SLEEP_MS,
-    'мс',
-    'с мгновенным пробуждением по уведомлению о новой задаче.',
+    'ms',
+    'with instant wake-up on a new-task notification.',
     config.proactive.enabled
-      ? `Проактивность включена, интервал ${config.proactive.intervalMs} мс.`
-      : 'Проактивность выключена.',
+      ? `Proactivity enabled, interval ${config.proactive.intervalMs} ms.`
+      : 'Proactivity disabled.',
   );
 
   while (true) {
@@ -83,27 +83,27 @@ async function loop() {
     try {
       const r = await tick();
       if (r.processed > 0) {
-        console.log(`Выполнено задач планировщика: ${r.processed}.`);
+        console.log(`Scheduler tasks completed: ${r.processed}.`);
       }
 
       if (config.proactive.enabled && Date.now() - lastProactiveAt >= config.proactive.intervalMs) {
         lastProactiveAt = Date.now();
         const p = await checkProactiveTriggers();
         if (p.fired > 0) {
-          console.log(`Отправлено проактивных сообщений: ${p.fired}.`);
+          console.log(`Proactive messages sent: ${p.fired}.`);
         }
         if (config.proactive.events.enabled) {
           const e = await processEvents();
           if (e.delivered > 0) {
-            console.log(`Доставлено сообщений о событиях: ${e.delivered}.`);
+            console.log(`Event messages delivered: ${e.delivered}.`);
           }
         }
       }
 
-      // Узнаём момент ближайшей задачи уже после возможного перепланирования в tick().
+      // Determine the time of the nearest task only after the possible rescheduling in tick().
       nextTaskMs = await msUntilDueTask();
     } catch (err) {
-      console.error('Ошибка прохода воркера:', err.message);
+      console.error('Worker pass error:', err.message);
     }
 
     await sleep(computeSleepMs(nextTaskMs));

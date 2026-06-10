@@ -1,6 +1,6 @@
-// Основной пайплайн ответа агента. Объединяет все этапы:
-// классификация → выборка памяти → сборка компактного контекста → ответ модели с
-// циклом инструментов → сохранение сообщений → асинхронное извлечение и запись фактов.
+// Main agent response pipeline. Combines all stages:
+// classification → memory retrieval → assembling a compact context → model response with
+// a tool loop → saving messages → asynchronous extraction and writing of facts.
 import { config } from './config.js';
 import { chat, chatStream } from './llm.js';
 import {
@@ -249,7 +249,7 @@ export async function runModelTurn({
   chatFn = chat,
   chatStreamFn = chatStream,
 }) {
-  // Это главный ответ агента — помечаем журнал отдельным типом, отличным от запасного «нелегального».
+  // This is the main agent answer — tag the log with a dedicated type, distinct from the fallback one.
   const kind = REQUEST_KINDS.MAIN_AGENT_ANSWER;
   if (!streamingOn) {
     return chatFn({ model, messages, tools, kind });
@@ -270,14 +270,14 @@ export async function runModelTurn({
       },
     });
   } catch {
-    // Если видимого стрима ещё не было, откатываемся на обычный chat: транспортные ошибки streaming API
-    // не должны ломать совместимый путь ответа. Дельты выше только буферизуются, поэтому пользователь их
-    // ещё не видел.
+    // If no visible streaming has happened yet, fall back to the regular chat: transport errors of the
+    // streaming API must not break the compatible response path. The deltas above are only buffered, so the
+    // user has not seen them yet.
     return chatFn({ model, messages, tools, kind });
   }
 
-  // В ходе, который завершился tool_calls, не публикуем промежуточный текст: пользователь сначала увидит
-  // статус инструмента, а финальный ответ придёт после выполнения инструмента и следующего model turn.
+  // In a turn that ended with tool_calls we do not publish intermediate text: the user first sees the
+  // tool status, and the final answer arrives after the tool runs and the next model turn.
   if (!msg.tool_calls?.length) {
     for (const chunk of bufferedDeltas) {
       await emit({ type: 'assistant.delta', text: chunk });
@@ -314,37 +314,37 @@ async function buildCapabilitiesContext(ctx, toolDefs) {
 ${toolLines}`;
 }
 
-// Главная функция: обработать одно сообщение пользователя и вернуть ответ.
-// extractSync=true заставляет дождаться записи памяти (нужно для тестов); в проде — false.
+// Main function: handle a single user message and return a response.
+// extractSync=true forces waiting for the memory write (needed for tests); in production it is false.
 export async function handleMessage({
   externalId,
   userMessage,
   domainKey = 'general',
-  // channel — ключ канала доставки ('telegram', 'html', 'plain'). Определяет, какую инструкцию о
-  // форматировании ответа подмешать в системный промпт. Профиль канала регистрируется самим каналом
-  // на старте (см. src/pipeline/channels.js); для незарегистрированного канала разметки нет.
+  // channel — the delivery channel key ('telegram', 'html', 'plain'). Determines which response-formatting
+  // instruction to mix into the system prompt. The channel profile is registered by the channel itself
+  // at startup (see src/pipeline/channels.js); an unregistered channel gets no markup.
   channel = 'plain',
   extractSync = false,
-  // onEvent — единственная точка связи ядра с любым каналом вывода (Telegram, командная строка, тесты).
-  // Ядро вызывает его по принципу best-effort: ошибка callback не должна ломать ответ агента, а значение
-  // null (по умолчанию) — это нормальный режим работы вообще без какого-либо адаптера.
+  // onEvent — the single point connecting the core to any output channel (Telegram, command line, tests).
+  // The core calls it best-effort: a callback error must not break the agent response, and a value of
+  // null (the default) is the normal mode of operation with no adapter at all.
   onEvent = null,
-  // stream — включить потоковый вызов модели (chatStream вместо chat). Фактически действует только при
-  // включённом config.streaming.enabled; иначе ядро работает прежним непотоковым путём.
+  // stream — enable streaming model invocation (chatStream instead of chat). Effective only when
+  // config.streaming.enabled is on; otherwise the core works via the previous non-streaming path.
   stream = false,
 }) {
   const streamingOn = stream && config.streaming.enabled;
-  // Метаданные корреляции для журнала LLM-запросов. requestId группирует все обращения одного хода диалога
-  // (классификация, основной ответ, извлечение фактов и т. д.). Формат совпадает с тем, что показывается в
-  // будущем интерфейсе: «Request ID: llm_…». Объект изменяемый — userId/conversationId/domainKey дополняются
-  // по мере появления данных и видны внутри src/llm.js через AsyncLocalStorage.
+  // Correlation metadata for the LLM request log. requestId groups all calls of one dialog turn
+  // (classification, the main answer, fact extraction, etc.). The format matches what is shown in the
+  // future interface: "Request ID: llm_…". The object is mutable — userId/conversationId/domainKey are filled
+  // in as data appears and are visible inside src/llm.js via AsyncLocalStorage.
   const llmMeta = {
     requestId: `llm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
     channel,
     domainKey,
   };
-  // Метаданные, которые добавляются в каждое событие. conversationId и userId становятся известны после
-  // ensureUser/ensureConversation, поэтому объект мутируется по мере появления данных.
+  // Metadata added to every event. conversationId and userId become known after
+  // ensureUser/ensureConversation, so the object is mutated as data appears.
   const eventMeta = { domainKey };
   const emit = async (event) => {
     if (!onEvent) {
@@ -353,25 +353,25 @@ export async function handleMessage({
     try {
       await onEvent({ ...event, ...eventMeta });
     } catch {
-      // Ошибки слоя отображения не должны влиять на бизнес-ответ агента.
+      // Display-layer errors must not affect the agent's business response.
     }
   };
 
   await emit({ type: 'agent.started' });
   try {
-    // Ленивая одноразовая инициализация инструментов MCP. initTools кэширует промис, поэтому реальное
-    // подключение происходит при первом сообщении, а последующие вызовы мгновенно возвращают тот же промис.
+    // Lazy one-time initialization of MCP tools. initTools caches the promise, so the actual
+    // connection happens on the first message, and subsequent calls instantly return the same promise.
     await initTools();
-    // Весь ход диалога выполняется внутри контекста корреляции, поэтому обращения к LLM из любых вложенных
-    // этапов попадают в журнал с общим requestId и атрибуцией пользователя/разговора/домена.
+    // The whole dialog turn runs inside the correlation context, so LLM calls from any nested
+    // stages land in the log with a shared requestId and user/conversation/domain attribution.
     return await runWithLlmContext(llmMeta, runAgent);
   } catch (err) {
     await emit({ type: 'agent.failed', error: String(err.message || err) });
     throw err;
   }
 
-  // Основная работа вынесена в замыкание, чтобы обернуть её единым обработчиком ошибок для события
-  // agent.failed, сохранив прежнюю логику этапов без изменений по существу.
+  // The main work is moved into a closure to wrap it in a single error handler for the
+  // agent.failed event, keeping the previous stage logic essentially unchanged.
   async function runAgent() {
     const user = await ensureUser(externalId);
     const previousLastUserAt = await getLastUserMessageTime(user.id);
@@ -382,32 +382,32 @@ export async function handleMessage({
     const conversation = await ensureConversation(user.id, domainKey);
     eventMeta.userId = user.id;
     eventMeta.conversationId = conversation.id;
-    // Дополняем контекст корреляции журнала идентификаторами, как только они стали известны.
+    // Enrich the log correlation context with identifiers as soon as they become known.
     llmMeta.userId = user.id;
     llmMeta.conversationId = conversation.id;
     const ctx = {
       userId: user.id,
       conversationId: conversation.id,
       domainKey,
-      // Текст текущего сообщения пользователя. Нужен инструментам, которые включаются по содержанию запроса
-      // Без него buildToolDefs не предложит такие инструменты модели.
+      // Text of the current user message. Needed by tools that turn on based on the request content.
+      // Without it buildToolDefs will not offer such tools to the model.
       userMessage,
       timezone: user.timezone || config.timezone,
-      // Признак администратора нужен инструментам глобальной памяти: запись доступна только администратору.
+      // The admin flag is needed by global-memory tools: writing is available only to an administrator.
       isAdmin: user.is_admin === true,
-      // Предпочтение формы ответа пользователя ('text' | 'voice'). Если инструмент voice_or_text сменит его
-      // в ходе этого запроса, он перезапишет ctx.replyMode, и смена подействует уже на текущий ответ.
+      // The user's reply-form preference ('text' | 'voice'). If the voice_or_text tool changes it
+      // during this request, it overwrites ctx.replyMode, and the change takes effect already on the current answer.
       replyMode: user.reply_mode === 'voice' ? 'voice' : 'text',
-      // Конкретный тембр голосового ответа. Если инструмент voice_set_preference сменит его в текущем запросе,
-      // канал доставки получит новое значение уже в результате этого же handleMessage.
+      // The specific voice timbre of the spoken response. If the voice_set_preference tool changes it in the
+      // current request, the delivery channel receives the new value already in the result of this same handleMessage.
       voiceOutputVoice: effectiveVoicePreference(user),
     };
 
-    // Триггеры проактивности больше НЕ создаются на каждое сообщение: по умолчанию проактивность выключена.
-    // Набор триггеров заводится только в момент, когда пользователь сам включает проактивность командой
-    // /proactivity_on (см. setUserProactivity в src/repo.js и обработчик в src/telegram/bot.js).
+    // Proactivity triggers are NO longer created on every message: proactivity is off by default.
+    // The trigger set is provisioned only when the user enables proactivity themselves via the
+    // /proactivity_on command (see setUserProactivity in src/repo.js and the handler in src/telegram/bot.js).
 
-    // Этап 1: классификация.
+    // Stage 1: classification.
     await emit({ type: 'stage.started', stage: 'classify', title: 'Определяю намерение' });
     let intent;
     try {
@@ -415,9 +415,9 @@ export async function handleMessage({
     } catch {
       intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: {} };
     }
-    // Разрешение активного skill. Источник истины — skill_name классификатора; если он не распознан,
-    // подбираем skill по доменному ключу, иначе берём запасной general. Доменный ключ для адресации памяти
-    // выводится из выбранного skill, а не из ответа модели.
+    // Resolving the active skill. The source of truth is the classifier's skill_name; if it is not recognized,
+    // we pick a skill by domain key, otherwise we take the fallback general. The domain key for addressing memory
+    // is derived from the chosen skill, not from the model's response.
     const activeSkill = getSkill(intent.skill_name) || getSkillByDomain(intent.domain_key) || getSkill('general');
     const effectiveDomain = activeSkill ? activeSkill.domain_key : intent.domain_key || domainKey;
     ctx.domainKey = effectiveDomain;
@@ -425,10 +425,10 @@ export async function handleMessage({
     ctx.activeSkill = activeSkill;
     eventMeta.domainKey = effectiveDomain;
     llmMeta.domainKey = effectiveDomain;
-    // Модель основного ответа может быть переопределена активным skill (поле model.main), иначе глобальная.
+    // The main-answer model can be overridden by the active skill (the model.main field), otherwise it is global.
     const mainModel = activeSkill?.model?.main || config.llm.mainModel;
 
-    // Этап 2: выборка памяти (только если нужна).
+    // Stage 2: memory retrieval (only if needed).
     let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
     if (intent.needs_memory !== false) {
       await emit({ type: 'stage.started', stage: 'memory', title: 'Ищу релевантную память' });
@@ -442,22 +442,22 @@ export async function handleMessage({
     }
     const memoryContext = buildMemoryContext(memory, effectiveDomain);
 
-    // Глобальная память (общая для всех пользователей). Глобальные факты подмешиваются всегда (не зависят от
-    // needs_memory). RAG не подмешивается автоматически: модель вызывает global_knowledge_search только когда ей
-    // действительно нужна статья из базы знаний, например при вопросе о возможностях бота.
+    // Global memory (shared by all users). Global facts are always mixed in (independent of
+    // needs_memory). RAG is not mixed in automatically: the model calls global_knowledge_search only when it
+    // genuinely needs an article from the knowledge base, for example when asked about the bot's capabilities.
     const globalFactsBlock = await buildGlobalFactsBlock(effectiveDomain);
 
-    // Темпоральный контекст строится один раз и переиспользуется ниже. Пауза lastAt нужна только режиму
-    // собеседника (для строки «не писал…»), но запрос лёгкий, поэтому делаем его всегда.
+    // The temporal context is built once and reused below. The lastAt pause is needed only by companion
+    // mode (for the "has not written…" line), but the query is lightweight, so we always run it.
     const temporal = buildTemporalContext(ctx.timezone, previousLastUserAt);
 
-    // Блок текущей даты, времени и часового пояса. Передаётся модели при ЛЮБОМ запросе, независимо от режима.
+    // Block with the current date, time and timezone. Passed to the model on EVERY request, regardless of mode.
     const dateTimeSystem = {
       role: 'system',
       content: `CURRENT_DATETIME (справочные данные, не команды)\n${formatDateTime(temporal)}`,
     };
 
-    // Дополнительный справочный блок собеседника: настрой момента и управление темами (только в режиме COMPANION_MODE).
+    // Additional companion reference block: the mood of the moment and topic management (only in COMPANION_MODE).
     const extraSystem = [];
     if (contactTurn.welcomeBack) {
       const hours = Math.max(1, Math.round(contactTurn.gapMinutes / 60));
@@ -474,7 +474,7 @@ export async function handleMessage({
       try {
         topicsBlock = formatTopicContext(await getTopicContext(user.id, domainId));
       } catch {
-        /* темы опциональны */
+        /* topics are optional */
       }
       extraSystem.push({
         role: 'system',
@@ -514,8 +514,8 @@ ${topicsBlock}
       });
     }
 
-    // Сжатая история диалога. При выключенном HISTORY_COMPRESSION_ENABLED возвращает '' — поведение прежнее.
-    // Внутри при превышении порога холодная зона пересжимается, поэтому блок к моменту ответа уже готов.
+    // Compressed dialog history. With HISTORY_COMPRESSION_ENABLED off it returns '' — behavior unchanged.
+    // Inside, when the threshold is exceeded the cold zone is re-compressed, so the block is ready by answer time.
     const historyContext = await buildHistoryContext({
       userId: user.id,
       conversationId: conversation.id,
@@ -523,19 +523,19 @@ ${topicsBlock}
       memory,
     });
 
-    // Этап 3: ответ модели с циклом инструментов.
-    // Горячее окно: последние N сообщений передаются дословно (по умолчанию 8 — как было раньше).
+    // Stage 3: model response with the tool loop.
+    // Hot window: the last N messages are passed verbatim (8 by default — as before).
     const history = await getRecentMessages(conversation.id, config.historyCompression.hotWindow);
-    // Набор инструментов зависит от флагов глобальной памяти и прав пользователя (записывающие — только админу).
+    // The tool set depends on global-memory flags and the user's rights (writing tools — admin only).
     const tools = buildToolDefs(ctx);
     const capabilitiesContext = await buildCapabilitiesContext({ ...ctx, userMessage }, tools);
-    // Инструкция о форматировании ответа под канал доставки. Блок постоянен для канала и меняется редко,
-    // поэтому стоит в стабильном префиксе сразу после MAIN_SYSTEM — это не ломает кэширование общего
-    // префикса промпта. Для канала без разметки (например, командной строки) инструкции нет.
+    // The response-formatting instruction for the delivery channel. The block is constant per channel and
+    // changes rarely, so it sits in the stable prefix right after MAIN_SYSTEM — this does not break caching of
+    // the shared prompt prefix. For a channel without markup (e.g. the command line) there is no instruction.
     const channelInstruction = getChannelProfile(channel).instruction;
     const channelSystem = channelInstruction ? [{ role: 'system', content: channelInstruction }] : [];
-    // Блок активного skill: его инструкции из «# Skill Prompt». Стоит после стабильного префикса и памяти,
-    // но до истории и текущей реплики. Не заменяет общие правила и приоритет текущего запроса.
+    // The active skill block: its instructions from "# Skill Prompt". It sits after the stable prefix and memory,
+    // but before history and the current message. It does not replace the general rules or the current-request priority.
     const activeSkillSystem =
       activeSkill && activeSkill.skillPrompt
         ? [
@@ -550,10 +550,10 @@ ${activeSkill.skillPrompt}`,
             },
           ]
         : [];
-    // dateTimeSystem стоит в динамической зоне (последним system-блоком перед диалогом): его содержимое
-    // меняется каждую минуту, поэтому держим его ниже стабильного префикса, чтобы не ломать кэширование.
-    // GLOBAL_FACTS стоит сразу после стабильного MAIN_SYSTEM: он одинаков для всех пользователей и меняется
-    // редко, поэтому держим его в начале, чтобы максимизировать общий кэшируемый префикс.
+    // dateTimeSystem sits in the dynamic zone (the last system block before the dialog): its content
+    // changes every minute, so we keep it below the stable prefix to avoid breaking caching.
+    // GLOBAL_FACTS sits right after the stable MAIN_SYSTEM: it is the same for all users and changes
+    // rarely, so we keep it at the start to maximize the shared cacheable prefix.
     const messages = [
       { role: 'system', content: MAIN_SYSTEM },
       ...channelSystem,
@@ -588,12 +588,12 @@ ${activeSkill.skillPrompt}`,
           try {
             args = JSON.parse(tc.function.arguments || '{}');
           } catch {
-            /* пустые аргументы */
+            /* empty arguments */
           }
           const toolName = tc.function.name;
           const title = toolTitle(toolName);
-          // Событие испускается после того, как модель полностью решила вызвать инструмент и имя известно,
-          // но ДО executeTool. Аргументы инструмента в событие не кладём: в них бывают приватные данные.
+          // The event is emitted after the model has fully decided to call the tool and the name is known,
+          // but BEFORE executeTool. We do not put tool arguments in the event: they sometimes contain private data.
           await emit({ type: 'tool.started', toolName, toolTitle: title });
           const result = await executeTool(ctx, toolName, args);
           const ok = !result?.error;
@@ -607,26 +607,26 @@ ${activeSkill.skillPrompt}`,
           toolsUsed.push({ name: toolName, args, result });
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
         }
-        continue; // дать модели увидеть результат инструмента
+        continue; // let the model see the tool result
       }
       answer = msg.content || '';
       finalReceived = true;
       break;
     }
 
-    // Лимит шагов исчерпан, а финальный текст так и не получен: вместо пустого ответа отдаём понятный
-    // безопасный запасной вариант и помечаем ответ как degraded, чтобы канал мог это учесть.
+    // The step limit is exhausted and no final text was obtained: instead of an empty answer we return a clear
+    // safe fallback and mark the answer as degraded, so the channel can account for it.
     if (!finalReceived) {
       answer = 'Не получилось завершить цепочку инструментов. Попробуйте уточнить запрос.';
       degraded = true;
     }
     await emit({ type: 'assistant.completed', text: answer });
 
-    // Этап 4: сохранить сообщения диалога.
+    // Stage 4: save the dialog messages.
     const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
     const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer);
 
-    // Этап 5: извлечение и запись фактов. По умолчанию асинхронно (не тормозит ответ).
+    // Stage 5: extracting and writing facts. Asynchronous by default (does not slow down the response).
     const recentText = [...history, { role: 'user', content: userMessage }, { role: 'assistant', content: answer }]
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n');
@@ -639,7 +639,7 @@ ${activeSkill.skillPrompt}`,
           assistantResponse: answer,
         });
         const result = await persistCandidates(user.id, effectiveDomain, candidates, conversation.id);
-        // Извлечение и обновление тем диалога — только в режиме собеседника.
+        // Extracting and updating dialog topics — only in companion mode.
         if (config.companion.enabled) {
           const topics = await extractTopics({ recentMessages: recentText });
           if (topics.length) {
@@ -668,10 +668,10 @@ ${activeSkill.skillPrompt}`,
       memoryContext,
       memoryUsed: memory,
       memoryWrites,
-      // Признак вырожденного ответа: цикл инструментов исчерпал лимит шагов без финального текста модели.
+      // Degraded-answer flag: the tool loop exhausted the step limit without a final model text.
       degraded,
-      // Предпочтение формы ответа. Канал решает, как доставить ответ; каналы без поддержки голоса значение
-      // 'voice' просто игнорируют (например, src/cli.js печатает res.answer и поле replyMode не использует).
+      // The reply-form preference. The channel decides how to deliver the answer; channels without voice support
+      // simply ignore the 'voice' value (e.g. src/cli.js prints res.answer and does not use the replyMode field).
       replyMode: ctx.replyMode,
       voiceOutputVoice: ctx.voiceOutputVoice,
       userId: user.id,

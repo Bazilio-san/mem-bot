@@ -9,8 +9,8 @@ import {
   summarize,
 } from '../../skills/authoring-support.js';
 
-// Создать новый навык по описанию на естественном языке. Под капотом генерирует черновик целого навыка,
-// проверяет его и по умолчанию только показывает предпросмотр; запись на диск — лишь при apply=true.
+// Create a new skill from a natural-language description. Under the hood it drafts a whole skill,
+// validates it, and by default only shows a preview; it writes to disk only when apply=true.
 export const skillAuthorCreateTool = {
   name: 'skill_author_create',
   title: 'Создаю навык...',
@@ -51,7 +51,7 @@ Use for a brand-new domain, not for editing an existing skill.`,
 
     if (getSkill(skill.name)) {
       return {
-        error: `Навык с именем «${skill.name}» уже существует. Используйте инструменты редактирования или другое имя.`,
+        error: `A skill named "${skill.name}" already exists. Use the editing tools or a different name.`,
       };
     }
 
@@ -67,7 +67,7 @@ Use for a brand-new domain, not for editing an existing skill.`,
 
     if (args.apply === true) {
       if (!ok) {
-        return { applied: false, issues, preview, error: 'Навык не прошёл валидацию; правьте и повторите.' };
+        return { applied: false, issues, preview, error: 'The skill failed validation; fix the issues and retry.' };
       }
       const res = await writeSkill(skill);
       clearStaged(ctx, skill.name);
@@ -78,7 +78,7 @@ Use for a brand-new domain, not for editing an existing skill.`,
       ok,
       issues,
       preview,
-      next: 'Покажите предпросмотр админу и вызовите skill_author_apply с confirm=true.',
+      next: 'Show the preview to the admin and call skill_author_apply with confirm=true.',
     };
   },
 };

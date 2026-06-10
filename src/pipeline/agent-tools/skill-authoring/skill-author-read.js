@@ -1,7 +1,7 @@
 import { authoringEnabled, loadEditable, summarize } from '../../skills/authoring-support.js';
 
-// Показать разобранный навык целиком или одну его часть. Нужно перед редактированием, чтобы модель правила
-// то, что реально есть, а не угадывала.
+// Show the parsed skill in full or just one part. Needed before editing so the model edits what actually
+// exists rather than guessing.
 export const skillAuthorReadTool = {
   name: 'skill_author_read',
   title: 'Читаю навык...',

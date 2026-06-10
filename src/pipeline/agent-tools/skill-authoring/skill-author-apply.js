@@ -1,8 +1,8 @@
 import { writeSkill, validateSkill } from '../../skills/writer.js';
 import { authoringEnabled, getStaged, clearStaged, summarize } from '../../skills/authoring-support.js';
 
-// Записать на диск навык, подготовленный в этом диалоге (созданный или отредактированный), с подтверждением.
-// Делает резервную копию, перезагружает реестр и заводит строку домена. Разрушающее действие: confirm=true.
+// Write the skill prepared in this conversation (created or edited) to disk, with confirmation.
+// Makes a backup, reloads the registry, and creates the domain row. Destructive action: confirm=true.
 export const skillAuthorApplyTool = {
   name: 'skill_author_apply',
   title: 'Применяю изменения навыка...',
@@ -33,15 +33,15 @@ registry. Requires confirm=true. Use after showing the preview to the admin and 
   },
   async handler(ctx, args) {
     if (args.confirm !== true) {
-      return { applied: false, error: 'Нужно подтверждение confirm=true.' };
+      return { applied: false, error: 'Confirmation required: confirm=true.' };
     }
     const skill = getStaged(ctx, args.name);
     if (!skill) {
-      return { applied: false, error: `Нет подготовленного черновика навыка «${args.name}» в этом диалоге.` };
+      return { applied: false, error: `No prepared draft for skill "${args.name}" in this conversation.` };
     }
     const { ok, issues } = await validateSkill(skill);
     if (!ok) {
-      return { applied: false, issues, error: 'Навык не прошёл валидацию; исправьте и повторите.' };
+      return { applied: false, issues, error: 'The skill failed validation; fix the issues and retry.' };
     }
     const res = await writeSkill(skill);
     clearStaged(ctx, args.name);

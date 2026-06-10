@@ -20,7 +20,7 @@ export const DEFAULT_VOICE_BY_GENDER = Object.freeze({
   mf: 'alloy',
 });
 
-// Категории, которые модель может передать вместо конкретного идентификатора голоса.
+// Categories the model may pass instead of a concrete voice id.
 export const CATEGORY_TO_GENDER = Object.freeze({
   male: 'm',
   female: 'f',

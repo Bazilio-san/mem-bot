@@ -1,7 +1,7 @@
-// Темпоральный контекст: дата, время, часовой пояс, время суток, тип дня, пауза с прошлого сообщения и
-// подсказка о настроении момента. Дата/время/пояс выводятся always-on блоком (formatDateTime), а настрой
-// момента — только в режиме собеседника (formatTemporalContext).
-// Чистый модуль без внешних зависимостей и побочных эффектов. При некорректном поясе откатывается на московское время.
+// Temporal context: date, time, timezone, time of day, day type, the pause since the previous message and
+// a hint about the mood of the moment. Date/time/timezone are emitted as an always-on block (formatDateTime),
+// while the mood of the moment is emitted only in companion mode (formatTemporalContext).
+// Pure module with no external dependencies or side effects. On an invalid timezone it falls back to Moscow time.
 const DAYS_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 const MONTHS_RU = [
   'января',
@@ -147,8 +147,8 @@ export function buildTemporalContext(timezone, lastMessageAt) {
   };
 }
 
-// Компактная строка с датой, временем, днём недели и часовым поясом. Передаётся модели при ЛЮБОМ
-// запросе (см. agent.js), поэтому держим её одной строкой без зависимости от паузы и настроя момента.
+// Compact line with the date, time, day of week and timezone. Passed to the model on EVERY
+// request (see agent.js), so we keep it on a single line independent of the pause and the mood of the moment.
 export function formatDateTime(ctx) {
   return (
     `Текущая дата и время: ${ctx.currentDate}, ${ctx.currentTime} (${ctx.dayOfWeek}), ` +
@@ -156,8 +156,8 @@ export function formatDateTime(ctx) {
   );
 }
 
-// Настрой момента для режима собеседника: период суток, пауза с прошлого сообщения и подсказка по тону.
-// Дата, время и часовой пояс сюда НЕ входят — они выводятся отдельным always-on блоком через formatDateTime.
+// Mood of the moment for companion mode: time of day, the pause since the previous message and a tone hint.
+// Date, time and timezone are NOT included here — they are emitted by a separate always-on block via formatDateTime.
 export function formatTemporalContext(ctx) {
   const lines = [`Период суток: ${ctx.timeOfDay} (${ctx.dayType})`];
   if (ctx.timeSinceLastMessage) {

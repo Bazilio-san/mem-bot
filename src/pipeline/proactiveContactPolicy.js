@@ -1,5 +1,5 @@
-// Каналонезависимая политика контакта для проактивных сообщений.
-// Решает, можно ли писать пользователю, только по состоянию, времени и типу кандидата.
+// Channel-independent contact policy for proactive messages.
+// Decides whether the user can be messaged, based only on state, time and candidate type.
 import { config } from '../config.js';
 import { query } from '../db.js';
 

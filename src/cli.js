@@ -1,5 +1,5 @@
-// Интерактивный чат в терминале. Подключается ко всему пайплайну памяти.
-// Запуск: npm run chat   (или: node src/cli.js [externalId] [domainKey])
+// Interactive chat in the terminal. Connects to the whole memory pipeline.
+// Run: npm run chat   (or: node src/cli.js [externalId] [domainKey])
 import readline from 'node:readline';
 import { handleMessage } from './agent.js';
 import { tick } from './pipeline/scheduler.js';
@@ -22,31 +22,31 @@ let domainKey = process.argv[3] || 'general';
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise((res) => rl.question(q, res));
 
-console.log(`Чат-бот с памятью. Пользователь: ${externalId}, домен: ${domainKey}.`);
-console.log('Команды: /domain <key> — сменить домен, /tick — прогнать планировщик, /exit — выход.');
+console.log(`Memory chatbot. User: ${externalId}, domain: ${domainKey}.`);
+console.log('Commands: /domain <key> — switch domain, /tick — run the scheduler, /exit — quit.');
 console.log(
-  `Глобальная память (запись — только администратору): /fact-add <текст>, /fact-list, /fact-del <id>, /kb-add <текст>, /kb-find <запрос>, /kb-del <id>.\n`,
+  `Global memory (writing — admin only): /fact-add <text>, /fact-list, /fact-del <id>, /kb-add <text>, /kb-find <query>, /kb-del <id>.\n`,
 );
 
-// Проверить, что текущий пользователь — администратор. Возвращает идентификатор пользователя или null.
+// Check that the current user is an administrator. Returns the user id or null.
 async function requireAdmin() {
   const user = await ensureUser(externalId);
   if (!(await isAdmin(user.id))) {
-    console.log('Команда доступна только администратору. Поставьте пользователю пометку is_admin в базе.');
+    console.log('This command is available to administrators only. Set the is_admin flag on the user in the database.');
     return null;
   }
   return user.id;
 }
 
-// Фоновый проход планировщика раз в 10 секунд, чтобы напоминания реально срабатывали.
+// Background scheduler pass every 10 seconds, so reminders actually fire.
 const schedulerTimer = setInterval(async () => {
   try {
     const r = await tick();
     if (r.processed > 0) {
-      console.log(`\n[планировщик] выполнено задач: ${r.processed}\n> `);
+      console.log(`\n[scheduler] tasks processed: ${r.processed}\n> `);
     }
   } catch {
-    /* игнорируем разовые ошибки фонового прохода */
+    /* ignore one-off errors of the background pass */
   }
 }, 10000);
 
@@ -61,16 +61,16 @@ async function main() {
     }
     if (input.startsWith('/domain ')) {
       domainKey = input.slice(8).trim() || 'general';
-      console.log(`Домен: ${domainKey}`);
+      console.log(`Domain: ${domainKey}`);
       continue;
     }
     if (input === '/tick') {
       const r = await tick();
-      console.log(`Выполнено задач: ${r.processed}`);
+      console.log(`Tasks processed: ${r.processed}`);
       continue;
     }
 
-    // --- Глобальные факты (всегда-включённые, общие для всех; запись только администратору) ---
+    // --- Global facts (always-on, shared by everyone; writing admin-only) ---
     if (input.startsWith('/fact-add ')) {
       const adminId = await requireAdmin();
       if (!adminId) {
@@ -78,11 +78,11 @@ async function main() {
       }
       const text = input.slice(10).trim();
       if (!text) {
-        console.log('Укажите текст факта: /fact-add <текст>');
+        console.log('Provide the fact text: /fact-add <text>');
         continue;
       }
       const f = await addGlobalFact({ factText: text, createdBy: adminId });
-      console.log(`Глобальный факт добавлен. Идентификатор: ${f.id}`);
+      console.log(`Global fact added. Id: ${f.id}`);
       continue;
     }
     if (input === '/fact-list') {
@@ -92,10 +92,10 @@ async function main() {
       }
       const facts = await listGlobalFacts({ includeDisabled: true });
       if (!facts.length) {
-        console.log('Глобальных фактов пока нет.');
+        console.log('No global facts yet.');
       } else {
         for (const f of facts) {
-          console.log(`  ${f.enabled ? '●' : '○'} ${f.id} (приоритет ${f.priority}): ${f.fact_text}`);
+          console.log(`  ${f.enabled ? '●' : '○'} ${f.id} (priority ${f.priority}): ${f.fact_text}`);
         }
       }
       continue;
@@ -107,11 +107,11 @@ async function main() {
       }
       const id = input.slice(10).trim();
       const ok = await deleteGlobalFact(id);
-      console.log(ok ? 'Глобальный факт удалён.' : 'Факт с таким идентификатором не найден.');
+      console.log(ok ? 'Global fact deleted.' : 'No fact with that id was found.');
       continue;
     }
 
-    // --- Общая база знаний (RAG): поиск доступен всем, запись только администратору ---
+    // --- Shared knowledge base (RAG): search available to everyone, writing admin-only ---
     if (input.startsWith('/kb-add ')) {
       const adminId = await requireAdmin();
       if (!adminId) {
@@ -119,22 +119,22 @@ async function main() {
       }
       const text = input.slice(8).trim();
       if (!text) {
-        console.log('Укажите текст: /kb-add <текст>');
+        console.log('Provide the text: /kb-add <text>');
         continue;
       }
       const k = await addGlobalKnowledge({ content: text, createdBy: adminId });
-      console.log(`Текст добавлен в базу знаний. Идентификатор: ${k.id}`);
+      console.log(`Text added to the knowledge base. Id: ${k.id}`);
       continue;
     }
     if (input.startsWith('/kb-find ')) {
       const q = input.slice(9).trim();
       if (!q) {
-        console.log('Укажите запрос: /kb-find <запрос>');
+        console.log('Provide the query: /kb-find <query>');
         continue;
       }
       const hits = await searchGlobalKnowledge({ domainKey, query: q });
       if (!hits.length) {
-        console.log('Релевантных фрагментов не найдено.');
+        console.log('No relevant fragments found.');
       } else {
         for (const h of hits) {
           console.log(`  ${h.id}: ${h.title ? h.title + ' — ' : ''}${h.content}`);
@@ -149,7 +149,7 @@ async function main() {
       }
       const id = input.slice(8).trim();
       const ok = await deleteGlobalKnowledge(id);
-      console.log(ok ? 'Запись базы знаний удалена.' : 'Запись с таким идентификатором не найдена.');
+      console.log(ok ? 'Knowledge base record deleted.' : 'No record with that id was found.');
       continue;
     }
 
@@ -157,11 +157,11 @@ async function main() {
       const res = await handleMessage({ externalId, userMessage: input, domainKey });
       ({ domainKey } = res);
       if (res.toolsUsed.length) {
-        console.log(`  [инструменты: ${res.toolsUsed.map((t) => t.name).join(', ')}]`);
+        console.log(`  [tools: ${res.toolsUsed.map((t) => t.name).join(', ')}]`);
       }
       console.log(`bot> ${res.answer}\n`);
     } catch (err) {
-      console.error('Ошибка обработки:', err.message);
+      console.error('Processing error:', err.message);
     }
   }
   clearInterval(schedulerTimer);

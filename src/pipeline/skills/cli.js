@@ -1,41 +1,41 @@
-// Командная строка управления реестром skills.
+// Command-line tool for managing the skills registry.
 //
-// Команды:
-//   validate   Прочитать и проверить все skills/<name>/SKILL.md. Падает с понятной ошибкой при проблеме.
-//   list       Показать активные skills, их domain_key, набор инструментов и наличие схемы домена.
-//   sync       Завести в mem.agent_domains строки для доменных ключей skills (мэппинг domain_key → domain_id).
+// Commands:
+//   validate   Read and check every skills/<name>/SKILL.md. Fails with a clear error on a problem.
+//   list       Show active skills, their domain_key, tool set, and whether a domain schema is present.
+//   sync       Create rows in mem.agent_domains for the skills' domain keys (domain_key → domain_id mapping).
 //
-// Команда sync не хранит схемы в базе: источник схемы — файл рядом со skill. Sync лишь гарантирует, что для
-// каждого доменного ключа есть строка-справочник с числовым domain_id, на который ссылаются внешние ключи
-// таблиц памяти.
+// The sync command does not store schemas in the database: the source of a schema is the file next to the skill.
+// Sync only guarantees that for each domain key there is a lookup row with a numeric domain_id, which the foreign
+// keys of the memory tables reference.
 import { loadSkills, listSkillRoutes, getSkill } from './registry.js';
 import { query, closePool } from '../../db.js';
 import { flushLlmLog } from '../llm-log.js';
 
 function cmdValidate() {
   const { byName } = loadSkills({ force: true });
-  console.log(`Проверено skills: ${byName.size}.`);
+  console.log(`Skills checked: ${byName.size}.`);
   for (const skill of byName.values()) {
-    const schema = skill.definition ? `схема: ${skill.definition.entities.length} сущн.` : 'схема: нет';
+    const schema = skill.definition ? `schema: ${skill.definition.entities.length} entities` : 'schema: none';
     console.log(`  • ${skill.name} → domain ${skill.domain_key}; ${schema}`);
   }
-  console.log('Все описания валидны.');
+  console.log('All definitions are valid.');
 }
 
 function cmdList() {
   const routes = listSkillRoutes();
   if (!routes.length) {
-    console.log('Активных skills нет.');
+    console.log('No active skills.');
     return;
   }
-  console.log('Активные skills:');
+  console.log('Active skills:');
   for (const r of routes) {
     const skill = getSkill(r.name);
-    const tools = skill.tools.allowed.length ? skill.tools.allowed.join(', ') : '(только базовые)';
-    const schema = skill.definition ? `${skill.definition.entities.length} сущностей` : 'нет';
+    const tools = skill.tools.allowed.length ? skill.tools.allowed.join(', ') : '(base only)';
+    const schema = skill.definition ? `${skill.definition.entities.length} entities` : 'none';
     console.log(`  • ${r.name} / domain ${r.domain_key} — ${r.title}`);
     console.log(
-      `      инструменты: ${tools}; схема домена: ${schema}; справочники: ${skill.references.allowed ? 'да' : 'нет'}`,
+      `      tools: ${tools}; domain schema: ${schema}; references: ${skill.references.allowed ? 'yes' : 'no'}`,
     );
   }
 }
@@ -52,10 +52,10 @@ async function cmdSync() {
     );
     if (rowCount) {
       created += rowCount;
-      console.log(`  + создан domain ${skill.domain_key}`);
+      console.log(`  + created domain ${skill.domain_key}`);
     }
   }
-  console.log(`Синхронизация завершена. Заведено новых доменов: ${created}.`);
+  console.log(`Sync complete. New domains created: ${created}.`);
 }
 
 async function main() {
@@ -72,11 +72,11 @@ async function main() {
         await cmdSync();
         break;
       default:
-        console.log('Команды: validate | list | sync');
+        console.log('Commands: validate | list | sync');
         process.exitCode = 1;
     }
   } catch (err) {
-    console.error('Ошибка:', err.message);
+    console.error('Error:', err.message);
     process.exitCode = 1;
   } finally {
     await flushLlmLog();

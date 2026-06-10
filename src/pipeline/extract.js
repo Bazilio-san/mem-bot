@@ -1,13 +1,13 @@
-// Этап извлечения кандидатов в долговременную память из диалога (после ответа).
-// Запускается асинхронно, чтобы не задерживать ответ пользователю. Сохраняет только
-// то, что полезно в будущем; мусор и одноразовые детали отбрасывает.
+// Stage that extracts long-term memory candidates from the dialog (after the reply).
+// Runs asynchronously so as not to delay the user's reply. Saves only
+// what is useful in the future; discards junk and one-off details.
 import { chatJSON } from '../llm.js';
 import { config } from '../config.js';
 import { loadDomainDefinition, getEntitySpec } from '../schema/registry.js';
 import { getFactExtractionPrompt, getSkill, getSkillByDomain } from './skills/registry.js';
 
-// Подсказка для первого прохода: если у домена есть схема, перечисляем его сущности и поля data,
-// чтобы модель сразу выбирала правильный entity_type. Для доменов без схемы возвращается пустая строка.
+// Hint for the first pass: if the domain has a schema, we list its entities and data fields
+// so the model immediately picks the correct entity_type. For domains without a schema an empty string is returned.
 async function buildSchemaHint(domainKey) {
   const def = await loadDomainDefinition(domainKey);
   if (!def || !def.entities?.length) {
@@ -20,9 +20,9 @@ async function buildSchemaHint(domainKey) {
   return `\nУ домена есть схема памяти. Для предметных фактов используй эти типы сущностей и поля data:\n${lines.join('\n')}`;
 }
 
-// Собрать строгую закрытую схему ответа под конкретную сущность для второго прохода.
-// Модель обязана вернуть ровно entity_key, memory_text и data по схеме сущности: лишних полей нет,
-// все поля data перечислены, типы и enum заданы. Для fixed_vocab ключ ограничивается словарём.
+// Build a strict closed response schema for a specific entity for the second pass.
+// The model must return exactly entity_key, memory_text and data per the entity schema: no extra fields,
+// all data fields listed, types and enums set. For fixed_vocab the key is restricted to the vocabulary.
 function buildEntityExtractionSchema(spec) {
   const entityKeyProp =
     spec.entity_key.mode === 'fixed_vocab'
@@ -40,9 +40,9 @@ function buildEntityExtractionSchema(spec) {
   };
 }
 
-// Второй проход: перезаполнить data и entity_key кандидата строго по схеме его сущности.
-// Кандидат без entity_type или сущность вне схемы домена возвращаются без изменений
-// (на записи такой предметный факт всё равно будет отклонён, если сущности нет в схеме).
+// Second pass: refill the candidate's data and entity_key strictly per its entity schema.
+// A candidate without entity_type, or an entity outside the domain schema, is returned unchanged
+// (on write such a domain fact will be rejected anyway if the entity is not in the schema).
 async function refineCandidate(domainKey, candidate, contextText, model = config.llm.extractModel) {
   if (!candidate.entity_type) {
     return candidate;
@@ -75,13 +75,13 @@ memory_text — короткая человеческая фраза о факт
       memory_text: filled?.memory_text || candidate.memory_text,
     };
   } catch {
-    // Если строгий проход не удался — оставляем кандидата как есть; контроль сработает на записи.
+    // If the strict pass failed, leave the candidate as is; validation will kick in on write.
     return candidate;
   }
 }
 
-// Прогнать все кандидаты через второй проход. Предметные кандидаты со схемой уточняются параллельно;
-// для домена без схемы список возвращается без изменений (второй проход не запускается).
+// Run all candidates through the second pass. Domain candidates with a schema are refined in parallel;
+// for a domain without a schema the list is returned unchanged (the second pass does not run).
 async function refineCandidates(domainKey, candidates, contextText, model = config.llm.extractModel) {
   const def = await loadDomainDefinition(domainKey);
   if (!def) {
@@ -204,8 +204,8 @@ notification_first_person, emoji_chat_names, informal_tone.
 
 export async function extractCandidates({ skillName = null, domainKey, recentMessages, assistantResponse }) {
   const schemaHint = await buildSchemaHint(domainKey);
-  // Дополнение активного skill объясняет, какие факты полезны именно в этом домене; схема ниже задаёт форму.
-  // Skill берётся по имени из роутера, а при его отсутствии (например, путь реакций) — по доменному ключу.
+  // The active skill's addendum explains which facts are useful specifically in this domain; the schema below sets the form.
+  // The skill is taken by name from the router, and in its absence (for example, the reactions path) — by the domain key.
   const skill = skillName ? getSkill(skillName) : getSkillByDomain(domainKey);
   const extractModel = skill?.model?.extract || config.llm.extractModel;
   const skillExtraction = skill ? getFactExtractionPrompt(skill.name) : '';
@@ -227,12 +227,12 @@ ${recentMessages}
 ${assistantResponse}`,
   });
   const candidates = result.candidates || [];
-  // Второй проход: для предметных кандидатов со схемой перезаполняем data/entity_key строго по схеме сущности.
+  // Second pass: for domain candidates with a schema, refill data/entity_key strictly per the entity schema.
   return refineCandidates(domainKey, candidates, `${recentMessages}\n${assistantResponse}`, extractModel);
 }
 
-// Извлечение тем диалога для тематического трекинга (критерий 13). Возвращает массив тем с оценкой
-// вовлечённости пользователя. Используется только в режиме собеседника (COMPANION_MODE).
+// Extraction of dialog topics for topic tracking (criterion 13). Returns an array of topics with a score
+// of the user's engagement. Used only in companion mode (COMPANION_MODE).
 const TOPICS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -245,8 +245,8 @@ const TOPICS_SCHEMA = {
         additionalProperties: false,
         required: ['topic_key', 'user_engagement'],
         properties: {
-          topic_key: { type: 'string' }, // короткий стабильный ключ: fitness, work_stress, travel
-          user_engagement: { type: 'number' }, // 0..1 — насколько живо пользователь отвечал по теме
+          topic_key: { type: 'string' }, // short stable key: fitness, work_stress, travel
+          user_engagement: { type: 'number' }, // 0..1 — how lively the user's responses on the topic were
         },
       },
     },

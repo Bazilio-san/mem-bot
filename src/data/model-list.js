@@ -1,7 +1,7 @@
 // https://platform.openai.com/docs/models
-// Цены указаны за 1млн токенов https://openai.com/api/pricing/
+// Prices are per 1M tokens https://openai.com/api/pricing/
 
-// здесь свойства имеют короткие имена, чтобы удобно было видеть в одной строке
+// here the properties have short names so they are easy to see on a single line
 export const openAiModelMeta = {
   'computer-use-preview': { kT: 0, inp: 0, out: 0, inpB: 0, outB: 0 },
   'curie-search-document': { kT: 0, inp: 0, out: 0, inpB: 0, outB: 0 },

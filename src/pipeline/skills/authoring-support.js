@@ -1,13 +1,13 @@
-// Общие помощники инструментов редактирования навыков: единый предикат доступа, промежуточное хранилище
-// подготовленных черновиков (предпросмотр → применение) и преобразования формы навыка. Лежит вне каталога
-// agent-tools намеренно: там действует правило «один инструмент — один файл», а это вспомогательный модуль.
+// Shared helpers for the skill-editing tools: a single access predicate, a staging store for prepared drafts
+// (preview → apply), and skill-shape transformations. Deliberately placed outside the agent-tools directory:
+// there the "one tool — one file" rule applies, whereas this is a helper module.
 import { getSkill } from './registry.js';
 
-// Доступ: только администратор и только при включённом флаге инструментария.
+// Access: admin only, and only when the toolkit flag is enabled.
 export const authoringEnabled = (ctx, config) => config.skills.authoring.enabled && ctx.isAdmin === true;
 
-// Промежуточное хранилище подготовленных навыков на время диалога. Ключ — диалог и имя навыка.
-// Порождающие инструменты кладут сюда результат и возвращают предпросмотр; apply берёт отсюда и пишет на диск.
+// Staging store for prepared skills for the duration of a dialog. Key is the dialog plus the skill name.
+// Generating tools put the result here and return a preview; apply takes it from here and writes to disk.
 const staging = new Map();
 const key = (ctx, name) => `${ctx.conversationId}::${name}`;
 
@@ -21,7 +21,7 @@ export function clearStaged(ctx, name) {
   staging.delete(key(ctx, name));
 }
 
-// Собрать объект навыка (форма как у реестра) из черновика генератора.
+// Build a skill object (registry shape) from a generator draft.
 export function buildSkillFromDraft(draft) {
   return {
     name: draft.name,
@@ -44,11 +44,11 @@ export function buildSkillFromDraft(draft) {
   };
 }
 
-// Загрузить навык для редактирования: глубокая копия редактируемых полей (без вычисляемых dir и т. п.).
+// Load a skill for editing: deep copy of the editable fields (without computed dir, etc.).
 export function loadEditable(name) {
   const s = getSkill(name);
   if (!s) {
-    throw new Error(`Навык «${name}» не найден.`);
+    throw new Error(`Skill «${name}» not found.`);
   }
   return JSON.parse(
     JSON.stringify({
@@ -69,13 +69,13 @@ export function loadEditable(name) {
   );
 }
 
-// Взять навык для редактирования: сначала подготовленный в этом диалоге, иначе с диска.
+// Take a skill for editing: first the one staged in this dialog, otherwise from disk.
 export function editableOrStaged(ctx, name) {
   return getStaged(ctx, name) || loadEditable(name);
 }
 
-// Применить или подготовить изменённый навык. При apply=true валидирует и пишет на диск; иначе кладёт в
-// промежуточное хранилище и возвращает предпросмотр с замечаниями (запись — отдельным skill_author_apply).
+// Apply or stage the changed skill. With apply=true it validates and writes to disk; otherwise it puts it into
+// the staging store and returns a preview with issues (the actual write goes through a separate skill_author_apply).
 export async function applyOrStage(ctx, skill, { apply } = {}) {
   const { validateSkill, writeSkill } = await import('./writer.js');
   const { ok, issues } = await validateSkill(skill);
@@ -97,7 +97,7 @@ export async function applyOrStage(ctx, skill, { apply } = {}) {
   };
 }
 
-// Краткая сводка навыка для ответов инструментов.
+// Brief skill summary for tool responses.
 export function summarize(skill) {
   return {
     name: skill.name,

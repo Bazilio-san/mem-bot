@@ -12,7 +12,32 @@ allowed-tools: Bash(node scripts/stop-telegram.js), Bash(node src/telegram/bot.j
 
 Drive the live bot in Telegram Web to verify end-to-end behaviour: streaming drafts, tool-call statuses, voice
 replies, history, proactivity. The bot is `@tinter2_bot`; the web chat is `https://web.telegram.org/k/#@tinter2_bot`.
-Playwright must run in persistent-cache mode so the Telegram login survives across runs.
+Playwright must run with a persistent on-disk profile so the Telegram login survives across runs.
+
+## Persistent profile and output folders
+
+The login and browser cache live in a fixed folder on disk, and every screenshot or saved snapshot is written to a
+second fixed folder. The two folders are:
+
+- Browser profile (holds the Telegram login): `C:\Users\vv\.cache\playwright-mcp\profile`
+- Output artifacts (screenshots, saved snapshots): `C:\Users\vv\.cache\playwright-mcp\output`
+
+These paths are NOT set by this skill — they are launch arguments of the Playwright MCP server. The server entry in
+`~/.claude.json` (the global Claude Code config) must pass both flags to `@playwright/mcp`:
+
+```jsonc
+"args": [
+  "/c", "npx", "-y", "@playwright/mcp@latest",
+  "--user-data-dir", "C:\\Users\\vv\\.cache\\playwright-mcp\\profile",
+  "--output-dir", "C:\\Users\\vv\\.cache\\playwright-mcp\\output"
+]
+```
+
+The critical flag is `--user-data-dir`. Without it, `@playwright/mcp` creates a throwaway temporary profile on every
+launch (its own `--help` says: "If not specified, a temporary directory will be created"), so the Telegram login is
+lost after each run and the QR-login screen reappears every time. With the flag pointing at the fixed folder above,
+the login is written to disk once and reused on all later runs. After changing these arguments you must restart
+Claude Code so the Playwright MCP server starts with them.
 
 ## Step 1 — Reload the code first (critical)
 
@@ -32,8 +57,9 @@ lost or duplicated. Always stop the old one before starting a new one.
 
 Navigate Playwright to `https://web.telegram.org/k/#@tinter2_bot`. If the QR-login screen appears
 (`Log in by QR Code` / `Scan with Telegram app on your phone`), STOP and ask the user to scan it from their phone
-(Settings → Devices → Link Desktop Device). Do not attempt to log in yourself. The cache is persistent, so once the
-user logs in the session survives later runs.
+(Settings → Devices → Link Desktop Device). Do not attempt to log in yourself. The profile folder is persistent, so
+once the user logs in the session is saved to `C:\Users\vv\.cache\playwright-mcp\profile` and survives later runs —
+the QR screen should appear only on the very first run (or after the user revokes the linked device).
 
 ## Step 3 — Send a message
 
@@ -55,7 +81,8 @@ whole answer shows up at once as one finished bubble, the non-streaming delivery
 (Step 5) rather than the streaming code.
 
 Tip: large snapshots bloat context. Save them to a file with the `filename` option and read only the tail of that
-file to inspect the last bubble, instead of dumping the whole bubble tree.
+file to inspect the last bubble, instead of dumping the whole bubble tree. With `--output-dir` set, these files land
+in `C:\Users\vv\.cache\playwright-mcp\output`, not in the repo, so they never pollute the working tree.
 
 ## Step 5 — Streaming gating rules
 
@@ -75,5 +102,7 @@ So if streaming "does not work", check in order:
 ## Step 6 — Clean up
 
 If you started the bot as a session-owned background process, restart it in the user's own terminal afterwards (or
-tell the user to), so it does not die when your session ends. Delete any snapshot artifacts written to the repo root
-(`snap-*.md`) to keep the workspace clean.
+tell the user to), so it does not die when your session ends. Snapshot and screenshot artifacts go to the output
+folder `C:\Users\vv\.cache\playwright-mcp\output` (not the repo) — clear that folder if it grows large. If any
+`snap-*.md` files did land in the repo root (for example because `--output-dir` was not configured yet), delete
+them to keep the workspace clean.

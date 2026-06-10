@@ -26,8 +26,8 @@ Call this whenever the user names a specific voice or asks for a male, female, o
     },
   },
   async handler(ctx, args) {
-    // Модель сама выбирает один из вариантов перечисления: либо конкретный идентификатор голоса,
-    // либо категорию (male/female/neutral). Никакого разбора свободного текста здесь нет.
+    // The model itself picks one of the enum options: either a concrete voice id
+    // or a category (male/female/neutral). There is no free-text parsing here.
     const requestedVoice = String(args.voice || '');
     let voice;
     let gender;

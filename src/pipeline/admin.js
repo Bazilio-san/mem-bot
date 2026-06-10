@@ -1,5 +1,5 @@
-// Управление памятью пользователем: просмотр, удаление одной записи, полное забывание.
-// Удаление — мягкое (status='deleted'), чтобы запись исчезала из выборок, но оставался след.
+// User-facing memory management: viewing, deleting a single record, full forgetting.
+// Deletion is soft (status='deleted'), so the record disappears from retrievals but a trace remains.
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 
@@ -20,7 +20,7 @@ export async function listMemory(userId, { includeArchived = false } = {}) {
   return rows;
 }
 
-// Удалить одну запись памяти (мягко).
+// Delete a single memory record (soft).
 export async function deleteMemory(userId, memoryId) {
   const { rowCount } = await query(
     `UPDATE mem.memory_items SET status='deleted', updated_at=now() WHERE id=$1 AND user_id=$2`,
@@ -29,7 +29,7 @@ export async function deleteMemory(userId, memoryId) {
   return rowCount > 0;
 }
 
-// Забыть всё об активной памяти пользователя.
+// Forget everything in the user's active memory.
 export async function forgetAll(userId) {
   const { rowCount } = await query(
     `UPDATE mem.memory_items SET status='deleted', updated_at=now() WHERE user_id=$1 AND status='active'`,
@@ -162,16 +162,16 @@ async function deleteBySemanticMatch(userId, rawName) {
   };
 }
 
-// Мягко удалить записи памяти по названию сущности, идентификатору или тексту факта.
-// Сначала проверяется UUID и точное совпадение memory_text: это покрывает сценарий, когда пользователь копирует
-// строку из memory_list. Затем включается прежний поиск по entity_key/entity_type и безопасный fallback по тексту.
-// Если точные методы ничего не нашли, последним шагом используется смысловой поиск по embedding с осторожными
-// порогами: очевидный лучший кандидат удаляется, близкие варианты возвращаются как ambiguous.
-// Сопоставление нечёткое и регистронезависимое: совпадение по ключу сущности (entity_key), по её типу,
-// вхождение названия в ключ или текст факта. Параметр entityType уточняет тип, если названий несколько.
-// Возвращает { deleted, items } — число помеченных удалёнными записей и их краткий перечень.
-// Если тип не уточнён, а под название подходят записи РАЗНЫХ типов, удаление не выполняется: возвращается
-// { deleted: 0, ambiguous: true, candidates }, чтобы агент уточнил у пользователя, что именно забыть.
+// Soft-delete memory records by entity name, identifier, or fact text.
+// First a UUID and an exact memory_text match are checked: this covers the scenario where the user copies
+// a string from memory_list. Then the previous search by entity_key/entity_type and a safe text fallback kick in.
+// If the exact methods found nothing, the last step uses semantic search by embedding with cautious
+// thresholds: an obvious best candidate is deleted, close variants are returned as ambiguous.
+// Matching is fuzzy and case-insensitive: a match by entity key (entity_key), by its type,
+// the name occurring in the key or fact text. The entityType parameter narrows the type when there are several names.
+// Returns { deleted, items } — the number of records marked as deleted and a brief list of them.
+// If the type is not specified and records of DIFFERENT types match the name, deletion is not performed: it returns
+// { deleted: 0, ambiguous: true, candidates } so the agent can clarify with the user what exactly to forget.
 export async function deleteByEntity(userId, entityName, entityType = null) {
   const rawName = String(entityName || '').trim();
   const name = normalizeLookupText(rawName);
@@ -241,8 +241,8 @@ export async function deleteByEntity(userId, entityName, entityType = null) {
   return softDeleteRows(userId, rows);
 }
 
-// Является ли пользователь администратором (ручная пометка is_admin в БД).
-// Только администратор может наполнять и чистить глобальную память (см. global-memory.js).
+// Whether the user is an administrator (a manual is_admin flag in the DB).
+// Only an administrator can populate and clean global memory (see global-memory.js).
 export async function isAdmin(userId) {
   const { rows } = await query('SELECT is_admin FROM mem.users WHERE id = $1', [userId]);
   return rows[0]?.is_admin === true;

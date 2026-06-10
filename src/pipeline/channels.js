@@ -1,20 +1,20 @@
-// Реестр профилей представления каналов. Ядро ИИ-бота не знает о конкретных каналах доставки
-// (Telegram, веб-чат, командная строка): каждый канал на старте сам регистрирует свой профиль
-// функцией registerChannelProfile, а ядро лишь подмешивает инструкцию форматирования из профиля в
-// системный промпт по ключу канала. Так добавление нового канала не требует правок ядра.
+// Registry of channel presentation profiles. The AI bot core knows nothing about specific delivery channels
+// (Telegram, web chat, command line): each channel registers its own profile at startup via the
+// registerChannelProfile function, and the core merely mixes the formatting instruction from the profile into the
+// system prompt by the channel key. This way adding a new channel does not require changes to the core.
 //
-// Профиль канала — это объект со следующими полями (любое можно опустить):
-//   instruction — системный блок для модели: какой разметкой форматировать ответ (строка или null);
-//   parseMode   — режим разметки при доставке ('HTML', 'MarkdownV2', null) — используется слоем канала;
-//   postProcess — функция очистки/экранирования текста перед отправкой (или null) — используется каналом;
-//   split       — функция разбивки длинного текста по границам тегов (или null) — используется каналом.
-// Поля parseMode/postProcess/split относятся к доставке и читаются самим каналом; ядро использует только
-// instruction. Они входят в профиль, чтобы канал держал все свои настройки представления в одном месте.
+// A channel profile is an object with the following fields (any of them can be omitted):
+//   instruction — a system block for the model: which markup to format the reply with (a string or null);
+//   parseMode   — the markup mode at delivery ('HTML', 'MarkdownV2', null) — used by the channel layer;
+//   postProcess — a function to clean up/escape text before sending (or null) — used by the channel;
+//   split       — a function to split long text along tag boundaries (or null) — used by the channel.
+// The parseMode/postProcess/split fields relate to delivery and are read by the channel itself; the core uses only
+// instruction. They are part of the profile so that the channel keeps all its presentation settings in one place.
 
 const PROFILES = new Map();
 
-// Профиль по умолчанию — без разметки. Применяется командной строкой, тестами и как запасной вариант
-// для незарегистрированного канала.
+// The default profile — without markup. Used by the command line, by tests, and as a fallback
+// for an unregistered channel.
 const PLAIN_PROFILE = {
   instruction: null,
   parseMode: null,
@@ -22,14 +22,14 @@ const PLAIN_PROFILE = {
   split: null,
 };
 
-// Зарегистрировать профиль канала. Недостающие поля дополняются значениями профиля по умолчанию,
-// поэтому каналу достаточно указать только то, что для него существенно.
+// Register a channel profile. Missing fields are filled in with the default profile's values,
+// so a channel only needs to specify what is essential to it.
 export function registerChannelProfile(channel, profile) {
   PROFILES.set(channel, { ...PLAIN_PROFILE, ...profile });
 }
 
-// Получить профиль канала по ключу. Для неизвестного канала возвращается профиль по умолчанию (без разметки),
-// поэтому вызывающая сторона всегда получает полный объект и может безопасно читать его поля.
+// Get a channel profile by key. For an unknown channel the default profile (without markup) is returned,
+// so the caller always gets a full object and can safely read its fields.
 export function getChannelProfile(channel) {
   return PROFILES.get(channel) || PLAIN_PROFILE;
 }

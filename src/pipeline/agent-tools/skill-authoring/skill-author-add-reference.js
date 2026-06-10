@@ -1,7 +1,7 @@
 import { writeReference } from '../../skills/writer.js';
 import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/authoring-support.js';
 
-// Создать или обновить файл справочника навыка и включить чтение справочников. Содержимое пишет модель в content.
+// Create or update a skill reference file and enable reading references. The model writes the content into `content`.
 export const skillAuthorAddReferenceTool = {
   name: 'skill_author_add_reference',
   title: 'Добавляю справочник навыка...',

@@ -1,8 +1,9 @@
-// Решение о сжатии холодной зоны истории и вызов суммаризатора.
-// Холодная зона — всё, что старше горячего окна (последних N сообщений). Если её размер в токенах
-// превысил порог, она пересобирается в компактный дайджест с градиентом: ближняя к текущему моменту
-// часть подробнее, дальняя — короче. Факты, уже сохранённые в долговременной памяти, в дайджест не
-// попадают (защита от дублей). Устойчивые факты выносятся в долговременную память обычным контуром.
+// Decides whether to compress the cold zone of history and invokes the summarizer.
+// The cold zone is everything older than the hot window (the last N messages). If its size in tokens
+// exceeds the threshold, it's rebuilt into a compact digest with a gradient: the part closer to the
+// current moment is more detailed, the further part shorter. Facts already saved in long-term memory
+// don't make it into the digest (dedup protection). Durable facts are pushed into long-term memory
+// through the normal flow.
 import { chatJSON } from '../llm.js';
 import { config, debugEnabled } from '../config.js';
 import {
@@ -20,14 +21,14 @@ function dbg(...args) {
   }
 }
 
-// Заголовки зон в итоговом дайджесте. Порядок фиксирован: ближняя → средняя → дальняя.
+// Zone headers in the final digest. The order is fixed: near, middle, far.
 const ZONE_HEADERS = {
   near: 'Ближняя часть разговора:',
   middle: 'Средняя часть разговора:',
   far: 'Дальняя часть разговора:',
 };
 
-// Схема ответа суммаризатора. Размеры в токенах в схему намеренно не входят — их считает наш код.
+// Summarizer response schema. Token sizes are deliberately left out of the schema — our code counts them.
 const SUMMARY_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -86,7 +87,7 @@ ${ZONE_HEADERS.far}
 - MEMORY_CONTEXT важнее повторяющихся старых фактов из истории.
 - Если факт уже есть в active_memory, не повторяй его в summary_text, а перечисли в dropped_because_in_memory.`;
 
-// Плоский список текстов активной памяти (для передачи суммаризатору и код-стороны дедупликации).
+// Flat list of active-memory texts (to pass to the summarizer and for code-side deduplication).
 function activeMemoryTexts(memory) {
   if (!memory) {
     return [];
@@ -107,8 +108,8 @@ function activeMemoryTexts(memory) {
   return out;
 }
 
-// Разбить холодную зону на три части по доле токенов: дальняя — первые 25%, средняя — следующие 35%,
-// ближняя — последние 40% (по давности). Сообщения отсортированы по возрастанию времени.
+// Split the cold zone into three parts by token share: far — the first 25%, middle — the next 35%,
+// near — the last 40% (by age). Messages are sorted in ascending time order.
 function splitZones(messages) {
   const total = sumMessageTokens(messages) || 1;
   const farLimit = total * 0.25;
@@ -143,8 +144,8 @@ function normalizeWords(s) {
   );
 }
 
-// Похожесть строки на текст памяти по доле общих слов (мера Жаккара). Нужна, чтобы код-сторона
-// гарантированно убирала из дайджеста факты, уже сохранённые в долговременной памяти.
+// Similarity of a line to a memory text by the share of shared words (Jaccard measure). Needed so the
+// code side reliably removes from the digest facts already saved in long-term memory.
 function similarToMemory(line, memTexts) {
   const lw = normalizeWords(line);
   if (lw.size === 0) {
@@ -169,14 +170,14 @@ function similarToMemory(line, memTexts) {
   return false;
 }
 
-// Затереть очевидно секретные значения (длинные группы цифр: паспорта, номера, карты).
+// Redact obviously secret values (long digit groups: passports, numbers, cards).
 function redactSecrets(text) {
   return String(text)
     .replace(/\d{4}\s?\d{6}/g, '[скрыто]')
     .replace(/\d{6,}/g, '[скрыто]');
 }
 
-// Оставить из набора строк столько, чтобы уложиться в бюджет токенов (обрезаем с конца — наименее важное).
+// Keep as many lines as fit into the token budget (trimming from the end — the least important).
 function trimLinesToTokens(lines, budget) {
   const out = [...lines];
   while (out.length && estimateTokens(out.join('\n')) > budget) {
@@ -185,7 +186,7 @@ function trimLinesToTokens(lines, budget) {
   return out;
 }
 
-// Разобрать summary_text модели на три зоны по заголовкам. Текст до первого заголовка относим к ближней.
+// Parse the model's summary_text into three zones by headers. Text before the first header goes to near.
 function parseZones(summaryText) {
   const zones = { near: [], middle: [], far: [] };
   let current = 'near';
@@ -211,8 +212,8 @@ function parseZones(summaryText) {
   return zones;
 }
 
-// Собрать итоговый дайджест: дедупликация с памятью, затирание секретов, бюджет по зонам, фиксированные
-// заголовки и градиент (ближняя получает больший бюджет, чем дальняя). Гарантирует размер ≤ targetTokens.
+// Assemble the final digest: dedup against memory, secret redaction, per-zone budget, fixed headers
+// and a gradient (near gets a larger budget than far). Guarantees size ≤ targetTokens.
 function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
   const cleaned = redactSecrets(summaryText);
   const zones = parseZones(cleaned);
@@ -240,7 +241,7 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
     }
   }
   let text = parts.join('\n\n');
-  // Финальная страховка по общему размеру (если суммарно всё же больше цели — режем с конца).
+  // Final safeguard on total size (if it's still over the target overall — trim from the end).
   const allLines = text.split('\n');
   if (estimateTokens(text) > targetTokens) {
     text = trimLinesToTokens(allLines, targetTokens).join('\n');
@@ -248,8 +249,8 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
   return { text, dropped };
 }
 
-// Привести факты суммаризатора к форме кандидатов памяти и провести их обычным контуром persistCandidates
-// (порог важности → проверка чувствительности → дедупликация → обновление вместо дублей).
+// Convert summarizer facts into memory-candidate shape and run them through the normal persistCandidates
+// flow (importance threshold, sensitivity check, deduplication, update instead of duplicates).
 function factsToCandidates(facts = []) {
   return facts
     .map((f) => ({
@@ -269,8 +270,8 @@ function factsToCandidates(facts = []) {
     .filter((c) => c.memory_text);
 }
 
-// Сжать холодную зону: разбить на зоны, вызвать суммаризатор, собрать итоговый дайджест с гарантиями
-// размера, градиента, дедупликации и затирания секретов. Возвращает поля для сохранения сводки.
+// Compress the cold zone: split into zones, call the summarizer, assemble the final digest with
+// guarantees on size, gradient, deduplication and secret redaction. Returns fields for saving the summary.
 export async function summarizeColdHistory({
   activeSummary,
   coldPending,
@@ -303,7 +304,7 @@ ${renderZone(zones.middle) || '(нет сообщений)'}
 ${ZONE_HEADERS.far}
 ${renderZone(zones.far) || '(нет сообщений)'}`;
 
-  dbg('сжатие холодной зоны, сообщений:', coldPending.length, 'цель токенов:', targetTokens);
+  dbg('compressing cold zone, messages:', coldPending.length, 'token target:', targetTokens);
   let raw;
   try {
     raw = await chatJSON({
@@ -315,8 +316,8 @@ ${renderZone(zones.far) || '(нет сообщений)'}`;
       user,
     });
   } catch (err) {
-    dbg('суммаризатор вернул ошибку, активная сводка не меняется:', err.message);
-    return null; // плохой JSON — не трогаем старую активную сводку
+    dbg('summarizer returned an error, active summary unchanged:', err.message);
+    return null; // bad JSON — leave the old active summary untouched
   }
 
   const { text, dropped } = assembleSummary(raw.summary_text || '', { memTexts, targetTokens, zoneWeights });
@@ -331,14 +332,14 @@ ${renderZone(zones.far) || '(нет сообщений)'}`;
   };
 }
 
-// Проверить размер холодной зоны и при превышении порога пересобрать дайджест и сохранить его.
-// Вызывается перед сборкой контекста ответа: к моменту ответа HISTORY_CONTEXT уже готов.
+// Check the cold-zone size and, if the threshold is exceeded, rebuild the digest and save it.
+// Called before assembling the response context: by response time HISTORY_CONTEXT is already ready.
 export async function maybeCompressHistory({ userId, conversationId, domainKey, memory }) {
   const { hotWindow } = config.historyCompression;
   const activeSummary = await getActiveConversationSummary(conversationId);
   const hotMessages = await getRecentMessages(conversationId, hotWindow);
 
-  // Граница горячего окна: всё, что старше самого раннего из последних N сообщений, — холодная зона.
+  // Hot-window boundary: everything older than the earliest of the last N messages is the cold zone.
   const boundaryCreatedAt = hotMessages.length ? hotMessages[0].created_at : new Date();
 
   const coldPending = await getColdPendingMessages({
@@ -353,7 +354,7 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
     return { compressed: false, reason: 'below_threshold', coldSize };
   }
   if (!coldPending.length) {
-    // Нечего досжимать (вся холодная зона уже покрыта) — оставляем активную сводку как есть.
+    // Nothing left to compress (the whole cold zone is already covered) — keep the active summary as is.
     return { compressed: false, reason: 'nothing_pending', coldSize };
   }
 
@@ -386,17 +387,17 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
     memoryDedupe: { dropped_because_in_memory: result.droppedBecauseInMemory },
   });
 
-  // Устойчивые факты из истории — в долговременную память обычным контуром (пороги, чувствительность, дедуп).
+  // Durable facts from history go into long-term memory via the normal flow (thresholds, sensitivity, dedup).
   if (result.factsToMemory.length) {
     try {
       await persistCandidates(userId, domainKey, result.factsToMemory, conversationId);
     } catch (err) {
-      dbg('запись facts_to_memory не удалась:', err.message);
+      dbg('writing facts_to_memory failed:', err.message);
     }
   }
 
   dbg(
-    'история сжата:',
+    'history compressed:',
     JSON.stringify({
       source_token_count: coldSize,
       summary_token_count: result.summaryTokenCount,

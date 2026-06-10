@@ -1,7 +1,7 @@
 import { writeSkill } from '../../skills/writer.js';
 import { authoringEnabled, loadEditable, summarize } from '../../skills/authoring-support.js';
 
-// Включить навык (enabled=true), чтобы роутер мог его выбирать. Пишет сразу.
+// Enable a skill (enabled=true) so the router can select it. Writes immediately.
 export const skillAuthorEnableTool = {
   name: 'skill_author_enable',
   title: 'Включаю навык...',

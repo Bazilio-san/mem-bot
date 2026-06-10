@@ -1,6 +1,6 @@
-// Внешние события как поводы написать первым (критерий 17). Источник событий (на старте — заглушка-новости),
-// фильтр релевантности через модель и доставка релевантного события с защитой от повторной отправки.
-// Универсальный механизм: вместо новостей можно подключить погоду, праздники, дедлайны — контракт тот же.
+// External events as reasons to reach out first (criterion 17). An event source (a news stub at the start),
+// a relevance filter through the model, and delivery of a relevant event with protection against re-sending.
+// A universal mechanism: instead of news you can plug in weather, holidays, deadlines — the contract is the same.
 import { config } from '../config.js';
 import { query } from '../db.js';
 import { chat, chatJSON } from '../llm.js';
@@ -12,7 +12,7 @@ import {
   recordProactiveSent,
 } from './proactiveContactPolicy.js';
 
-// Заглушка источника новостей. В продакшене заменить на внешний API. Каждое событие имеет стабильный id.
+// News source stub. In production, replace with an external API. Each event has a stable id.
 const NEWS_STUB = [
   {
     id: 'news-001',
@@ -86,7 +86,7 @@ const NEWS_STUB = [
   },
 ];
 
-let cursor = 0; // курсор по заглушке: по одному событию за проход.
+let cursor = 0; // cursor over the stub: one event per pass.
 
 function nextEvent() {
   if (!NEWS_STUB.length) {
@@ -108,7 +108,7 @@ async function loadFactsText(userId, domainId) {
   return rows.map((r) => `- (${r.memory_kind}) ${r.memory_text}`).join('\n');
 }
 
-// Оценка релевантности события пользователю. Строгий JSON.
+// Assessment of an event's relevance to the user. Strict JSON.
 async function checkRelevance(userId, domainId, event) {
   const facts = await loadFactsText(userId, domainId);
   if (!facts) {
@@ -186,7 +186,7 @@ ${facts}`;
   await recordProactiveSent({ userId: user.id, candidate });
 }
 
-// Один проход контура событий: взять событие, проверить релевантность каждому пользователю, доставить подходящим.
+// One pass of the events loop: take an event, check relevance for each user, deliver to the matching ones.
 export async function processEvents() {
   if (!config.proactive.enabled || !config.proactive.events.enabled) {
     return { delivered: 0 };
@@ -215,7 +215,7 @@ export async function processEvents() {
         delivered++;
       }
     } catch (err) {
-      console.error('Обработка события не удалась:', event.id, err.message);
+      console.error('Event processing failed:', event.id, err.message);
     }
   }
   return { delivered, eventId: event.id };

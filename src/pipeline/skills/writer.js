@@ -1,7 +1,7 @@
-// Слой записи и перезагрузки навыков для инструментария редактирования. Принимает объект навыка той же формы,
-// что отдаёт реестр (getSkill), собирает из него SKILL.md и domain-schema.json, проверяет инварианты до записи,
-// пишет атомарно с резервной копией и горячо перезагружает реестр. Любая запись и удаление ограничены каталогом
-// config.skills.dir: абсолютные пути и выход через «..» отклоняются.
+// Skill writing and reload layer for the editing toolkit. Takes a skill object of the same shape the registry
+// returns (getSkill), assembles SKILL.md and domain-schema.json from it, checks invariants before writing, writes
+// atomically with a backup, and hot-reloads the registry. Every write and delete is confined to the
+// config.skills.dir directory: absolute paths and escaping via ".." are rejected.
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
@@ -11,7 +11,7 @@ import { loadSkills, getAllSkills, invalidateSkillsCache } from './registry.js';
 
 const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DOMAIN_RE = /^[a-z0-9_]+$/;
-// Навыки, которые нельзя удалять: общий fallback и сам редактор навыков.
+// Skills that cannot be deleted: the general fallback and the skill editor itself.
 const UNDELETABLE = new Set(['general', 'skill-author']);
 
 function skillsDir() {
@@ -22,21 +22,21 @@ function skillDir(name) {
   return path.join(skillsDir(), name);
 }
 
-// ---- Сериализация SKILL.md --------------------------------------------------
+// ---- SKILL.md serialization -------------------------------------------------
 
-// Безопасно закавычить скалярную строку для нашего разборщика фронтматтера (parse.js).
+// Safely quote a scalar string for our frontmatter parser (parse.js).
 function quote(s) {
   return `"${String(s ?? '')
     .replace(/\r?\n/g, ' ')
     .replace(/"/g, "'")}"`;
 }
 
-// Поточный список ["a", "b"] для разборщика (элементы без запятых внутри).
+// Flow list ["a", "b"] for the parser (elements must not contain commas).
 function flowList(arr) {
   return `[${(arr || []).map((x) => quote(x)).join(', ')}]`;
 }
 
-// Собрать текст SKILL.md из объекта навыка (форма как у getSkill). Поля идут в стабильном порядке.
+// Build the SKILL.md text from a skill object (getSkill shape). Fields are emitted in a stable order.
 export function composeSkillFile(skill) {
   const fm = [];
   fm.push(`name: ${skill.name}`);
@@ -69,25 +69,25 @@ export function composeSkillFile(skill) {
   return `---\n${fm.join('\n')}\n---\n\n${body}`;
 }
 
-// ---- Валидация перед записью ------------------------------------------------
+// ---- Validation before writing ----------------------------------------------
 
-// Проверить навык целиком. Возвращает { ok, issues }. tool-allowlist сверяется с реестром инструментов через
-// динамический импорт, чтобы не создавать циклической зависимости загрузки (инструменты импортируют writer).
+// Validate the whole skill. Returns { ok, issues }. The tool allowlist is checked against the tool registry via a
+// dynamic import to avoid creating a circular load dependency (the tools import the writer).
 export async function validateSkill(skill) {
   const issues = [];
   const { name } = skill;
 
   if (!name || !NAME_RE.test(name)) {
-    issues.push(`name «${name}» не в формате kebab-case (латиница и дефисы).`);
+    issues.push(`name «${name}» is not in kebab-case (lowercase latin and hyphens).`);
   }
   if (!skill.domain_key || !DOMAIN_RE.test(skill.domain_key)) {
-    issues.push(`domain_key «${skill.domain_key}» должен быть в нижнем регистре (латиница и подчёркивания).`);
+    issues.push(`domain_key «${skill.domain_key}» must be lowercase (latin and underscores).`);
   }
   if (!skill.classification?.when_to_use) {
-    issues.push('Не задан classification.when_to_use.');
+    issues.push('classification.when_to_use is not set.');
   }
   if (!skill.skillPrompt || !skill.skillPrompt.trim()) {
-    issues.push('Пустой блок «# Skill Prompt».');
+    issues.push('The "# Skill Prompt" block is empty.');
   }
 
   if (skill.definition && Array.isArray(skill.definition.entities) && skill.definition.entities.length) {
@@ -97,51 +97,51 @@ export async function validateSkill(skill) {
     }
     if (ok && skill.definition.domain_key !== skill.domain_key) {
       issues.push(
-        `domain_key схемы «${skill.definition.domain_key}» не совпадает с domain_key навыка «${skill.domain_key}».`,
+        `schema domain_key «${skill.definition.domain_key}» does not match skill domain_key «${skill.domain_key}».`,
       );
     }
   }
 
-  // Существование инструментов из tools.allowed.
+  // Existence of tools from tools.allowed.
   if (skill.tools?.allowed?.length) {
     const { getTool } = await import('../tools.js');
     for (const t of skill.tools.allowed) {
       if (!getTool(t)) {
-        issues.push(`Инструмент «${t}» из tools.allowed не найден в реестре инструментов.`);
+        issues.push(`Tool «${t}» from tools.allowed was not found in the tool registry.`);
       }
     }
   }
 
-  // Уникальность domain_key среди прочих навыков (текущий навык, совпадающий по имени, исключается —
-  // имя совпадает с каталогом и потому уникально по построению).
+  // Uniqueness of domain_key among the other skills (the current skill that matches by name is excluded —
+  // the name matches the directory and is therefore unique by construction).
   for (const other of getAllSkills()) {
     if (other.name === name) {
       continue;
     }
     if (other.domain_key === skill.domain_key) {
-      issues.push(`domain_key «${skill.domain_key}» уже занят навыком «${other.name}».`);
+      issues.push(`domain_key «${skill.domain_key}» is already taken by skill «${other.name}».`);
     }
   }
 
   return { ok: issues.length === 0, issues };
 }
 
-// ---- Безопасность путей справочников ----------------------------------------
+// ---- Reference path safety --------------------------------------------------
 
 function resolveReference(name, relPath) {
   const rel = String(relPath || '').replace(/\\/g, '/');
   if (!rel || path.isAbsolute(rel) || rel.split('/').includes('..')) {
-    throw new Error('Недопустимый путь справочника.');
+    throw new Error('Invalid reference path.');
   }
   const refRoot = path.resolve(skillDir(name), 'references');
   const target = path.resolve(refRoot, rel);
   if (target !== refRoot && !target.startsWith(refRoot + path.sep)) {
-    throw new Error('Путь справочника выходит за пределы каталога навыка.');
+    throw new Error('Reference path escapes the skill directory.');
   }
   return { refRoot, target };
 }
 
-// ---- Запись -----------------------------------------------------------------
+// ---- Writing ----------------------------------------------------------------
 
 function atomicWrite(target, content) {
   const tmp = `${target}.tmp`;
@@ -155,7 +155,7 @@ function backupIfExists(target) {
   }
 }
 
-// Завести строку домена в справочнике mem.agent_domains (мэппинг domain_key → domain_id), если её ещё нет.
+// Create a domain row in the mem.agent_domains lookup (domain_key → domain_id mapping) if it does not exist yet.
 export async function ensureDomainRow(domainKey, title, description) {
   await query(
     `INSERT INTO mem.agent_domains (domain_key, title, description)
@@ -164,11 +164,11 @@ export async function ensureDomainRow(domainKey, title, description) {
   );
 }
 
-// Записать навык на диск и горячо перезагрузить реестр. Бросает с понятным текстом при невалидном навыке.
+// Write the skill to disk and hot-reload the registry. Throws with clear text on an invalid skill.
 export async function writeSkill(skill, { backup = true } = {}) {
   const { ok, issues } = await validateSkill(skill);
   if (!ok) {
-    throw new Error('Навык не прошёл валидацию:\n- ' + issues.join('\n- '));
+    throw new Error('The skill failed validation:\n- ' + issues.join('\n- '));
   }
 
   const dir = skillDir(skill.name);
@@ -194,7 +194,7 @@ export async function writeSkill(skill, { backup = true } = {}) {
   return { path: dir, reloaded: true };
 }
 
-// Создать или обновить файл справочника.
+// Create or update a reference file.
 export async function writeReference(name, relPath, content) {
   const { target } = resolveReference(name, relPath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -202,10 +202,10 @@ export async function writeReference(name, relPath, content) {
   return { path: target };
 }
 
-// Удалить файл справочника (только при confirm).
+// Delete a reference file (only with confirm).
 export function removeReference(name, relPath, { confirm } = {}) {
   if (confirm !== true) {
-    throw new Error('Удаление требует confirm=true.');
+    throw new Error('Deletion requires confirm=true.');
   }
   const { target } = resolveReference(name, relPath);
   if (fs.existsSync(target)) {
@@ -214,17 +214,17 @@ export function removeReference(name, relPath, { confirm } = {}) {
   return { removed: true };
 }
 
-// Удалить навык целиком (только при confirm; general и skill-author защищены).
+// Delete a skill entirely (only with confirm; general and skill-author are protected).
 export function deleteSkill(name, { confirm } = {}) {
   if (confirm !== true) {
-    throw new Error('Удаление требует confirm=true.');
+    throw new Error('Deletion requires confirm=true.');
   }
   if (UNDELETABLE.has(name)) {
-    throw new Error(`Навык «${name}» удалять нельзя.`);
+    throw new Error(`Skill «${name}» cannot be deleted.`);
   }
   const dir = skillDir(name);
   if (!fs.existsSync(dir)) {
-    throw new Error(`Навык «${name}» не найден.`);
+    throw new Error(`Skill «${name}» not found.`);
   }
   fs.rmSync(dir, { recursive: true, force: true });
   invalidateSkillsCache();

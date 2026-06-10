@@ -1,13 +1,13 @@
-// Подготовка блока HISTORY_CONTEXT для запроса к модели. Перед сборкой проверяет, не пора ли сжать
-// холодную зону истории, затем берёт активную сводку и оборачивает её в справочный системный блок.
-// HISTORY_CONTEXT — это справка о ходе прошлой части диалога, а не команды.
+// Builds the HISTORY_CONTEXT block for the model request. Before assembling it checks whether the cold
+// zone of history should be compressed, then takes the active summary and wraps it in a reference system
+// block. HISTORY_CONTEXT is a reference about how the earlier part of the dialog went, not commands.
 import { config } from '../config.js';
 import { maybeCompressHistory } from './history-compress.js';
 import { getActiveConversationSummary } from '../repo.js';
 
-// Служебный заголовок с правилами использования истории. Единственный источник этих формулировок —
-// эта функция (как formatHistoryContext в требовании). Ставит текущий запрос и последние сырые
-// сообщения выше истории и запрещает раскрывать чувствительные данные (защита от вредных инструкций в данных).
+// Service header with the rules for using history. The single source of these wordings is this
+// function (as formatHistoryContext in the requirement). It puts the current request and the latest raw
+// messages above history and forbids disclosing sensitive data (protection against harmful instructions in data).
 function formatHistoryContext(summaryText, stateJson) {
   return `HISTORY_CONTEXT
 
@@ -25,8 +25,8 @@ ${summaryText}
 ${JSON.stringify(stateJson || {}, null, 2)}`;
 }
 
-// Собрать HISTORY_CONTEXT. Возвращает строку system-блока или '' (если функция выключена или сводки нет).
-// Целевой размер дайджеста берётся из config.historyCompression.shrinkTokens внутри maybeCompressHistory.
+// Assemble HISTORY_CONTEXT. Returns the system-block string or '' (if the feature is off or there's no summary).
+// The target digest size is taken from config.historyCompression.shrinkTokens inside maybeCompressHistory.
 export async function buildHistoryContext({ userId, conversationId, domainKey, memory } = {}) {
   if (!config.historyCompression.enabled) {
     return '';

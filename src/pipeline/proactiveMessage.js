@@ -1,7 +1,7 @@
-// Генератор проактивного сообщения (критерии 15, 16). Собирает факты, темы и темпоральный контекст и
-// просит модель написать пользователю первым в стиле «наблюдение → пространство → выбор»: уместное
-// наблюдение, мягкое приглашение к разговору, свобода ответить или промолчать. В контекст идут только
-// обычные (несекретные) факты — приватность сохраняется, как и в основном MEMORY_CONTEXT.
+// Proactive message generator (criteria 15, 16). Collects facts, topics and temporal context and asks
+// the model to write to the user first in the "observation → space → choice" style: an apt observation,
+// a gentle invitation to talk, freedom to reply or stay silent. Only ordinary (non-secret) facts go into
+// the context — privacy is preserved, same as in the main MEMORY_CONTEXT.
 import { query } from '../db.js';
 import { chat } from '../llm.js';
 import { config } from '../config.js';
@@ -44,7 +44,7 @@ export async function buildProactiveMessage({
   try {
     topics = formatTopicContext(await getTopicContext(userId, domainId));
   } catch {
-    /* темы опциональны */
+    /* topics are optional */
   }
 
   const system = `# Роль

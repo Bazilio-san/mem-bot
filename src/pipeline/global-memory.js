@@ -1,17 +1,17 @@
-// Слой глобальной памяти: всегда-включённые глобальные факты и общая база знаний (RAG).
-// В отличие от личной памяти (привязанной к пользователю), эти записи видны всем. Наполнять и чистить
-// их может только администратор — проверка прав делается в вызывающем слое (инструменты агента, команды CLI).
-// Глобальные факты подмешиваются в каждый запрос; фрагменты базы знаний — только релевантные текущему запросу.
-// Подробности — в docs/ai-bot-with-memory/14-global-memory.md.
+// Global memory layer: always-on global facts and a shared knowledge base (RAG).
+// Unlike personal memory (bound to a user), these records are visible to everyone. Only an administrator can
+// populate and clean them — the permission check is done in the calling layer (agent tools, CLI commands).
+// Global facts are mixed into every request; knowledge base fragments — only those relevant to the current query.
+// Details are in docs/ai-bot-with-memory/14-global-memory.md.
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 import { getDomainId } from '../repo.js';
 import { config } from '../config.js';
 
-// ===================== Глобальные факты (always-on) ==========================
+// ===================== Global facts (always-on) ==========================
 
-// Действующие сейчас факты: включённые и относящиеся либо к текущему домену, либо общие (domain_id IS NULL).
-// Сортируются по приоритету (меньше число — важнее), обрезаются под жёсткий лимит минимизации.
+// Currently effective facts: enabled and belonging either to the current domain or shared (domain_id IS NULL).
+// Sorted by priority (a smaller number is more important), truncated to the hard minimization limit.
 export async function getActiveGlobalFacts({ domainKey, limit = config.globalMemory.factsLimit }) {
   const domainId = domainKey ? await getDomainId(domainKey) : null;
   const { rows } = await query(
@@ -25,7 +25,7 @@ export async function getActiveGlobalFacts({ domainKey, limit = config.globalMem
   return rows;
 }
 
-// Перечислить все факты (для админ-команд: показать идентификаторы, чтобы было что удалять).
+// List all facts (for admin commands: show identifiers so there is something to delete).
 export async function listGlobalFacts({ includeDisabled = true } = {}) {
   const { rows } = await query(
     `SELECT id, fact_text, priority, enabled, domain_id
@@ -37,8 +37,8 @@ export async function listGlobalFacts({ includeDisabled = true } = {}) {
   return rows;
 }
 
-// Добавить глобальный факт. По умолчанию факт общий для всех доменов (domain_id = NULL);
-// если передан domainKey — факт привязывается к этому домену.
+// Add a global fact. By default the fact is shared across all domains (domain_id = NULL);
+// if domainKey is passed, the fact is bound to that domain.
 export async function addGlobalFact({ factText, domainKey = null, priority = 100, createdBy = null }) {
   const domainId = domainKey ? await getDomainId(domainKey) : null;
   const { rows } = await query(
@@ -50,13 +50,13 @@ export async function addGlobalFact({ factText, domainKey = null, priority = 100
   return rows[0];
 }
 
-// Удалить глобальный факт по идентификатору (физически). Возвращает true, если запись была.
+// Delete a global fact by identifier (physically). Returns true if the record existed.
 export async function deleteGlobalFact(id) {
   const { rowCount } = await query('DELETE FROM mem.global_facts WHERE id = $1', [id]);
   return rowCount > 0;
 }
 
-// Включить или выключить факт без удаления.
+// Enable or disable a fact without deleting it.
 export async function setGlobalFactEnabled(id, enabled) {
   const { rowCount } = await query('UPDATE mem.global_facts SET enabled = $2, updated_at = now() WHERE id = $1', [
     id,
@@ -65,9 +65,9 @@ export async function setGlobalFactEnabled(id, enabled) {
   return rowCount > 0;
 }
 
-// Справочный блок GLOBAL_FACTS для промпта. Возвращает пустую строку, если слой выключен флагом
-// или подходящих фактов нет. Источник доверенный (только администратор), поэтому факты подаются как
-// авторитетные общие сведения и политика — без обёртки «это недоверенная справка».
+// GLOBAL_FACTS reference block for the prompt. Returns an empty string if the layer is disabled by a flag
+// or there are no matching facts. The source is trusted (administrator only), so the facts are presented as
+// authoritative general information and policy — without the "this is untrusted reference" wrapper.
 export async function buildGlobalFactsBlock(domainKey) {
   if (!config.globalMemory.factsEnabled) {
     return '';
@@ -80,11 +80,11 @@ export async function buildGlobalFactsBlock(domainKey) {
   return `GLOBAL_FACTS (общие сведения и политика для всех пользователей)\n\n${lines}`;
 }
 
-// ===================== Общая база знаний (RAG) ===============================
+// ===================== Shared knowledge base (RAG) ===============================
 
-// Поиск по базе знаний: смысловая близость через эмбеддинги (если доступны) либо полнотекст как запасной
-// сигнал. Учитывает домен (текущий или общий) и отсекает слабые совпадения порогом релевантности, чтобы в
-// контекст не попадали посторонние фрагменты.
+// Knowledge base search: semantic proximity via embeddings (if available) or full-text as a fallback
+// signal. Takes the domain into account (current or shared) and cuts off weak matches with a relevance
+// threshold so that irrelevant fragments do not end up in the context.
 export async function searchGlobalKnowledge({
   domainKey,
   query: userQuery,
@@ -108,7 +108,7 @@ export async function searchGlobalKnowledge({
     if (strong.length) {
       return strong;
     }
-    // Если по смыслу ничего сильного не нашлось — пробуем полнотекст ниже.
+    // If nothing strong was found semantically, we try full-text below.
   }
 
   const { rows } = await query(
@@ -123,8 +123,8 @@ export async function searchGlobalKnowledge({
   return rows.filter((r) => Number(r.relevance) >= minRelevance);
 }
 
-// Добавить текст в общую базу знаний. Считает эмбеддинг (если сервис доступен); при недоступности запись
-// всё равно создаётся и остаётся найденной полнотекстовым поиском.
+// Add text to the shared knowledge base. Computes an embedding (if the service is available); if unavailable,
+// the record is still created and remains findable via full-text search.
 export async function addGlobalKnowledge({
   title = null,
   content,
@@ -145,7 +145,7 @@ export async function addGlobalKnowledge({
   return rows[0];
 }
 
-// Удалить текст базы знаний по идентификатору (мягко: status = 'deleted', чтобы остался след).
+// Delete knowledge base text by identifier (soft delete: status = 'deleted', so a trace remains).
 export async function deleteGlobalKnowledge(id) {
   const { rowCount } = await query(
     `UPDATE mem.global_knowledge SET status = 'deleted', updated_at = now()
@@ -155,8 +155,8 @@ export async function deleteGlobalKnowledge(id) {
   return rowCount > 0;
 }
 
-// Справочный блок GLOBAL_KNOWLEDGE для промпта. Возвращает пустую строку, если RAG выключен флагом или
-// релевантных фрагментов нет (чтобы не добавлять пустой блок и не делать лишних запросов к эмбеддингам).
+// GLOBAL_KNOWLEDGE reference block for the prompt. Returns an empty string if RAG is disabled by a flag or
+// there are no relevant fragments (to avoid adding an empty block and making unnecessary embedding requests).
 export async function buildGlobalKnowledgeBlock(domainKey, userQuery) {
   if (!config.globalMemory.ragEnabled) {
     return '';

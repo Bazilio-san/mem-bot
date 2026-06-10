@@ -1,7 +1,7 @@
 import { getAllSkills } from '../../skills/registry.js';
 import { authoringEnabled, summarize } from '../../skills/authoring-support.js';
 
-// Перечислить все навыки с краткой сводкой: имя, домен, инструменты, наличие схемы и справочников.
+// List all skills with a short summary: name, domain, tools, whether they have a schema and references.
 export const skillAuthorListTool = {
   name: 'skill_author_list',
   title: 'Показываю навыки...',

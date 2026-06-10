@@ -18,4 +18,6 @@ llm:
   apiKey: 'sk-...'
   baseURL: 'https://litellm.my-proxy.com/v1'
 telegram:
+  #> Username (Id) бота для навигации при тестировании с playwright
+  botUsername: ''
   apiKey: 'ТОКЕН_БОТА'

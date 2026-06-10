@@ -41,3 +41,4 @@ config/local-*.yaml
 .mcp.json
 /backups/
 /.claude/worktrees/
+/.browser-session/

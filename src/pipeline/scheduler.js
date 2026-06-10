@@ -1,8 +1,8 @@
-// Планировщик напоминаний и фоновых задач. Содержит: извлечение задачи из сообщения,
-// создание задачи, воркер с безопасным захватом задач (FOR UPDATE SKIP LOCKED),
-// однократным выполнением разовых задач, перепланированием регулярных и повторами при ошибке.
+// Scheduler for reminders and background tasks. Contains: extracting a task from a message,
+// creating a task, a worker with safe task claiming (FOR UPDATE SKIP LOCKED),
+// one-shot execution of one-time tasks, rescheduling of recurring ones and retries on error.
 import cronParser from 'cron-parser';
-// rrule — CommonJS-модуль: rrulestr доступен только через default-экспорт, именованного экспорта нет.
+// rrule is a CommonJS module: rrulestr is available only via the default export, there's no named export.
 // eslint-disable-next-line import/default
 import rrulePkg from 'rrule';
 import { config } from '../config.js';
@@ -26,7 +26,7 @@ class ScheduleError extends Error {
   }
 }
 
-// Создать задачу в БД.
+// Create a task in the database.
 export async function createTask({ userId, domainKey = 'general', conversationId = null, task }) {
   const domainId = await getDomainId(domainKey);
   const normalizedTask = { ...task, timezone: normalizeTimezone(task.timezone) };
@@ -54,9 +54,9 @@ export async function createTask({ userId, domainKey = 'general', conversationId
       nextRun,
     ],
   );
-  // Разбудить воркер планировщика, чтобы он не ждал до конца текущего сна и подхватил задачу сразу.
-  // Сбой уведомления не должен мешать созданию задачи: в худшем случае воркер возьмёт её на ближайшем
-  // плановом пробуждении (не позднее верхней границы сна), поэтому ошибку здесь намеренно поглощаем.
+  // Wake the scheduler worker so it doesn't wait out the current sleep and picks the task up right away.
+  // A failed notification must not block task creation: at worst the worker will pick it up on its next
+  // scheduled wake-up (no later than the sleep upper bound), so we deliberately swallow the error here.
   await notify('scheduler_wake').catch(() => {});
   return rows[0];
 }
@@ -103,7 +103,7 @@ export function formatLocalDateTime(dateLike, timezone) {
 
 function assertValidDate(date, label) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    throw new ScheduleError(`Некорректное время расписания: ${label}`);
+    throw new ScheduleError(`Invalid schedule time: ${label}`);
   }
   return date;
 }
@@ -201,7 +201,7 @@ function parseFloatingDtstart(rruleText) {
 
 export function nextCronRun(task, afterDate = new Date()) {
   if (!task.cron_expr) {
-    throw new ScheduleError('Для cron-задачи не задан cron_expr');
+    throw new ScheduleError('cron_expr is not set for a cron task');
   }
   const timezone = normalizeTimezone(task.timezone);
   try {
@@ -211,13 +211,13 @@ export function nextCronRun(task, afterDate = new Date()) {
     });
     return assertValidDate(interval.next().toDate(), `cron_expr=${task.cron_expr}`);
   } catch (err) {
-    throw new ScheduleError(`Некорректное cron-расписание "${task.cron_expr}": ${err.message || err}`);
+    throw new ScheduleError(`Invalid cron schedule "${task.cron_expr}": ${err.message || err}`);
   }
 }
 
 export function nextRRuleRun(task, afterDate = new Date()) {
   if (!task.rrule) {
-    throw new ScheduleError('Для rrule-задачи не задан rrule');
+    throw new ScheduleError('rrule is not set for an rrule task');
   }
   const dtstartTzid = task.rrule.match(/^DTSTART;TZID=([^:\n]+):/im)?.[1];
   const timezone = normalizeTimezone(dtstartTzid || task.timezone);
@@ -242,9 +242,9 @@ export function nextRRuleRun(task, afterDate = new Date()) {
     if (!floatingNext) {
       return null;
     }
-    throw new ScheduleError(`RRULE-расписание "${task.rrule}" не дало будущий запуск`);
+    throw new ScheduleError(`RRULE schedule "${task.rrule}" produced no future run`);
   } catch (err) {
-    throw new ScheduleError(`Некорректное RRULE-расписание "${task.rrule}": ${err.message || err}`);
+    throw new ScheduleError(`Invalid RRULE schedule "${task.rrule}": ${err.message || err}`);
   }
 }
 
@@ -252,7 +252,7 @@ export function computeNextRun(task, afterDate = new Date()) {
   const after = assertValidDate(new Date(afterDate), 'afterDate');
   if (task.schedule_kind === 'one_time') {
     if (!task.run_at) {
-      throw new ScheduleError('Для разовой задачи не задан run_at');
+      throw new ScheduleError('run_at is not set for a one-time task');
     }
     return assertValidDate(new Date(task.run_at), `run_at=${task.run_at}`);
   }
@@ -265,7 +265,7 @@ export function computeNextRun(task, afterDate = new Date()) {
   if (task.schedule_kind === 'rrule') {
     return nextRRuleRun(task, after);
   }
-  throw new ScheduleError(`Неподдерживаемый тип расписания: ${task.schedule_kind}`);
+  throw new ScheduleError(`Unsupported schedule kind: ${task.schedule_kind}`);
 }
 
 export function computeFirstRun(task, afterDate = new Date()) {
@@ -274,14 +274,14 @@ export function computeFirstRun(task, afterDate = new Date()) {
   }
   if (task.schedule_kind === 'interval') {
     if (!task.interval_seconds || task.interval_seconds <= 0) {
-      throw new ScheduleError('Для interval-задачи нужен положительный interval_seconds');
+      throw new ScheduleError('An interval task requires a positive interval_seconds');
     }
     return computeNextRun(task, afterDate);
   }
   return computeNextRun(task, afterDate);
 }
 
-// Вычислить следующий запуск после выполнения. Для разовых задач — null (завершить).
+// Compute the next run after execution. For one-time tasks — null (finish).
 export function calculateNextRun(task, afterDate = new Date()) {
   if (task.schedule_kind === 'one_time') {
     return null;
@@ -289,7 +289,7 @@ export function calculateNextRun(task, afterDate = new Date()) {
   return computeNextRun(task, afterDate);
 }
 
-// Безопасно захватить просроченные задачи (несколько воркеров не возьмут одну и ту же).
+// Safely claim due tasks (multiple workers won't grab the same one).
 export async function claimDueTasks(limit = 20) {
   const { rows } = await query(
     `WITH due AS (
@@ -309,11 +309,11 @@ export async function claimDueTasks(limit = 20) {
   return rows;
 }
 
-// Сколько миллисекунд осталось до ближайшего запланированного запуска свободной активной задачи.
-// Возвращает 0, если задача уже просрочена и готова к выполнению, и null, если активных задач нет.
-// Задачи, заблокированные другим воркером (`locked_until` в будущем), исключаются, чтобы воркер не
-// крутился вхолостую вокруг чужой задачи. Запрос идёт по индексу `idx_tasks_due (next_run_at, ...)`,
-// поэтому он почти бесплатен и его можно вызывать на каждом проходе цикла.
+// How many milliseconds remain until the nearest scheduled run of a free active task.
+// Returns 0 if a task is already due and ready to run, and null if there are no active tasks.
+// Tasks locked by another worker (`locked_until` in the future) are excluded, so the worker doesn't
+// spin idly around someone else's task. The query uses the `idx_tasks_due (next_run_at, ...)` index,
+// so it's nearly free and can be called on every loop iteration.
 export async function msUntilDueTask() {
   const { rows } = await query(
     `SELECT next_run_at FROM mem.scheduled_tasks
@@ -329,8 +329,8 @@ export async function msUntilDueTask() {
   return ms > 0 ? ms : 0;
 }
 
-// Выполнить одну задачу: создать запись запуска, положить уведомление в outbox,
-// перепланировать или завершить. При ошибке увеличить счётчик попыток.
+// Execute a single task: create a run record, put a notification into the outbox,
+// reschedule or finish. On error, increment the attempts counter.
 export async function runTask(task, { onReminder } = {}) {
   const { rows: runRows } = await query(
     `INSERT INTO mem.scheduled_task_runs (task_id, status, worker_id, started_at)
@@ -435,8 +435,8 @@ export async function runTask(task, { onReminder } = {}) {
       ]);
       return { ok: false, error: String(err.message || err) };
     }
-    // Ошибка не теряется: увеличиваем попытки, при исчерпании — статус failed,
-    // иначе оставляем активной с отложенным повтором.
+    // The error is not lost: we increment attempts, and on exhaustion set status to failed,
+    // otherwise keep the task active with a deferred retry.
     await query(
       `UPDATE mem.scheduled_tasks
        SET attempts = attempts + 1,
@@ -455,7 +455,7 @@ export async function runTask(task, { onReminder } = {}) {
   }
 }
 
-// Один проход планировщика: захватить и выполнить все просроченные задачи.
+// A single scheduler pass: claim and execute all due tasks.
 export async function tick(opts = {}) {
   const tasks = await claimDueTasks(opts.limit || 20);
   const results = [];

@@ -1,12 +1,14 @@
-// Распознавание входящего аудио из Telegram (речь в текст, STT) в режиме готового файла (pre-recorded).
-// Модуль превращает вложение Telegram (голосовое сообщение, видео-кружок, присланный аудио- или видеофайл)
-// в строку текста. Внутри: определение типа вложения, проверка лимитов, скачивание файла на сторону бота,
-// выбор распознавателя по конфигурации и сам вызов распознавания. Telegram-адаптер про детали не знает —
-// он лишь вызывает функции этого модуля и получает текст, который дальше идёт в обычный пайплайн агента.
+// Recognition of incoming audio from Telegram (speech to text, STT) in pre-recorded file mode.
+// The module turns a Telegram attachment (voice message, video note, sent audio or video file) into a text
+// string. Internally: detect the attachment type, check limits, download the file to the bot side, pick a
+// recognizer based on configuration, and perform the recognition call itself. The Telegram adapter knows
+// nothing about the details — it just calls this module's functions and gets text that then flows into the
+// regular agent pipeline.
 //
-// Распознавание выполняется одним HTTP-запросом к облачному сервису: внешняя утилита ffmpeg не нужна, все
-// поддерживаемые сервисы принимают сжатые форматы Telegram (OGG/OPUS, MP4, M4A, WebM) напрямую. Рабочие
-// реализации адаптеров перенесены из проверочного скрипта scripts/stt-experiment.js практически без изменений.
+// Recognition is done with a single HTTP request to a cloud service: the external ffmpeg utility is not
+// needed, all supported services accept Telegram's compressed formats (OGG/OPUS, MP4, M4A, WebM) directly.
+// The working adapter implementations were carried over from the test script scripts/stt-experiment.js
+// almost unchanged.
 import path from 'node:path';
 import { config } from '../config.js';
 import { logLlmRequest } from '../pipeline/llm-log.js';
@@ -15,9 +17,9 @@ const OPENAI_COMPATIBLE = 'openai-compatible';
 const ASSEMBLYAI = 'assemblyai';
 const AAI_BASE = 'https://api.assemblyai.com';
 
-// Реестр распознавателей хранит имена переменных окружения (keyEnv/baseEnv) как историческую метку для
-// диагностических сообщений. Сами значения читаются только через config — прямого process.env здесь нет.
-// Эти таблицы сопоставляют имя переменной с местом значения в дереве конфигурации.
+// The recognizer registry keeps environment variable names (keyEnv/baseEnv) as a historical label for
+// diagnostic messages. The values themselves are read only through config — there is no direct process.env
+// here. These tables map a variable name to the location of its value in the configuration tree.
 const KEY_RESOLVERS = {
   GROQ_API_KEY: () => config.providers.groqApiKey,
   ASSEMBLYAI_API_KEY: () => config.providers.assemblyaiApiKey,
@@ -28,21 +30,21 @@ const BASE_RESOLVERS = {
   OPENAI_BASE_URL: () => config.llm.baseURL,
 };
 
-// Значение ключа доступа для распознавателя по имени его переменной окружения (или undefined, если нет).
+// Access key value for a recognizer by its environment variable name (or undefined if absent).
 function resolveProviderKey(envName) {
   const resolver = KEY_RESOLVERS[envName];
   return resolver ? resolver() : undefined;
 }
 
-// Базовый URL для распознавателя по имени его переменной окружения (или undefined, если не задан).
+// Base URL for a recognizer by its environment variable name (or undefined if not set).
 function resolveProviderBase(envName) {
   const resolver = BASE_RESOLVERS[envName];
   return resolver ? resolver() : undefined;
 }
 
-// Реестр поддерживаемых распознавателей. Значение переменной окружения VOICE_INPUT_PROVIDER выбирает строку.
-// Группа openai-compatible использует единый интерфейс audio/transcriptions (Groq и LiteLLM-прокси), поэтому
-// добавление нового варианта — это одна запись в реестре, а не отдельная интеграция.
+// Registry of supported recognizers. The VOICE_INPUT_PROVIDER environment variable value selects an entry.
+// The openai-compatible group uses a single audio/transcriptions interface (Groq and LiteLLM proxy), so
+// adding a new option is a single registry entry rather than a separate integration.
 export const VOICE_PROVIDERS = {
   'groq-whisper-large-v3-turbo': {
     type: OPENAI_COMPATIBLE,
@@ -76,16 +78,16 @@ export const VOICE_PROVIDERS = {
   },
 };
 
-// Типы вложений, для которых распознанный текст показывается пользователю перед ответом: присланные файлы.
-// Для живого голосового общения (голосовое сообщение, видео-кружок) эхо не показываем — отвечаем сразу по сути.
+// Attachment kinds for which the recognized text is shown to the user before the reply: sent files.
+// For live voice interaction (voice message, video note) we don't echo — we reply straight to the point.
 const ECHO_KINDS = new Set(['audio', 'video', 'document']);
 
-// Имя переменной окружения с ключом доступа для выбранного распознавателя (или null, если имя неизвестно).
+// Environment variable name holding the access key for the chosen recognizer (or null if name is unknown).
 export function providerKeyEnv(provider) {
   return VOICE_PROVIDERS[provider]?.keyEnv || null;
 }
 
-// Готов ли распознаватель к работе: распознаватель известен и для него задан ключ доступа в окружении.
+// Whether the recognizer is ready: the recognizer is known and its access key is set in the environment.
 export function isProviderConfigured(provider) {
   const spec = VOICE_PROVIDERS[provider];
   if (!spec) {
@@ -94,14 +96,14 @@ export function isProviderConfigured(provider) {
   return Boolean(resolveProviderKey(spec.keyEnv));
 }
 
-// Распознать ли тип вложения как «присланный файл», для которого показываем распознанный текст пользователю.
+// Whether to treat the attachment kind as a "sent file" for which we show the recognized text to the user.
 export function shouldEchoTranscript(kind) {
   return ECHO_KINDS.has(kind);
 }
 
-// Определить тип вложения и собрать его описание из полей сообщения Telegram.
-// Возвращает описание вложения с речью либо null, если поддерживаемого вложения в сообщении нет.
-// Для документа берём только аудио- и видео-MIME-типы, прочие документы игнорируем.
+// Detect the attachment kind and assemble its description from Telegram message fields.
+// Returns a speech attachment description or null if there is no supported attachment in the message.
+// For a document we take only audio and video MIME types, ignoring other documents.
 export function detectAttachment(message) {
   if (!message) {
     return null;
@@ -167,9 +169,9 @@ export function detectAttachment(message) {
   return null;
 }
 
-// Проверить лимиты вложения до скачивания. Если длительность известна — сверяем её с пределом в секундах;
-// если длительность неизвестна (документ или сервис её не прислал) — сверяем размер файла с пределом в байтах.
-// Возвращает { ok: true } либо { ok: false, reason: 'too_long' | 'too_large' }.
+// Check attachment limits before downloading. If duration is known — compare it against the limit in seconds;
+// if duration is unknown (a document, or the service did not send it) — compare file size against the limit
+// in bytes. Returns { ok: true } or { ok: false, reason: 'too_long' | 'too_large' }.
 export function checkAttachmentLimits(attachment, { maxSeconds, maxBytes }) {
   const duration = attachment.durationSeconds || 0;
   if (duration > 0 && duration > maxSeconds) {
@@ -181,7 +183,7 @@ export function checkAttachmentLimits(attachment, { maxSeconds, maxBytes }) {
   return { ok: true };
 }
 
-// Угадать MIME-тип по расширению имени файла, чтобы корректно подписать файл в multipart-запросе.
+// Guess the MIME type from the file name extension to label the file correctly in a multipart request.
 function guessMime(fileName) {
   const ext = path.extname(fileName || '').toLowerCase();
   const map = {
@@ -199,10 +201,11 @@ function guessMime(fileName) {
   return map[ext] || 'application/octet-stream';
 }
 
-// OpenAI-совместимые сервисы (Groq) определяют формат файла по расширению в имени, а не по MIME-типу запроса.
-// Telegram отдаёт голосовое сообщение как файл с расширением .oga, которого нет в списке принимаемых Groq
-// форматов, хотя по содержимому это обычный OGG/OPUS. Поэтому имя для отправки приводим к расширению из
-// разрешённого списка: если расширение уже допустимо — оставляем как есть, иначе подбираем по MIME-типу.
+// OpenAI-compatible services (Groq) determine the file format by the extension in the name, not by the
+// request MIME type. Telegram delivers a voice message as a file with the .oga extension, which is not in
+// Groq's list of accepted formats even though by content it's ordinary OGG/OPUS. So we coerce the upload
+// name to an extension from the allowed list: if the extension is already valid we keep it, otherwise we
+// pick one by MIME type.
 const ACCEPTED_UPLOAD_EXT = new Set(['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'opus', 'wav', 'webm']);
 
 function safeUploadName(fileName) {
@@ -227,9 +230,9 @@ function safeUploadName(fileName) {
   return `${base}.${target}`;
 }
 
-// Скачать файл Telegram по file_id в память процесса. Сначала методом getFile получаем относительный путь к
-// файлу на серверах Telegram, затем скачиваем его по файловому адресу. Прямую ссылку наружу не отдаём: она
-// содержит токен бота, поэтому стороннему сервису передаём уже сами байты, а не URL.
+// Download a Telegram file by file_id into process memory. First the getFile method gives us the relative
+// path to the file on Telegram's servers, then we download it by its file address. We don't hand the direct
+// link outside: it contains the bot token, so we pass the bytes themselves to a third-party service, not a URL.
 async function downloadTelegramFile({ telegramApiBase, botToken, fileId }) {
   const infoRes = await fetch(`${telegramApiBase}/getFile`, {
     method: 'POST',
@@ -242,20 +245,20 @@ async function downloadTelegramFile({ telegramApiBase, botToken, fileId }) {
   }
   const filePath = info.result.file_path;
 
-  // Файловый адрес строим из базового адреса API, заменяя «/bot<токен>» на «/file/bot<токен>».
-  // Это сохраняет хост (в том числе локальный сервер Bot API), а токен остаётся внутри процесса.
+  // Build the file address from the base API address by replacing "/bot<token>" with "/file/bot<token>".
+  // This preserves the host (including a local Bot API server), and the token stays inside the process.
   const fileBase = telegramApiBase.replace(/\/bot[^/]+$/, `/file/bot${botToken}`);
   const fileRes = await fetch(`${fileBase}/${filePath}`);
   if (!fileRes.ok) {
-    throw new Error(`скачивание файла, код ответа HTTP ${fileRes.status}`);
+    throw new Error(`file download, HTTP response code ${fileRes.status}`);
   }
   const buffer = Buffer.from(await fileRes.arrayBuffer());
   return { buffer, filePath };
 }
 
-// Распознавание через OpenAI-совместимый интерфейс audio/transcriptions (подходит и для Groq, и для прокси).
-// Прокси периодически обрывает соединение по тайм-ауту (превышение времени ожидания), поэтому делаем несколько
-// повторных попыток одного и того же запроса.
+// Recognition via the OpenAI-compatible audio/transcriptions interface (works for both Groq and the proxy).
+// The proxy occasionally drops the connection on a timeout (waiting-time exceeded), so we make several retry
+// attempts of the same request.
 async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fileName, language }) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -285,12 +288,12 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
   throw lastErr;
 }
 
-// Распознавание через AssemblyAI: загрузка файла, постановка задачи и опрос готовности.
-// Модель universal-2 поддерживает русский язык. Параметр speech_model устарел; текущий интерфейс принимает
-// приоритетный список speech_models. Код языка передаём подсказкой через language_code, если он задан, иначе
-// включаем автоопределение языка через language_detection.
+// Recognition via AssemblyAI: file upload, job submission and readiness polling.
+// The universal-2 model supports Russian. The speech_model parameter is deprecated; the current interface
+// accepts a priority list speech_models. We pass the language code as a hint via language_code if it is set,
+// otherwise we enable automatic language detection via language_detection.
 async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
-  // Шаг 1: загрузка файла. Заголовок авторизации у AssemblyAI — сам ключ без префикса Bearer.
+  // Step 1: file upload. AssemblyAI's authorization header is the key itself, without a Bearer prefix.
   const up = await fetch(`${AAI_BASE}/v2/upload`, {
     method: 'POST',
     headers: { Authorization: apiKey, 'Content-Type': 'application/octet-stream' },
@@ -301,7 +304,7 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   }
   const { upload_url: uploadUrl } = await up.json();
 
-  // Шаг 2: постановка задачи распознавания.
+  // Step 2: submit the recognition job.
   const body = { audio_url: uploadUrl, speech_models: ['universal-2'] };
   if (language) {
     body.language_code = language;
@@ -318,7 +321,7 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   }
   const created = await cr.json();
 
-  // Шаг 3: опрос готовности раз в секунду, пока статус не станет completed или error.
+  // Step 3: poll for readiness once per second until the status becomes completed or error.
   for (;;) {
     await new Promise((r) => setTimeout(r, 1000));
     const pr = await fetch(`${AAI_BASE}/v2/transcript/${created.id}`, { headers: { Authorization: apiKey } });
@@ -330,23 +333,23 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
       return t.text || '';
     }
     if (t.status === 'error') {
-      throw new Error(`распознавание не удалось: ${t.error}`);
+      throw new Error(`recognition failed: ${t.error}`);
     }
   }
 }
 
-// Скачать вложение Telegram и распознать его выбранным распознавателем. Возвращает распознанный текст вместе
-// со служебными сведениями: признак пустого результата, длительность, размер и имя распознавателя.
-// Контракт явный: модуль получает базовый адрес Telegram API и токен бота аргументами и не читает приватные
-// детали Telegram-адаптера.
+// Download a Telegram attachment and recognize it with the chosen recognizer. Returns the recognized text
+// together with service info: an empty-result flag, duration, size and the recognizer name.
+// The contract is explicit: the module receives the Telegram API base address and the bot token as arguments
+// and does not read private details of the Telegram adapter.
 export async function transcribeTelegramAttachment({ attachment, telegramApiBase, botToken, provider, language }) {
   const spec = VOICE_PROVIDERS[provider];
   if (!spec) {
-    throw new Error(`Неизвестный распознаватель речи: ${provider}`);
+    throw new Error(`Unknown speech recognizer: ${provider}`);
   }
   const apiKey = resolveProviderKey(spec.keyEnv);
   if (!apiKey) {
-    throw new Error(`Не задан ключ ${spec.keyEnv} для распознавателя ${provider}`);
+    throw new Error(`Key ${spec.keyEnv} is not set for recognizer ${provider}`);
   }
 
   const { buffer, filePath } = await downloadTelegramFile({
@@ -356,13 +359,13 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
   });
   const fileName = attachment.fileName || (filePath ? filePath.split('/').pop() : 'audio');
 
-  // Сведения о распознавателе для журнала. Имя модели и провайдер зависят от типа распознавателя.
+  // Recognizer info for the log. The model name and provider depend on the recognizer type.
   const isAssembly = spec.type === ASSEMBLYAI;
   const logModel = isAssembly ? 'universal-2' : spec.model;
   const logProvider = isAssembly ? 'assemblyai' : spec.keyEnv === 'GROQ_API_KEY' ? 'groq' : 'openai';
-  // Журнал бинарного обращения: содержимое файла и распознанный текст не сохраняются — только метаданные
-  // файла в binary_meta и нетекстовые параметры запроса в payload (распознанный текст — пользовательские
-  // данные, он и так попадает в обычную историю сообщений).
+  // Binary-request log: the file content and recognized text are not stored — only the file metadata in
+  // binary_meta and the non-text request parameters in payload (the recognized text is user data and ends
+  // up in the regular message history anyway).
   const binaryMeta = {
     kind: attachment.kind,
     mimeType: attachment.mimeType,
@@ -403,7 +406,7 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
         error: err?.message || err,
       });
     } catch {
-      // журнал не должен влиять на распознавание
+      // logging must not affect recognition
     }
     throw err;
   }
@@ -419,7 +422,7 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
       durationMs: Date.now() - startedAt,
     });
   } catch {
-    // журнал не должен влиять на распознавание
+    // logging must not affect recognition
   }
 
   const clean = (text || '').trim();

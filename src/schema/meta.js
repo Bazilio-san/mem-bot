@@ -1,23 +1,23 @@
-// Мета-схема определения домена и общая настройка валидатора JSON Schema (ajv).
+// Domain definition meta-schema and the shared setup of the JSON Schema validator (ajv).
 //
-// Здесь решаются две задачи. Во-первых, описывается форма самого объекта definition
-// (того, что генерирует модель и правит человек), чтобы при сохранении нельзя было
-// записать сломанную схему. Во-вторых, проверяется, что каждая data_schema внутри
-// определения сама является валидной закрытой JSON Schema: с additionalProperties=false
-// и непустым списком обязательных полей. Закрытость и делает data машиночитаемым.
+// Two things are solved here. First, the shape of the definition object itself is described
+// (the one the model generates and a human edits), so that a broken schema cannot be saved.
+// Second, it is verified that each data_schema inside the definition is itself a valid closed
+// JSON Schema: with additionalProperties=false and a non-empty list of required fields.
+// Being closed is what makes data machine-readable.
 import Ajv from 'ajv';
 
-// Один общий экземпляр валидатора на процесс.
-// strict отключён намеренно: на наших схемах встречаются объединения типов вида
-// ["string", "null"], которые строгий режим ajv считает подозрительными, хотя они корректны.
+// A single shared validator instance per process.
+// strict is disabled intentionally: our schemas contain type unions like
+// ["string", "null"], which ajv's strict mode considers suspicious even though they are correct.
 export const ajv = new Ajv({ allErrors: true, strict: false, allowUnionTypes: true });
 
-// Допустимые режимы формирования entity_key. Только закрытые режимы: словарь синонимов или slug.
-// Свободного режима нет — стабильный ключ обязателен для надёжной дедупликации.
+// Allowed modes for forming entity_key. Only closed modes: a synonym dictionary or a slug.
+// There is no free-form mode — a stable key is required for reliable deduplication.
 export const ENTITY_KEY_MODES = ['fixed_vocab', 'slug'];
 
-// Виды памяти, которые домен может объявить в allowed_memory_kinds.
-// Совпадают с типом mem.memory_kind из migrations/001_init.sql.
+// Memory kinds a domain may declare in allowed_memory_kinds.
+// They match the mem.memory_kind type from migrations/001_init.sql.
 export const MEMORY_KINDS = [
   'fact',
   'preference',
@@ -38,9 +38,9 @@ export const MEMORY_KINDS = [
   'discovery_seed',
 ];
 
-// Мета-схема: какой должна быть форма объекта definition.
-// Проверяет верхний уровень и форму каждой сущности; саму корректность data_schema
-// как JSON Schema мы дополнительно проверяем кодом в validateDefinition (ajv.compile).
+// Meta-schema: what the shape of the definition object must be.
+// Checks the top level and the shape of each entity; the correctness of data_schema itself
+// as a JSON Schema is additionally checked in code in validateDefinition (ajv.compile).
 export const DEFINITION_META_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -69,16 +69,16 @@ export const DEFINITION_META_SCHEMA = {
             required: ['mode'],
             properties: {
               mode: { type: 'string', enum: ENTITY_KEY_MODES },
-              // Список канонических ключей для режима fixed_vocab.
+              // List of canonical keys for the fixed_vocab mode.
               vocabulary: { type: 'array', items: { type: 'string' } },
-              // Сопоставление «канонический ключ → список синонимов».
+              // Mapping "canonical key -> list of synonyms".
               synonyms: {
                 type: 'object',
                 additionalProperties: { type: 'array', items: { type: 'string' } },
               },
             },
           },
-          // Закрытая JSON Schema поля data. Корректность проверяется отдельно (см. validateDefinition).
+          // Closed JSON Schema of the data field. Correctness is checked separately (see validateDefinition).
           data_schema: { type: 'object' },
         },
       },
@@ -88,8 +88,8 @@ export const DEFINITION_META_SCHEMA = {
 
 const validateMetaShape = ajv.compile(DEFINITION_META_SCHEMA);
 
-// Проверить, что объект data_schema — закрытая схема: тип object, additionalProperties=false,
-// непустой required, и сам по себе является валидной JSON Schema (компилируется в ajv).
+// Check that the data_schema object is a closed schema: type object, additionalProperties=false,
+// non-empty required, and is itself a valid JSON Schema (compiles in ajv).
 function checkClosedDataSchema(dataSchema, entityType) {
   const issues = [];
   const prefix = `сущность «${entityType}»`;
@@ -105,7 +105,7 @@ function checkClosedDataSchema(dataSchema, entityType) {
   if (!dataSchema.properties || typeof dataSchema.properties !== 'object') {
     issues.push(`${prefix}: data_schema.properties отсутствует или не является объектом.`);
   }
-  // Сама схема должна компилироваться: иначе ей нельзя валидировать данные.
+  // The schema itself must compile: otherwise it cannot be used to validate data.
   try {
     ajv.compile(dataSchema);
   } catch (err) {
@@ -114,16 +114,16 @@ function checkClosedDataSchema(dataSchema, entityType) {
   return issues;
 }
 
-// Проверить полное определение домена. Возвращает { ok, issues }.
-// Сначала проверяется форма по мета-схеме, затем — закрытость каждой data_schema
-// и согласованность режима entity_key (fixed_vocab обязан иметь непустой словарь).
+// Validate a full domain definition. Returns { ok, issues }.
+// First the shape is checked against the meta-schema, then the closedness of each data_schema
+// and the consistency of the entity_key mode (fixed_vocab must have a non-empty dictionary).
 export function validateDefinition(definition) {
   const issues = [];
   if (!validateMetaShape(definition)) {
     for (const e of validateMetaShape.errors || []) {
       issues.push(`Форма определения: ${e.instancePath || '/'} ${e.message}.`);
     }
-    // Если базовая форма сломана, дальше проверять небезопасно.
+    // If the basic shape is broken, it's unsafe to check further.
     return { ok: false, issues };
   }
 
@@ -135,7 +135,7 @@ export function validateDefinition(definition) {
       if (!Array.isArray(key.vocabulary) || key.vocabulary.length === 0) {
         issues.push(`сущность «${entity.entity_type}»: режим fixed_vocab требует непустой vocabulary.`);
       }
-      // Синонимы, если заданы, должны указывать на ключи из словаря.
+      // Synonyms, if provided, must point to keys from the dictionary.
       for (const canonical of Object.keys(key.synonyms || {})) {
         if (Array.isArray(key.vocabulary) && !key.vocabulary.includes(canonical)) {
           issues.push(
@@ -146,7 +146,7 @@ export function validateDefinition(definition) {
     }
   }
 
-  // Уникальность entity_type внутри домена.
+  // Uniqueness of entity_type within the domain.
   const types = definition.entities.map((e) => e.entity_type);
   const dupes = types.filter((t, i) => types.indexOf(t) !== i);
   if (dupes.length) {

@@ -1,15 +1,15 @@
-// Слой доступа к данным: пользователи, домены, диалоги, сообщения.
+// Data access layer: users, domains, conversations, messages.
 import { query } from './db.js';
 import { config } from './config.js';
 import { estimateTokens } from './pipeline/token-counter.js';
 import { normalizeVoiceId } from './voice/voices.js';
 
-// Найти или создать пользователя по внешнему идентификатору (например, Telegram ID).
-// Флаг is_test помечает технических пользователей автотестов так же, как log.llm_request.is_test
-// помечает журнальные записи тестового прогона: по умолчанию он берётся из NODE_ENV === 'test',
-// поэтому каждый пользователь, созданный во время прогона тестов (в том числе неявно через
-// handleMessage), помечается тестовым без правок в каждом тесте. На существующего пользователя
-// флаг не переустанавливается: ветка ON CONFLICT обновляет только updated_at.
+// Find or create a user by external id (e.g. a Telegram ID).
+// The is_test flag marks technical autotest users the same way log.llm_request.is_test
+// marks journal records of a test run: by default it is taken from NODE_ENV === 'test',
+// so every user created during a test run (including implicitly via
+// handleMessage) is marked as test without edits in each test. For an existing user the
+// flag is not re-set: the ON CONFLICT branch updates only updated_at.
 export async function ensureUser(
   externalId,
   { displayName = null, locale = 'ru', timezone = 'Europe/Moscow', isTest = process.env.NODE_ENV === 'test' } = {},
@@ -26,7 +26,7 @@ export async function ensureUser(
 
 const domainCache = new Map();
 
-// Получить идентификатор домена по его ключу (с кэшированием).
+// Get a domain id by its key (with caching).
 export async function getDomainId(domainKey) {
   if (domainCache.has(domainKey)) {
     return domainCache.get(domainKey);
@@ -39,7 +39,7 @@ export async function getDomainId(domainKey) {
   return id;
 }
 
-// Найти или создать активный диалог пользователя в указанном домене.
+// Find or create the user's active conversation in the given domain.
 export async function ensureConversation(userId, domainKey = 'general') {
   const domainId = await getDomainId(domainKey);
   const existing = await query(
@@ -56,9 +56,9 @@ export async function ensureConversation(userId, domainKey = 'general') {
   return rows[0];
 }
 
-// Сохранить одно сообщение диалога. Дополнительно проставляет token_count (оценка размера сообщения),
-// который нужен для подсчёта размера холодной зоны при поджатии истории. Поля tool_name и tool_call_id
-// (журнал вызовов инструментов) и обновление updated_at диалога сохраняются без изменений.
+// Save a single conversation message. Additionally sets token_count (an estimate of the message size),
+// which is needed to compute the cold-zone size when compressing history. The tool_name and tool_call_id
+// fields (the tool-call log) and updating the conversation's updated_at are preserved unchanged.
 export async function saveMessage(conversationId, userId, role, content, extra = {}) {
   const tokenCount = estimateTokens(content);
   const { rows } = await query(
@@ -81,8 +81,8 @@ export async function saveMessage(conversationId, userId, role, content, extra =
   return rows[0];
 }
 
-// Связать внутреннее сообщение истории с идентификатором сообщения во внешнем канале доставки.
-// Это позволяет обработчику реакций найти, на какое сообщение ассистента отреагировал пользователь.
+// Link an internal history message to the message id in the external delivery channel.
+// This lets the reactions handler find which assistant message the user reacted to.
 export async function saveMessageExternalRef({
   conversationMessageId,
   channel,
@@ -103,7 +103,7 @@ export async function saveMessageExternalRef({
   return rows[0];
 }
 
-// Найти внутреннее сообщение по внешнему идентификатору канала.
+// Find an internal message by the external channel id.
 export async function findMessageByExternalRef({ channel, chatExternalId, messageExternalId }) {
   const { rows } = await query(
     `SELECT cm.*, d.domain_key, mer.channel, mer.chat_external_id, mer.message_external_id
@@ -118,7 +118,7 @@ export async function findMessageByExternalRef({ channel, chatExternalId, messag
   return rows[0] || null;
 }
 
-// Получить активную сводку холодной зоны диалога (последнюю помеченную is_active).
+// Get the active cold-zone summary of the conversation (the latest one marked is_active).
 export async function getActiveConversationSummary(conversationId) {
   const { rows } = await query(
     `SELECT * FROM mem.conversation_summaries
@@ -130,7 +130,7 @@ export async function getActiveConversationSummary(conversationId) {
   return rows[0] || null;
 }
 
-// Деактивировать все активные сводки диалога (перед вставкой новой активной).
+// Deactivate all active summaries of the conversation (before inserting a new active one).
 export async function markOldSummariesInactive(conversationId) {
   await query(
     `UPDATE mem.conversation_summaries
@@ -140,8 +140,8 @@ export async function markOldSummariesInactive(conversationId) {
   );
 }
 
-// Сообщения холодной зоны, ещё не покрытые активной сводкой: старше границы горячего окна
-// (beforeCreatedAt) и новее последнего покрытого сообщения (afterMessageId). По возрастанию времени.
+// Cold-zone messages not yet covered by the active summary: older than the hot-window boundary
+// (beforeCreatedAt) and newer than the last covered message (afterMessageId). In ascending time order.
 export async function getColdPendingMessages({ conversationId, beforeCreatedAt, afterMessageId = null }) {
   const { rows } = await query(
     `SELECT id, role, content, tool_name, token_count, created_at
@@ -156,8 +156,8 @@ export async function getColdPendingMessages({ conversationId, beforeCreatedAt, 
   return rows;
 }
 
-// Сохранить новую активную сводку холодной зоны. Предыдущие активные сводки деактивируются.
-// Размеры в токенах (source_token_count, summary_token_count) приходят посчитанными нашим кодом.
+// Save a new active cold-zone summary. The previous active summaries are deactivated.
+// The token sizes (source_token_count, summary_token_count) arrive already computed by our code.
 export async function saveConversationSummary({
   conversationId,
   userId,
@@ -201,7 +201,7 @@ export async function saveConversationSummary({
   return rows[0];
 }
 
-// Получить последние сообщения диалога в хронологическом порядке.
+// Get the latest conversation messages in chronological order.
 export async function getRecentMessages(conversationId, limit = 10) {
   const { rows } = await query(
     `SELECT role, content, tool_name, created_at
@@ -214,7 +214,7 @@ export async function getRecentMessages(conversationId, limit = 10) {
   return rows.reverse();
 }
 
-// Записать вызов инструмента в журнал (для отладки и аудита).
+// Record a tool call in the log (for debugging and auditing).
 export async function logToolCall({
   conversationId,
   userId,
@@ -243,7 +243,7 @@ export async function logToolCall({
   );
 }
 
-// Время последнего сообщения пользователя (для темпорального контекста и триггера возврата).
+// Time of the user's last message (for the temporal context and the welcome-back trigger).
 export async function getLastUserMessageTime(userId) {
   const { rows } = await query(
     `SELECT max(cm.created_at) AS last_at
@@ -254,9 +254,9 @@ export async function getLastUserMessageTime(userId) {
   return rows[0]?.last_at ? new Date(rows[0].last_at) : null;
 }
 
-// Все пользователи, у которых проактивность включена мастер-флагом И есть хотя бы один включённый триггер.
-// Мастер-флаг пользователя (proactivity_enabled) стоит над потриггерным enabled: если контур у пользователя
-// выключен целиком, ни один из его триггеров в проход проактивности не попадает.
+// All users for whom proactivity is enabled by the master flag AND who have at least one enabled trigger.
+// The user's master flag (proactivity_enabled) sits above the per-trigger enabled: if the user's circuit is
+// turned off entirely, none of their triggers enter the proactivity pass.
 export async function listUsersWithTriggers() {
   const { rows } = await query(
     `SELECT DISTINCT u.id, u.external_id, u.timezone
@@ -267,8 +267,8 @@ export async function listUsersWithTriggers() {
   return rows;
 }
 
-// Набор триггеров проактивности по умолчанию с порогами срабатывания из конфигурации.
-// Используется как сидом песочницы, так и моментом включения проактивности пользователем.
+// The default set of proactivity triggers with firing thresholds from the configuration.
+// Used both by the sandbox seed and at the moment the user enables proactivity.
 export function defaultProactiveTriggers() {
   return [
     { trigger_type: 'inactivity', config: { minutes_inactive: config.proactive.inactivityMinutes } },
@@ -278,9 +278,9 @@ export function defaultProactiveTriggers() {
   ];
 }
 
-// Идемпотентное создание набора триггеров по умолчанию для пользователя. По умолчанию триггеры создаются
-// выключенными (enabled = false): включение конкретных поводов — отдельное явное действие пользователя.
-// Сид песочницы передаёт { enabled: true }, чтобы демо-пользователи сразу были наглядными.
+// Idempotent creation of the default trigger set for a user. By default the triggers are created
+// disabled (enabled = false): enabling specific occasions is a separate explicit user action.
+// The sandbox seed passes { enabled: true } so demo users are illustrative right away.
 export async function ensureDefaultTriggers(userId, domainId, defaults, { enabled = false } = {}) {
   for (const t of defaults) {
     await query(
@@ -292,9 +292,9 @@ export async function ensureDefaultTriggers(userId, domainId, defaults, { enable
   }
 }
 
-// Переключить мастер-флаг проактивности пользователя. При включении заодно создаёт набор триггеров
-// по умолчанию (все выключены), чтобы пользователю было что включать через подменю. Гарантирует
-// существование пользователя по внешнему идентификатору (создаёт запись, если её ещё нет).
+// Toggle the user's proactivity master flag. When enabling, it also creates the default trigger set
+// (all disabled) so the user has something to enable via the submenu. Ensures the user exists
+// by external id (creates the record if it does not exist yet).
 export async function setUserProactivity(externalId, enabled) {
   const user = await ensureUser(externalId);
   await query('UPDATE mem.users SET proactivity_enabled = $2, updated_at = now() WHERE id = $1', [user.id, enabled]);
@@ -305,30 +305,30 @@ export async function setUserProactivity(externalId, enabled) {
   return { ...user, proactivity_enabled: enabled };
 }
 
-// Сохранить предпочтение формы ответа пользователя по идентификатору (внутреннему userId): 'text' или 'voice'.
-// Это управляющая настройка ядра; каналы без поддержки голоса значение 'voice' молча игнорируют. Возвращает
-// сохранённый режим. Недопустимое значение приводится к 'text', чтобы в базе всегда было корректное состояние.
+// Save the user's reply-form preference by id (internal userId): 'text' or 'voice'.
+// This is a core control setting; channels without voice support silently ignore the 'voice' value. Returns
+// the saved mode. An invalid value is coerced to 'text' so the database always holds a valid state.
 export async function setReplyMode(userId, mode) {
   const replyMode = mode === 'voice' ? 'voice' : 'text';
   await query('UPDATE mem.users SET reply_mode = $2, updated_at = now() WHERE id = $1', [userId, replyMode]);
   return replyMode;
 }
 
-// Лёгкое чтение предпочтения формы ответа по внешнему идентификатору (например, Telegram ID), без upsert.
-// Нужно каналу, чтобы решить способ доставки (потоковый черновик или голос) ещё ДО вызова ядра: ядро узнаёт
-// режим только внутри handleMessage через ensureUser, а решение о стриминге принимается раньше. Для нового
-// пользователя (записи ещё нет) и при любом некорректном значении возвращает 'text' — безопасный режим по умолчанию.
+// Lightweight read of the reply-form preference by external id (e.g. a Telegram ID), without an upsert.
+// The channel needs it to decide the delivery method (streaming draft or voice) even BEFORE calling the core:
+// the core learns the mode only inside handleMessage via ensureUser, while the streaming decision is made earlier.
+// For a new user (no record yet) and any invalid value it returns 'text' — the safe default mode.
 export async function getUserReplyMode(externalId) {
   const { rows } = await query('SELECT reply_mode FROM mem.users WHERE external_id = $1', [externalId]);
   return rows[0]?.reply_mode === 'voice' ? 'voice' : 'text';
 }
 
-// Сохранить пользовательский тембр голосового ответа. NULL очищает пользовательскую настройку и возвращает
-// глобальный fallback из конфигурации. Недопустимые значения не записываются.
+// Save the user's voice timbre for spoken responses. NULL clears the user setting and returns
+// the global fallback from the configuration. Invalid values are not written.
 export async function setVoicePreference(userId, voice) {
   const normalized = voice == null ? null : normalizeVoiceId(voice);
   if (voice != null && !normalized) {
-    throw new Error(`Недопустимый голос TTS: ${voice}`);
+    throw new Error(`Invalid TTS voice: ${voice}`);
   }
   await query('UPDATE mem.users SET voice_output_voice = $2, updated_at = now() WHERE id = $1', [userId, normalized]);
   return normalized;
@@ -338,15 +338,15 @@ export function effectiveVoicePreference(user) {
   return normalizeVoiceId(user?.voice_output_voice) || config.voiceOutput.voice;
 }
 
-// Лёгкое чтение эффективного тембра по внешнему идентификатору без создания пользователя. Нужно каналам,
-// которым требуется принять решение до входа в основной агентский контур.
+// Lightweight read of the effective timbre by external id without creating a user. Needed by channels
+// that have to make a decision before entering the main agent circuit.
 export async function getUserVoicePreference(externalId) {
   const { rows } = await query('SELECT voice_output_voice FROM mem.users WHERE external_id = $1', [externalId]);
   return normalizeVoiceId(rows[0]?.voice_output_voice) || config.voiceOutput.voice;
 }
 
-// Текущее состояние проактивности пользователя: мастер-флаг и список его триггеров с признаком enabled.
-// Возвращает null, если пользователя с таким внешним идентификатором ещё нет. Нужно для отрисовки подменю.
+// The user's current proactivity state: the master flag and the list of their triggers with the enabled flag.
+// Returns null if no user with that external id exists yet. Needed to render the submenu.
 export async function getProactivityState(externalId) {
   const { rows } = await query(
     `SELECT u.proactivity_enabled, pt.trigger_type, pt.enabled AS trigger_enabled
@@ -366,8 +366,8 @@ export async function getProactivityState(externalId) {
   return { enabled, triggers };
 }
 
-// Переключить один триггер проактивности конкретного пользователя. Возвращает true, если строка нашлась
-// и обновлена (триггер существует), иначе false.
+// Toggle a single proactivity trigger of a specific user. Returns true if the row was found
+// and updated (the trigger exists), otherwise false.
 export async function setTrigger(externalId, triggerType, enabled) {
   const { rowCount } = await query(
     `UPDATE mem.proactive_triggers pt

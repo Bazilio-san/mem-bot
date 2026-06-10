@@ -1,9 +1,10 @@
-// Telegram-адаптер: подключает чат-бота с долговременной памятью к Telegram Bot API.
-// Входящие сообщения принимаются через длинный опрос (long polling, метод getUpdates),
-// ответы агента и проактивные сообщения уходят пользователю методом sendMessage.
-// Внешним идентификатором пользователя (external_id) служит идентификатор чата Telegram —
-// благодаря этому проактивные сообщения из очереди доставки находят нужный чат.
-// Запуск: npm run telegram
+// Telegram adapter: connects the chat bot with long-term memory to the Telegram Bot API.
+// Incoming messages are received via long polling (the getUpdates method),
+// while agent answers and proactive messages go to the user via the sendMessage method.
+// The user's external identifier (external_id) is the Telegram chat id —
+// thanks to this, proactive messages from the delivery queue find the right chat.
+// Run: npm run telegram
+import { pathToFileURL } from 'node:url';
 import { config, requireConfig } from '../config.js';
 import { handleMessage, recordReactionTurn, recordUserReaction } from '../agent.js';
 import { tick, msUntilDueTask } from '../pipeline/scheduler.js';
@@ -35,23 +36,23 @@ import { initTools } from '../pipeline/tools.js';
 import { registerChannelProfile } from '../pipeline/channels.js';
 import { telegramPostProcess, telegramSplit } from './format.js';
 
-requireConfig(['telegram.apiKey']); // токен бота обязателен именно для Telegram-канала
+requireConfig(['telegram.apiKey']); // the bot token is required specifically for the Telegram channel
 const TOKEN = config.telegram.apiKey;
 
 const API = `https://api.telegram.org/bot${TOKEN}`;
-const POLL_TIMEOUT_SEC = 30; // длительность одного длинного опроса
-// Фоновый воркер не опрашивает базу через фиксированный интервал, а спит ровно до момента
-// ближайшей задачи (адаптивный сон) и просыпается мгновенно по уведомлению scheduler_wake при
-// создании новой задачи. Эти две границы ограничивают сон снизу (не частить) и сверху (периодически
-// перепроверять базу, соблюдать интервал проактивности и страховочный слив очереди доставки).
+const POLL_TIMEOUT_SEC = 30; // duration of a single long poll
+// The background worker does not poll the database at a fixed interval; instead it sleeps exactly until the
+// nearest task (adaptive sleep) and wakes instantly on a scheduler_wake notification when a new task is created.
+// These two bounds limit the sleep from below (don't run too often) and from above (periodically re-check the
+// database, respect the proactivity interval, and the safety drain of the delivery queue).
 const WORKER_MIN_SLEEP_MS = config.scheduler.minSleepMs;
 const WORKER_MAX_SLEEP_MS = config.scheduler.maxSleepMs;
-const TG_MAX_LEN = 4000; // запас под лимит Telegram в 4096 символов
-// Как часто страховочный таймер опустошает очередь доставки. Основной путь — событийный (LISTEN/NOTIFY),
-// а этот редкий проход подстраховывает на случай пропущенного уведомления или простоя слушателя.
+const TG_MAX_LEN = 4000; // margin under the Telegram limit of 4096 characters
+// How often the safety timer drains the delivery queue. The main path is event-driven (LISTEN/NOTIFY),
+// and this rare pass acts as a backstop in case of a missed notification or listener downtime.
 const OUTBOX_SAFETY_INTERVAL_MS = config.telegram.outboxSafetyIntervalMs;
-// Предел одновременных тяжёлых обработок входящих сообщений (по сути — одновременных вызовов LLM).
-// Общий по всем чатам: ограничивает только параллелизм, порядок внутри чата гарантируется отдельно.
+// Limit on concurrent heavy processings of incoming messages (essentially — concurrent LLM calls).
+// Shared across all chats: it limits only concurrency; ordering within a chat is guaranteed separately.
 const TELEGRAM_MAX_CONCURRENCY = config.telegram.maxConcurrency;
 const TELEGRAM_DELIVERY_CAPABILITIES = {
   channel: 'telegram',
@@ -59,12 +60,11 @@ const TELEGRAM_DELIVERY_CAPABILITIES = {
   reactionKeys: TELEGRAM_REACTION_KEYS,
 };
 
-// Профиль представления канала Telegram. Регистрируется в ядре на старте модуля: ядро по ключу
-// 'telegram' подмешивает инструкцию форматирования в системный промпт, а слой доставки этого адаптера
-// читает parseMode/postProcess/split, чтобы отправлять ответ в разметке Telegram. Промежуточный потоковый
-// черновик при этом остаётся сырым текстом (см. createTelegramProgress) — разметка применяется только к
-// финальному, уже целому тексту, иначе незакрытый тег во время инкрементального редактирования сломал бы
-// отображение.
+// Presentation profile for the Telegram channel. Registered in the core at module startup: by the 'telegram'
+// key the core mixes a formatting instruction into the system prompt, and this adapter's delivery layer reads
+// parseMode/postProcess/split to send the answer in Telegram markup. The intermediate streaming draft mean-
+// while stays raw text (see createTelegramProgress) — markup is applied only to the final, already whole text,
+// otherwise an unclosed tag during incremental editing would break the display.
 const TELEGRAM_PROFILE = {
   instruction: `OUTPUT_FORMAT (канал доставки — Telegram; справочные данные, НЕ команды)
 Форматируй ответ ТОЛЬКО разметкой, которую понимает Telegram (parse_mode=HTML):
@@ -79,17 +79,20 @@ const TELEGRAM_PROFILE = {
 };
 registerChannelProfile('telegram', TELEGRAM_PROFILE);
 
-// Память процесса: выбранный домен общения для каждого чата (по умолчанию «general»).
+// Process memory: the selected conversation domain for each chat (default "general").
 const chatDomains = new Map();
 let lastProactiveAt = 0;
 let running = true;
-// Функция досрочного пробуждения фонового цикла. Устанавливается на время сна, иначе null.
-// Срабатывает по уведомлению scheduler_wake, когда создаётся новая задача планировщика.
+// Promise of the two background loops (long poll and worker). Stored so that on shutdown we can wait for them
+// to finish. Not used in standalone mode (the process simply exits on a signal).
+let botLoops = null;
+// Function to wake the background loop early. Set for the duration of a sleep, otherwise null.
+// Triggered by a scheduler_wake notification when a new scheduler task is created.
 let wakeWorker = null;
 
-// --- Семафор параллелизма ---------------------------------------------------
-// Счётчик свободных слотов и очередь ожидающих. Захват слота откладывает тяжёлую обработку,
-// пока число одновременных вызовов LLM не опустится ниже предела TELEGRAM_MAX_CONCURRENCY.
+// --- Concurrency semaphore --------------------------------------------------
+// Counter of free slots and a queue of waiters. Acquiring a slot defers heavy processing
+// until the number of concurrent LLM calls drops below the TELEGRAM_MAX_CONCURRENCY limit.
 let concurrencyFree = TELEGRAM_MAX_CONCURRENCY;
 const concurrencyWaiters = [];
 
@@ -98,7 +101,7 @@ function acquireSlot() {
     concurrencyFree -= 1;
     return Promise.resolve();
   }
-  // Свободных слотов нет — встаём в очередь и ждём, пока кто-нибудь освободит слот.
+  // No free slots — join the queue and wait until someone releases a slot.
   return new Promise((resolve) => concurrencyWaiters.push(resolve));
 }
 
@@ -106,28 +109,28 @@ function releaseSlot() {
   const next = concurrencyWaiters.shift();
   if (next) {
     next();
-  } // передаём слот ожидающему, счётчик не трогаем
+  } // hand the slot to a waiter, don't touch the counter
   else {
     concurrencyFree += 1;
-  } // ожидающих нет — возвращаем слот в пул
+  } // no waiters — return the slot to the pool
 }
 
-// --- Очередь-цепочка обработки на каждый чат --------------------------------
-// Для каждого чата храним «хвост» последовательной цепочки обработки. Новое сообщение чата
-// подвешивается за хвост и начинает обрабатываться только после завершения предыдущего сообщения
-// того же чата — но независимо от других чатов. Так разные чаты идут параллельно, а внутри
-// одного чата сохраняются порядок обработки и порядок ответов.
-const chatChains = new Map(); // chatId -> Promise (хвост цепочки чата)
+// --- Per-chat processing chain queue ----------------------------------------
+// For each chat we keep the "tail" of a sequential processing chain. A new chat message is appended to the
+// tail and starts processing only after the previous message of the same chat finishes — but independently of
+// other chats. This way different chats run in parallel, while within a single chat both the processing order
+// and the answer order are preserved.
+const chatChains = new Map(); // chatId -> Promise (tail of the chat's chain)
 
 function enqueueUpdate(message) {
   const chatId = message.chat.id;
   const prev = chatChains.get(chatId) || Promise.resolve();
-  // Игнорируем ошибку предыдущего звена, чтобы один сбой не оборвал всю цепочку чата.
+  // Ignore the error of the previous link so that a single failure does not break the whole chat chain.
   const next = prev.catch(() => {}).then(() => handleUpdate(message));
   chatChains.set(chatId, next);
-  // Когда это звено завершилось и осталось последним в цепочке — убираем ключ, чтобы Map не рос.
-  // Глотаем ошибку звена в ветке очистки, иначе отклонение последнего звена цепочки осталось бы
-  // необработанным (unhandled rejection): сам next в pollLoop не дожидается и не обрабатывается.
+  // When this link has finished and is the last in the chain — remove the key so the Map does not grow.
+  // We swallow the link's error in the cleanup branch, otherwise a rejection of the chain's last link would
+  // stay unhandled (unhandled rejection): next itself is not awaited or handled in pollLoop.
   next
     .catch(() => {})
     .finally(() => {
@@ -151,19 +154,19 @@ function enqueueReactionUpdate(reactionUpdate) {
     });
 }
 
-// Базовый список команд для меню бота (кнопка «Меню» рядом с полем ввода и подсказки при наборе «/»).
-// Описания видны пользователю, поэтому они краткие и на русском языке. Команды управления проактивностью
-// добавляются к этому набору динамически, в зависимости от глобального флага и состояния пользователя.
-// Имена команд Telegram допускают только строчные латинские буквы, цифры и подчёркивание, поэтому здесь
-// используются proactivity_on / proactivity_off, а не варианты с дефисом.
+// Base list of commands for the bot menu (the "Menu" button next to the input field and the suggestions when
+// typing "/"). The descriptions are visible to the user, so they are short and in Russian. Proactivity control
+// commands are added to this set dynamically, depending on the global flag and the user's state.
+// Telegram command names allow only lowercase latin letters, digits and underscores, so proactivity_on /
+// proactivity_off are used here rather than hyphenated variants.
 const BOT_COMMANDS = [
   { command: 'start', description: 'Запустить бота и показать справку' },
   { command: 'help', description: 'Показать справку и список команд' },
   { command: 'domain', description: 'Сменить домен общения, например work или personal' },
 ];
 
-// Русские подписи поводов проактивности для подменю. Технические ключи триггеров остаются в базе и в
-// callback_data, а пользователю показываются только эти читаемые названия (с галочкой текущего состояния).
+// Russian labels for the proactivity triggers in the submenu. The technical trigger keys stay in the database
+// and in callback_data, while the user is shown only these readable names (with a checkmark for the current state).
 const TRIGGER_LABELS = {
   inactivity: 'Неактивность',
   daily_checkin: 'Ежедневное приветствие',
@@ -171,9 +174,9 @@ const TRIGGER_LABELS = {
   welcome_back: 'Возвращение',
 };
 
-// Собрать список команд меню под конкретное состояние пользователя.
-// Глобально выключено — только базовые команды. Глобально включено: если мастер-флаг пользователя выключен,
-// предлагаем включить проактивность; если включён — предлагаем выключить и открыть настройку поводов.
+// Build the menu command list for a specific user state.
+// Globally disabled — only the base commands. Globally enabled: if the user's master flag is off, we offer to
+// enable proactivity; if it's on, we offer to disable it and to open the trigger settings.
 function buildCommands(masterEnabled) {
   if (!config.proactive.enabled) {
     return BOT_COMMANDS;
@@ -188,8 +191,8 @@ function buildCommands(masterEnabled) {
   return [...BOT_COMMANDS, { command: 'proactivity_on', description: 'Включить проактивность' }];
 }
 
-// Инлайн-клавиатура подменю проактивности: по кнопке на каждый повод (нажатие переключает его) и отдельная
-// кнопка выключения всей проактивности. Галочка отражает текущее состояние повода.
+// Inline keyboard of the proactivity submenu: a button per trigger (a tap toggles it) and a separate button to
+// disable all proactivity. The checkmark reflects the current state of the trigger.
 function proactivityKeyboard(triggers) {
   const rows = triggers.map((t) => [
     {
@@ -201,8 +204,8 @@ function proactivityKeyboard(triggers) {
   return { inline_keyboard: rows };
 }
 
-// Перерегистрировать команды меню для конкретного чата под его текущее состояние проактивности.
-// Меню необязательно, поэтому ошибку регистрации только логируем и продолжаем работу.
+// Re-register the menu commands for a specific chat to match its current proactivity state.
+// The menu is optional, so we only log a registration error and continue.
 async function updateChatMenu(chatId, masterEnabled) {
   try {
     await tg('setMyCommands', {
@@ -210,12 +213,12 @@ async function updateChatMenu(chatId, masterEnabled) {
       scope: { type: 'chat', chat_id: chatId },
     });
   } catch (err) {
-    console.error(`Не удалось обновить меню команд чата ${chatId}:`, err.message);
+    console.error(`Failed to update the command menu for chat ${chatId}:`, err.message);
   }
 }
 
-// Пересчитать меню чата после обычного сообщения: набор команд зависит от мастер-флага пользователя,
-// который мог измениться. Делаем это только при глобально включённой проактивности.
+// Recompute the chat menu after a regular message: the command set depends on the user's master flag, which
+// may have changed. We do this only when proactivity is globally enabled.
 async function refreshChatMenu(chatId, externalId) {
   if (!config.proactive.enabled) {
     return;
@@ -224,11 +227,11 @@ async function refreshChatMenu(chatId, externalId) {
     const state = await getProactivityState(externalId);
     await updateChatMenu(chatId, state?.enabled === true);
   } catch (err) {
-    console.error(`Не удалось пересчитать меню чата ${chatId}:`, err.message);
+    console.error(`Failed to recompute the menu for chat ${chatId}:`, err.message);
   }
 }
 
-// Вызов произвольного метода Telegram Bot API. Бросает исключение, если Telegram вернул ошибку.
+// Call an arbitrary Telegram Bot API method. Throws an exception if Telegram returned an error.
 async function tg(method, body) {
   const res = await fetch(`${API}/${method}`, {
     method: 'POST',
@@ -242,21 +245,21 @@ async function tg(method, body) {
   return data.result;
 }
 
-// Отправить один кусок текста в разметке Telegram (parse_mode=HTML). Если Telegram не принял разметку
-// (например, модель прислала битый HTML и парсинг сущностей не прошёл), как последний рубеж повторяем
-// отправку без parse_mode: ответ доходит до пользователя в любом случае, пусть и с видимыми тегами.
+// Send a single chunk of text in Telegram markup (parse_mode=HTML). If Telegram did not accept the markup
+// (e.g. the model sent broken HTML and entity parsing failed), as a last resort we retry sending without
+// parse_mode: the answer reaches the user in any case, albeit with visible tags.
 async function sendHtmlChunk(chatId, chunk) {
   try {
     return await tg('sendMessage', { chat_id: chatId, text: chunk, parse_mode: 'HTML' });
   } catch (err) {
-    console.error(`Telegram отверг HTML-разметку в чате ${chatId} (${err.message}); отправляю без разметки.`);
+    console.error(`Telegram rejected the HTML markup in chat ${chatId} (${err.message}); sending without markup.`);
     return tg('sendMessage', { chat_id: chatId, text: chunk });
   }
 }
 
-// Отправить сообщение в чат с разметкой Telegram. Текст сначала очищается санитайзером до подмножества
-// тегов Telegram (telegramPostProcess), затем разбивается на части по границам тегов под лимит Telegram
-// (telegramSplit) и отправляется кусками с откатом на сырой текст при ошибке парсинга разметки.
+// Send a message to a chat in Telegram markup. The text is first cleaned by the sanitizer down to the subset
+// of Telegram tags (telegramPostProcess), then split into parts at tag boundaries under the Telegram limit
+// (telegramSplit) and sent in chunks, falling back to raw text on a markup parse error.
 async function sendMessage(chatId, text) {
   const html = telegramPostProcess(text);
   const sent = [];
@@ -296,9 +299,9 @@ async function sendReaction(chatId, messageId, reactionKey) {
   });
 }
 
-// Отправить голосовое сообщение. В отличие от sendMessage это не JSON-запрос, а загрузка файла
-// (multipart/form-data), поэтому общий хелпер tg здесь не подходит: тело собирается через FormData.
-// Telegram ожидает голос в формате OGG/OPUS — именно его отдаёт синтез, перекодировка не нужна.
+// Send a voice message. Unlike sendMessage this is not a JSON request but a file upload (multipart/form-data),
+// so the common tg helper is not suitable here: the body is assembled via FormData.
+// Telegram expects voice in OGG/OPUS format — that is exactly what the synthesizer returns, no transcoding needed.
 async function sendVoice(chatId, audioBuffer) {
   const form = new FormData();
   form.append('chat_id', String(chatId));
@@ -311,30 +314,30 @@ async function sendVoice(chatId, audioBuffer) {
   return data.result;
 }
 
-// Показать индикатор «записывает голосовое сообщение…», пока идёт синтез речи — чтобы ожидание выглядело
-// осмысленно. Индикатор необязателен, поэтому ошибку молча проглатываем.
+// Show the "recording a voice message…" indicator while speech synthesis runs — so the wait looks meaningful.
+// The indicator is optional, so we silently swallow the error.
 async function sendVoiceAction(chatId) {
   try {
     await tg('sendChatAction', { chat_id: chatId, action: 'record_voice' });
   } catch {
-    /* индикатор необязателен */
+    /* the indicator is optional */
   }
 }
 
-// Доставить содержательный ответ агента голосом. Короткий ответ без кода и списков озвучивается целиком; для
-// длинного ответа либо ответа с кодом или списками озвучивается краткое резюме, а полный ответ дополнительно
-// уходит текстом, чтобы ничего не терялось. При сбое синтеза бросаем исключение — вызывающая сторона откатится
-// на текстовую доставку. Через state.fullTextSent сообщает, что полный ответ уже отправлен текстом — это поле
-// читается и при сбое (исключении), поэтому при откате полный ответ не дублируется.
+// Deliver the agent's substantive answer as voice. A short answer without code or lists is voiced in full; for a
+// long answer, or one with code or lists, a brief summary is voiced while the full answer additionally goes as
+// text so nothing is lost. On a synthesis failure we throw an exception — the caller falls back to text delivery.
+// Via state.fullTextSent it reports that the full answer has already been sent as text — this field is read on
+// failure (the exception) too, so the full answer is not duplicated on fallback.
 async function deliverVoice(chatId, result, state) {
   const answer = result.answer || '(пустой ответ)';
   const { text, summarized } = await buildVoiceText(answer);
   if (!text) {
-    throw new Error('не удалось подготовить текст для синтеза (пустое резюме)');
+    throw new Error('failed to prepare text for synthesis (empty summary)');
   }
 
-  // Если озвучивается резюме, полный ответ отправляем текстом заранее: даже если синтез потом упадёт, ответ
-  // у пользователя уже есть и повторно слать его не нужно.
+  // If a summary is being voiced, we send the full answer as text in advance: even if synthesis fails later, the
+  // user already has the answer and there is no need to send it again.
   if (summarized) {
     const sent = await sendMessage(chatId, answer);
     await saveSentRefs(chatId, sent, result.assistantMessageId, 'text');
@@ -353,53 +356,53 @@ async function deliverAgentResult(chatId, sourceMessageId, result) {
       await sendReaction(chatId, sourceMessageId, result.delivery.reactionKey);
       return;
     } catch (err) {
-      console.error(`Не удалось поставить реакцию в чате ${chatId}:`, err.message);
+      console.error(`Failed to set a reaction in chat ${chatId}:`, err.message);
       const sent = await sendMessage(chatId, result.delivery.fallbackText || result.answer || 'Окей.');
       await saveSentRefs(chatId, sent, result.assistantMessageId, 'reaction_fallback');
       return;
     }
   }
-  // Голосовая доставка — только при включённом флаге и выбранном пользователем голосовом режиме. При любом
-  // сбое синтеза не теряем ответ: логируем причину на русском и отправляем тот же ответ текстом.
+  // Voice delivery — only when the flag is enabled and the user has chosen voice mode. On any synthesis failure
+  // we don't lose the answer: we log the reason and send the same answer as text.
   if (config.voiceOutput.enabled && result.replyMode === 'voice') {
     const state = { fullTextSent: false };
     try {
       await deliverVoice(chatId, result, state);
       return;
     } catch (err) {
-      console.error(`Не удалось отправить голосовой ответ в чат ${chatId}: ${err.message}. Отправляю ответ текстом.`);
+      console.error(`Failed to send a voice answer to chat ${chatId}: ${err.message}. Sending the answer as text.`);
       if (state.fullTextSent) {
         return;
-      } // полный ответ уже ушёл текстом при сбое синтеза
+      } // the full answer already went as text on the synthesis failure
     }
   }
   const sent = await sendMessage(chatId, result.answer || '(пустой ответ)');
   await saveSentRefs(chatId, sent, result.assistantMessageId, 'text');
 }
 
-// Показать индикатор «печатает…», пока агент думает над ответом.
+// Show the "typing…" indicator while the agent is thinking about the answer.
 async function sendTyping(chatId) {
   try {
     await tg('sendChatAction', { chat_id: chatId, action: 'typing' });
   } catch {
-    /* индикатор необязателен */
+    /* the indicator is optional */
   }
 }
 
-// Показывать индикатор «печатает…» непрерывно, пока идёт длительная обработка (скачивание и распознавание речи).
-// Telegram гасит индикатор примерно через пять секунд, поэтому отправляем событие сразу и обновляем по таймеру.
-// Возвращает функцию остановки, которую нужно вызвать по завершении тяжёлого участка.
+// Keep showing the "typing…" indicator continuously while a long processing runs (downloading and transcribing
+// speech). Telegram clears the indicator after about five seconds, so we send the event immediately and refresh
+// it on a timer. Returns a stop function that must be called when the heavy section finishes.
 function startTypingLoop(chatId) {
   sendTyping(chatId);
   const timer = setInterval(() => sendTyping(chatId), 4500);
   return () => clearInterval(timer);
 }
 
-// Признак готовности распознавания речи: общий флаг включён и для выбранного распознавателя задан ключ доступа.
-// Вычисляется один раз при старте в main(); если контур не готов, входящее аудио обрабатывается как раньше.
+// Whether speech recognition is ready: the general flag is on and an access key is set for the chosen recognizer.
+// Computed once at startup in main(); if the pipeline is not ready, incoming audio is handled as before.
 let voiceReady = false;
 
-// Сообщение пользователю при отклонении вложения по лимиту (до скачивания файла).
+// Message to the user when an attachment is rejected by a limit (before the file is downloaded).
 function voiceLimitMessage(reason) {
   if (reason === 'too_long') {
     const minutes = Math.round(config.voiceInput.maxSeconds / 60);
@@ -409,7 +412,7 @@ function voiceLimitMessage(reason) {
   return `Файл слишком большой. Я обрабатываю вложения размером до ${megabytes} МБ — пришлите, пожалуйста, меньше.`;
 }
 
-// Обработка служебных команд. Возвращает true, если сообщение было командой и уже обработано.
+// Handle service commands. Returns true if the message was a command and has already been processed.
 async function handleCommand(chatId, externalId, text) {
   if (text === '/start' || text === '/help') {
     let help = `Привет! Я чат-бот с долговременной памятью. Просто пишите мне — я запоминаю важное и отвечаю с учётом прошлых разговоров.
@@ -433,7 +436,7 @@ async function handleCommand(chatId, externalId, text) {
     await sendMessage(chatId, `Домен общения переключён на «${key}».`);
     return true;
   }
-  // Команды управления проактивностью: включить, выключить и открыть подменю выбора поводов.
+  // Proactivity control commands: enable, disable, and open the submenu for choosing triggers.
   if (text === '/proactivity_on') {
     if (!config.proactive.enabled) {
       await sendMessage(chatId, 'Проактивность сейчас выключена глобально администратором, включить её нельзя.');
@@ -476,8 +479,8 @@ async function handleCommand(chatId, externalId, text) {
   return false;
 }
 
-// Обработка нажатия инлайн-кнопки подменю проактивности (приходит как callback_query).
-// Коды callback_data: «pa:off» — выключить мастер-флаг; «pa:t:<тип>» — переключить один повод.
+// Handle a tap on an inline button of the proactivity submenu (arrives as a callback_query).
+// callback_data codes: "pa:off" — disable the master flag; "pa:t:<type>" — toggle a single trigger.
 async function handleCallback(cq) {
   const data = cq.data || '';
   const chatId = cq.message?.chat?.id;
@@ -514,49 +517,49 @@ async function handleCallback(cq) {
       });
       return;
     }
-    // Неизвестный код — просто закрываем «часики» на кнопке, чтобы клиент не ждал.
+    // Unknown code — just close the spinner on the button so the client doesn't wait.
     await tg('answerCallbackQuery', { callback_query_id: cq.id });
   } catch (err) {
-    console.error(`Ошибка обработки нажатия кнопки в чате ${chatId}:`, err.message);
+    console.error(`Error handling a button tap in chat ${chatId}:`, err.message);
     try {
       await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Не получилось, попробуйте ещё раз.' });
     } catch {
-      /* «часики» закроются сами по тайм-ауту */
+      /* the spinner will close on its own by timeout */
     }
   }
 }
 
-// Обработка одного входящего сообщения пользователя: обычный текст либо вложение с речью.
+// Handle a single incoming user message: plain text or a speech attachment.
 async function handleUpdate(message) {
   const chatId = message.chat.id;
   const externalId = String(chatId);
   let text = (message.text || '').trim();
 
-  // Текстовые команды разбираются до распознавания речи.
+  // Text commands are parsed before speech recognition.
   if (text.startsWith('/') && (await handleCommand(chatId, externalId, text))) {
     return;
   }
 
-  // Если текста нет, пробуем распознать вложение с речью (голос, кружок, аудио- или видеофайл).
-  // При выключенном или неготовом контуре распознавания такое сообщение, как и раньше, игнорируется.
+  // If there is no text, we try to transcribe a speech attachment (voice, video note, audio or video file).
+  // With the recognition pipeline disabled or not ready, such a message is ignored, as before.
   const attachment = !text && voiceReady ? detectAttachment(message) : null;
   if (!text && !attachment) {
     return;
   }
 
   const domainKey = chatDomains.get(chatId) || 'general';
-  // Реакции применяем только к чистому тексту; на голос всегда отвечаем по сути.
+  // We apply reactions only to plain text; for voice we always answer substantively.
   const reactionCandidate = !attachment && shouldConsiderReaction(text);
   if (!reactionCandidate) {
     await sendTyping(chatId);
   }
-  // Захватываем слот семафора на весь тяжёлый участок: для голоса это скачивание файла, распознавание и
-  // последующий вызов агента, для текста — только вызов агента. Слот ограничивает нагрузку на прокси и STT.
+  // We acquire a semaphore slot for the whole heavy section: for voice this is downloading the file, transcribing
+  // it and the subsequent agent call; for text — only the agent call. The slot limits load on the proxy and STT.
   await acquireSlot();
   let stopTyping = null;
   try {
     if (attachment) {
-      // Проверяем лимиты до скачивания: слишком длинные или слишком большие вложения отклоняем сразу.
+      // Check limits before downloading: attachments that are too long or too large are rejected immediately.
       const limit = checkAttachmentLimits(attachment, {
         maxSeconds: config.voiceInput.maxSeconds,
         maxBytes: config.voiceInput.maxBytes,
@@ -565,7 +568,7 @@ async function handleUpdate(message) {
         await sendMessage(chatId, voiceLimitMessage(limit.reason));
         return;
       }
-      // Скачивание и распознавание длятся заметно дольше текста — держим индикатор «печатает…» всё это время.
+      // Downloading and transcription take noticeably longer than text — keep the "typing…" indicator the whole time.
       stopTyping = startTypingLoop(chatId);
       let stt;
       try {
@@ -577,7 +580,7 @@ async function handleUpdate(message) {
           language: config.voiceInput.language,
         });
       } catch (err) {
-        console.error(`Не удалось распознать аудио в чате ${chatId}:`, err.message);
+        console.error(`Failed to transcribe audio in chat ${chatId}:`, err.message);
         await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте, пожалуйста, чуть позже.');
         return;
       }
@@ -589,11 +592,11 @@ async function handleUpdate(message) {
         return;
       }
       ({ text } = stt);
-      // Для присланных аудио- и видеофайлов показываем распознанный текст, для голоса и кружков — нет.
+      // For sent audio and video files we show the recognized text, for voice and video notes — no.
       if (shouldEchoTranscript(attachment.kind)) {
         await sendMessage(chatId, `Распознанный текст: ${text}`);
       }
-      // Дальше распознанный текст идёт в обычный пайплайн, поэтому переключаем индикатор на разовый режим.
+      // From here the recognized text goes into the normal pipeline, so we switch the indicator to one-shot mode.
       stopTyping();
       stopTyping = null;
       await sendTyping(chatId);
@@ -607,7 +610,7 @@ async function handleUpdate(message) {
           deliveryCapabilities: TELEGRAM_DELIVERY_CAPABILITIES,
         });
       } catch (err) {
-        console.error(`Не удалось выбрать реакцию для чата ${chatId}:`, err.message);
+        console.error(`Failed to choose a reaction for chat ${chatId}:`, err.message);
       }
       if (delivery.kind === 'reaction') {
         const recorded = await recordReactionTurn({ externalId, userMessage: text, domainKey, delivery });
@@ -618,21 +621,21 @@ async function handleUpdate(message) {
       await sendTyping(chatId);
     }
 
-    // Потоковый путь подключаем, когда стриминг включён и в ядре, и в Telegram. Голосовой ответ требует
-    // целого финального текста для синтеза, поэтому потоковый черновик несовместим с голосовой доставкой —
-    // иначе пришлось бы и редактировать черновик текстом, и слать голос, дублируя ответ. Решающим является
-    // не глобальный флаг голоса, а реальный режим ответа конкретного пользователя: даже при включённом
-    // VOICE_OUTPUT_ENABLED пользователи в текстовом режиме должны получать стриминг. Поэтому режим читается
-    // лёгким запросом ДО вызова ядра (ядро узнаёт его только внутри handleMessage). Остаётся редкая гонка:
-    // если модель сменит режим инструментом voice_or_text прямо в этом запросе, предсказание окажется
-    // неточным — это приемлемо, потому что смена режима происходит нечасто, не на каждом сообщении.
+    // We engage the streaming path when streaming is enabled both in the core and in Telegram. A voice answer
+    // requires the whole final text for synthesis, so a streaming draft is incompatible with voice delivery —
+    // otherwise we'd have to both edit the draft as text and send voice, duplicating the answer. The deciding
+    // factor is not the global voice flag but the actual reply mode of the specific user: even with
+    // VOICE_OUTPUT_ENABLED on, users in text mode should get streaming. So the mode is read with a light query
+    // BEFORE calling the core (the core learns it only inside handleMessage). One rare race remains:
+    // if the model changes the mode via the voice_or_text tool within this very request, the prediction will be
+    // inaccurate — that's acceptable, because a mode change happens infrequently, not on every message.
     let userReplyMode = 'text';
     if (config.voiceOutput.enabled) {
       try {
         userReplyMode = await getUserReplyMode(externalId);
       } catch {
         userReplyMode = 'text';
-      } // при сбое чтения безопаснее считать текстовым (стриминг разрешён)
+      } // on a read failure it's safer to assume text mode (streaming allowed)
     }
     const useStream = config.streaming.enabled && config.telegram.streaming.enabled && userReplyMode !== 'voice';
     if (useStream) {
@@ -646,8 +649,8 @@ async function handleUpdate(message) {
           minFirstDraftChars: config.telegram.streaming.minFirstDraftChars,
           maxLen: TG_MAX_LEN,
           toolStatuses: config.telegram.streaming.toolStatuses,
-          // Финальный текст доставляется в разметке Telegram (HTML): профиль канала задаёт parseMode,
-          // санитайзер и разбивку по границам тегов. Промежуточный черновик остаётся сырым текстом.
+          // The final text is delivered in Telegram markup (HTML): the channel profile defines parseMode,
+          // the sanitizer and the split at tag boundaries. The intermediate draft stays raw text.
           format: TELEGRAM_PROFILE,
         },
       });
@@ -660,13 +663,13 @@ async function handleUpdate(message) {
           stream: true,
           onEvent: progress.onEvent,
         });
-        chatDomains.set(chatId, res.domainKey); // агент мог сменить домен по смыслу запроса
+        chatDomains.set(chatId, res.domainKey); // the agent may have switched domain by the request's meaning
         const sent = await progress.complete(res.answer || '(пустой ответ)');
         await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
         await refreshChatMenu(chatId, externalId);
       } catch (err) {
         await progress.fail(err);
-        throw err; // общий обработчик ниже отправит текст сбоя
+        throw err; // the common handler below will send the failure text
       } finally {
         progress.finish();
       }
@@ -674,12 +677,12 @@ async function handleUpdate(message) {
     }
 
     const res = await handleMessage({ externalId, userMessage: text, domainKey, channel: 'telegram' });
-    chatDomains.set(chatId, res.domainKey); // агент мог сменить домен по смыслу запроса
+    chatDomains.set(chatId, res.domainKey); // the agent may have switched domain by the request's meaning
     await deliverAgentResult(chatId, message.message_id, res);
-    // Меню команд зависит от мастер-флага проактивности, который мог измениться, — пересчитываем его.
+    // The command menu depends on the proactivity master flag, which may have changed — recompute it.
     await refreshChatMenu(chatId, externalId);
   } catch (err) {
-    console.error(`Ошибка обработки сообщения чата ${chatId}:`, err.message);
+    console.error(`Error handling a message for chat ${chatId}:`, err.message);
     await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте ещё раз чуть позже.');
   } finally {
     if (stopTyping) {
@@ -725,19 +728,19 @@ async function handleReactionUpdate(reactionUpdate) {
       },
     });
   } catch (err) {
-    console.error(`Ошибка обработки реакции в чате ${chatId}:`, err.message);
+    console.error(`Error handling a reaction in chat ${chatId}:`, err.message);
   } finally {
     releaseSlot();
   }
 }
 
-// Слив очереди доставки mem.notification_outbox в Telegram.
-// Получатель определяется по external_id пользователя — это идентификатор чата Telegram.
-let draining = false; // флаг «слив очереди уже идёт»
+// Drain the mem.notification_outbox delivery queue into Telegram.
+// The recipient is determined by the user's external_id — that is the Telegram chat id.
+let draining = false; // flag "a drain is already in progress"
 
 async function drainOutbox() {
-  // Событие LISTEN/NOTIFY и страховочный таймер могут позвать слив одновременно.
-  // Флаг не даёт двум проходам отправить одни и те же сообщения дважды в рамках процесса.
+  // A LISTEN/NOTIFY event and the safety timer may call the drain at the same time.
+  // The flag prevents two passes from sending the same messages twice within the process.
   if (draining) {
     return 0;
   }
@@ -761,7 +764,7 @@ async function drainOutboxOnce() {
   for (const row of rows) {
     const chatId = Number(row.external_id);
     if (!Number.isFinite(chatId)) {
-      // Пользователь не из Telegram (например, тестовый cli-user) — этот канал не для него, пропускаем.
+      // The user is not from Telegram (e.g. a test cli-user) — this channel is not for them, skip.
       await query(
         `UPDATE mem.notification_outbox SET status = 'cancelled', error_text = 'recipient is not a telegram chat'
           WHERE id = $1`,
@@ -779,7 +782,7 @@ async function drainOutboxOnce() {
         String(chatId),
       ]);
     } catch (err) {
-      // Откладываем повторную попытку на минуту; после 5 неудач помечаем как проваленную.
+      // Postpone the retry by a minute; after 5 failures we mark it as failed.
       await query(
         `UPDATE mem.notification_outbox
             SET attempts = attempts + 1,
@@ -789,17 +792,17 @@ async function drainOutboxOnce() {
           WHERE id = $1`,
         [row.id, String(err.message || err)],
       );
-      console.error(`Не удалось доставить сообщение в чат ${chatId}:`, err.message);
+      console.error(`Failed to deliver a message to chat ${chatId}:`, err.message);
     }
   }
   return rows.length;
 }
 
-// --- Событийная доставка очереди через LISTEN/NOTIFY ------------------------
-// Выделенное соединение-слушатель канала «outbox_new». Уведомления приходят на конкретное
-// соединение, а не через пул, поэтому общий хелпер query из db.js здесь не подходит.
-let outboxListener = null; // активный клиент-слушатель (или null)
-let listenerReconnectTimer = null; // таймер запланированного переподключения
+// --- Event-driven queue delivery via LISTEN/NOTIFY --------------------------
+// A dedicated listener connection for the "outbox_new" channel. Notifications arrive on a specific
+// connection rather than through the pool, so the common query helper from db.js is not suitable here.
+let outboxListener = null; // the active listener client (or null)
+let listenerReconnectTimer = null; // timer for a scheduled reconnect
 
 async function startOutboxListener() {
   try {
@@ -807,26 +810,26 @@ async function startOutboxListener() {
     outboxListener = client;
     client.on('notification', (msg) => {
       if (msg.channel === 'scheduler_wake') {
-        // Создана новая задача планировщика — будим фоновый цикл, чтобы он не ждал до конца сна.
+        // A new scheduler task was created — wake the background loop so it doesn't wait until the end of its sleep.
         if (wakeWorker) {
           wakeWorker();
         }
         return;
       }
-      // Пришло уведомление о новой записи в очереди доставки — опустошаем очередь немедленно.
-      drainOutbox().catch((e) => console.error('Ошибка событийного слива очереди доставки:', e.message));
+      // A notification about a new delivery-queue entry arrived — drain the queue immediately.
+      drainOutbox().catch((e) => console.error('Error during event-driven delivery-queue drain:', e.message));
     });
     client.on('error', (e) => {
-      console.error('Ошибка соединения-слушателя очереди доставки:', e.message);
-      scheduleListenerReconnect(); // соединение разорвано — переоткрываем
+      console.error('Delivery-queue listener connection error:', e.message);
+      scheduleListenerReconnect(); // the connection dropped — reopen it
     });
     await client.query('LISTEN outbox_new');
-    await client.query('LISTEN scheduler_wake'); // мгновенное пробуждение воркера при новой задаче
-    // Уведомления не переживают обрыв соединения: сразу после подписки один раз опустошаем очередь,
-    // чтобы забрать всё, что накопилось за время запуска или простоя слушателя.
+    await client.query('LISTEN scheduler_wake'); // instant worker wake-up on a new task
+    // Notifications do not survive a dropped connection: right after subscribing we drain the queue once,
+    // to pick up everything accumulated during startup or while the listener was down.
     await drainOutbox();
   } catch (err) {
-    console.error('Не удалось запустить слушатель очереди доставки:', err.message);
+    console.error('Failed to start the delivery-queue listener:', err.message);
     scheduleListenerReconnect();
   }
 }
@@ -834,13 +837,13 @@ async function startOutboxListener() {
 function scheduleListenerReconnect() {
   if (listenerReconnectTimer || !running) {
     return;
-  } // переподключение уже запланировано или идёт остановка
-  // Освобождаем отвалившееся соединение с уничтожением, чтобы не копить «висящих» клиентов в пуле.
+  } // a reconnect is already scheduled or a shutdown is in progress
+  // Release the dropped connection with destroy, so as not to accumulate "dangling" clients in the pool.
   if (outboxListener) {
     try {
       outboxListener.release(true);
     } catch {
-      /* соединение уже разорвано */
+      /* the connection is already dropped */
     }
     outboxListener = null;
   }
@@ -849,10 +852,10 @@ function scheduleListenerReconnect() {
     if (running) {
       startOutboxListener();
     }
-  }, 3000); // небольшая пауза перед повторной попыткой
+  }, 3000); // a short pause before retrying
 }
 
-// Прерываемый сон фонового цикла: завершается по тайм-ауту или по уведомлению о новой задаче.
+// Interruptible sleep of the background loop: ends on timeout or on a notification about a new task.
 function sleepWorker(ms) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -867,9 +870,9 @@ function sleepWorker(ms) {
   });
 }
 
-// Сколько спать до следующего прохода фонового цикла. За основу берётся время до ближайшей задачи
-// (или верхняя граница, если задач нет), а затем сон укорачивается так, чтобы не пропустить очередную
-// проверку проактивности и очередной страховочный слив очереди доставки. Итог зажимается в границы.
+// How long to sleep until the next pass of the background loop. The basis is the time until the nearest task
+// (or the upper bound if there are no tasks), and then the sleep is shortened so as not to miss the next
+// proactivity check and the next safety drain of the delivery queue. The result is clamped to the bounds.
 function computeWorkerSleepMs(nextTaskMs, lastSafetyDrainAt) {
   const base = nextTaskMs === null ? WORKER_MAX_SLEEP_MS : nextTaskMs;
   let ms = Math.max(WORKER_MIN_SLEEP_MS, Math.min(base, WORKER_MAX_SLEEP_MS));
@@ -882,14 +885,14 @@ function computeWorkerSleepMs(nextTaskMs, lastSafetyDrainAt) {
   return ms;
 }
 
-// Фоновый цикл: планировщик задач, проактивный контур и страховочная доставка из очереди в Telegram.
+// Background loop: the task scheduler, the proactive pipeline, and safety delivery from the queue into Telegram.
 async function workerLoop() {
   let lastSafetyDrainAt = 0;
-  // eslint-disable-next-line no-unmodified-loop-condition -- running выставляется в false обработчиком завершения между await
+  // eslint-disable-next-line no-unmodified-loop-condition -- running is set to false by the shutdown handler between awaits
   while (running) {
     let nextTaskMs = null;
     try {
-      await tick(); // выполнить просроченные задачи (напоминания и т.п.)
+      await tick(); // run overdue tasks (reminders, etc.)
 
       if (config.proactive.enabled && Date.now() - lastProactiveAt >= config.proactive.intervalMs) {
         lastProactiveAt = Date.now();
@@ -899,26 +902,26 @@ async function workerLoop() {
         }
       }
 
-      // Страховочный слив: основная доставка событийная (LISTEN/NOTIFY), а этот редкий проход
-      // гарантирует отправку даже при пропущенном уведомлении или после простоя слушателя.
+      // Safety drain: the main delivery is event-driven (LISTEN/NOTIFY), and this rare pass
+      // guarantees sending even on a missed notification or after listener downtime.
       if (Date.now() - lastSafetyDrainAt >= OUTBOX_SAFETY_INTERVAL_MS) {
         lastSafetyDrainAt = Date.now();
         await drainOutbox();
       }
 
-      // Момент ближайшей задачи узнаём после возможного перепланирования в tick().
+      // We learn the moment of the nearest task after a possible rescheduling in tick().
       nextTaskMs = await msUntilDueTask();
     } catch (err) {
-      console.error('Ошибка фонового прохода воркера:', err.message);
+      console.error('Error during a worker background pass:', err.message);
     }
     await sleepWorker(computeWorkerSleepMs(nextTaskMs, lastSafetyDrainAt));
   }
 }
 
-// Цикл длинного опроса входящих сообщений.
+// Long-polling loop for incoming messages.
 async function pollLoop() {
   let offset = 0;
-  // eslint-disable-next-line no-unmodified-loop-condition -- running выставляется в false обработчиком завершения между await
+  // eslint-disable-next-line no-unmodified-loop-condition -- running is set to false by the shutdown handler between awaits
   while (running) {
     let updates;
     try {
@@ -928,75 +931,88 @@ async function pollLoop() {
         allowed_updates: ['message', 'callback_query', 'message_reaction'],
       });
     } catch (err) {
-      console.error('Ошибка длинного опроса getUpdates:', err.message);
-      await new Promise((res) => setTimeout(res, 3000)); // пауза перед повтором после сбоя сети
+      console.error('getUpdates long-poll error:', err.message);
+      await new Promise((res) => setTimeout(res, 3000)); // pause before retrying after a network failure
       continue;
     }
     for (const update of updates) {
-      offset = update.update_id + 1; // подтверждаем обработку, чтобы не получить повтор
-      // Не ждём обработку: ставим сообщение в цепочку его чата и сразу продолжаем опрос.
-      // Разные чаты обрабатываются параллельно, внутри чата — строго по порядку.
+      offset = update.update_id + 1; // acknowledge processing so we don't receive a repeat
+      // We don't await processing: we put the message into its chat's chain and immediately continue polling.
+      // Different chats are processed in parallel; within a chat — strictly in order.
       if (update.message) {
         enqueueUpdate(update.message);
       } else if (update.message_reaction) {
         enqueueReactionUpdate(update.message_reaction);
       }
-      // Нажатия инлайн-кнопок обрабатываем сразу (без вызова LLM и без семафора): это лёгкие операции
-      // с базой и перерисовкой клавиатуры. Ошибку только логируем, чтобы не оборвать опрос.
+      // Inline button taps are handled immediately (without an LLM call and without the semaphore): these are
+      // light database operations and keyboard redraws. We only log the error so as not to break polling.
       else if (update.callback_query) {
         handleCallback(update.callback_query).catch((e) =>
-          console.error('Ошибка обработки callback_query:', e.message),
+          console.error('Error handling callback_query:', e.message),
         );
       }
     }
   }
 }
 
-async function main() {
-  const me = await tg('getMe', {}); // заодно проверяем валидность токена
-  // Регистрируем глобальное меню команд как запасной набор по умолчанию (для чатов без своего меню).
-  // При глобально включённой проактивности это базовые команды плюс /proactivity_on; иначе — только базовые.
-  // Меню конкретного чата уточняется динамически в updateChatMenu/refreshChatMenu. Сбой не критичен.
+// Start the Telegram channel: check the token, register the menu, bring up the speech-recognition pipeline,
+// connect the tools, enable event-driven delivery, and start two background loops (long poll and worker).
+// The function does NOT wait for the loops to finish — they go into the background, and control returns to the
+// caller so the combined server can continue starting the web server. Returns the bot name for diagnostics.
+export async function startTelegram() {
+  running = true; // in case of a restart after a stop
+  const me = await tg('getMe', {}); // at the same time we verify the token is valid
+  // Register the global command menu as a default fallback set (for chats without their own menu).
+  // With proactivity globally enabled this is the base commands plus /proactivity_on; otherwise — base only.
+  // The menu of a specific chat is refined dynamically in updateChatMenu/refreshChatMenu. A failure is not critical.
   try {
     await tg('setMyCommands', { commands: buildCommands(false) });
   } catch (err) {
-    console.error('Не удалось зарегистрировать меню команд:', err.message);
+    console.error('Failed to register the command menu:', err.message);
   }
-  // Распознавание входящего аудио: включаем только если общий флаг поднят и для распознавателя задан ключ.
-  // Иначе пишем понятную причину в журнал и оставляем контур выключенным, не падая на первом голосовом.
+  // Incoming audio recognition: enable it only if the general flag is up and a key is set for the recognizer.
+  // Otherwise we write a clear reason to the log and leave the pipeline off, without crashing on the first voice.
   if (config.voiceInput.enabled) {
     if (isProviderConfigured(config.voiceInput.provider)) {
       voiceReady = true;
-      console.log(`Распознавание входящего аудио включено (распознаватель ${config.voiceInput.provider}).`);
+      console.log(`Incoming audio recognition enabled (recognizer ${config.voiceInput.provider}).`);
     } else {
       const keyEnv = providerKeyEnv(config.voiceInput.provider);
       const reason = keyEnv
-        ? `не задан ключ доступа ${keyEnv}`
-        : `распознаватель «${config.voiceInput.provider}» не поддерживается`;
-      console.warn(`Распознавание входящего аудио выключено: ${reason}. Голосовые сообщения будут игнорироваться.`);
+        ? `access key ${keyEnv} is not set`
+        : `recognizer «${config.voiceInput.provider}» is not supported`;
+      console.warn(`Incoming audio recognition disabled: ${reason}. Voice messages will be ignored.`);
     }
   }
   console.log(
-    `Профиль представления канала «telegram» зарегистрирован: ответ форматируется разметкой Telegram ` +
+    `Presentation profile for the «telegram» channel registered: answers are formatted with Telegram markup ` +
       `(parse_mode=${TELEGRAM_PROFILE.parseMode}).`,
   );
-  // Стартовая диагностика внешних MCP-серверов: выводим объявленный список и проверяем подключение к каждому
-  // сразу при запуске, а не лениво при первом сообщении. initTools кэширует промис, поэтому позже, при первом
-  // обращении агента, повторного подключения не происходит — используется уже собранный реестр инструментов.
-  console.log('Проверяю подключение к объявленным MCP-серверам…');
+  // Startup diagnostics of external MCP servers: we print the declared list and check the connection to each one
+  // right at startup, rather than lazily on the first message. initTools caches the promise, so later, on the
+  // agent's first call, no reconnection happens — the already-assembled tool registry is used.
+  console.log('Checking the connection to the declared MCP servers…');
   await initTools();
   console.log(
-    `Telegram-бот @${me.username} запущен. Длинный опрос активен.`,
-    config.proactive.enabled ? 'Проактивный контур включён.' : 'Проактивный контур выключен.',
+    `Telegram bot @${me.username} started. Long polling is active.`,
+    config.proactive.enabled ? 'The proactive pipeline is enabled.' : 'The proactive pipeline is disabled.',
   );
-  await startOutboxListener(); // событийная доставка очереди (LISTEN/NOTIFY)
-  await Promise.all([pollLoop(), workerLoop()]);
+  await startOutboxListener(); // event-driven queue delivery (LISTEN/NOTIFY)
+  // We start both infinite loops in the background and do NOT await them here. The loops catch their own errors
+  // and keep running while running === true; the stored promise is only needed to wait on during shutdown.
+  botLoops = Promise.all([pollLoop(), workerLoop()]);
+  botLoops.catch((err) => console.error('Telegram bot background loops failed:', err.message));
+  return { username: me.username };
 }
 
-// Аккуратное завершение по Ctrl+C: останавливаем циклы и закрываем пул соединений с БД.
-async function shutdown() {
-  console.log('\nЗавершение работы Telegram-бота…');
+// Stop only the Telegram part: the background loops, the delivery-queue listener, and the log buffer. We do NOT
+// close the DB connection pool here and do NOT call process.exit — the lifecycle of the pool and the process is
+// managed by the caller (in standalone mode by the startup block below, in the combined server by a common handler).
+export async function stopTelegram() {
   running = false;
+  if (wakeWorker) {
+    wakeWorker();
+  } // wake the sleeping worker so it immediately sees running === false and exits the loop
   if (listenerReconnectTimer) {
     clearTimeout(listenerReconnectTimer);
     listenerReconnectTimer = null;
@@ -1005,23 +1021,34 @@ async function shutdown() {
     try {
       outboxListener.release(true);
     } catch {
-      /* соединение уже разорвано */
+      /* the connection is already dropped */
     }
     outboxListener = null;
   }
-  // Сливаем буфер журнала LLM-запросов до закрытия пулов, чтобы не потерять хвост журнала.
+  // We flush the LLM-request log buffer before closing the pools, so as not to lose the tail of the log.
   await flushLlmLog();
-  try {
-    await closePool();
-  } catch {
-    /* пул мог быть не открыт */
-  }
-  process.exit(0);
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
 
-main().catch((err) => {
-  console.error('Критическая ошибка запуска Telegram-бота:', err.message);
-  process.exit(1);
-});
+// Direct run (npm run telegram): the module manages its own lifecycle — it starts the bot, stops it on a
+// shutdown signal, closes the DB connection pool, and exits. When imported from the combined server
+// (src/server/index.js) this block does not run, and shutdown is managed by the server.
+const isDirectRun = import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  const shutdown = async () => {
+    console.log('\nShutting down the Telegram bot…');
+    await stopTelegram();
+    try {
+      await closePool();
+    } catch {
+      /* the pool may not have been opened */
+    }
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  startTelegram().catch((err) => {
+    console.error('Critical error starting the Telegram bot:', err.message);
+    process.exit(1);
+  });
+}

@@ -1,16 +1,16 @@
-// Telegram-отображение потоковых событий ядра агента. Это один из возможных потребителей абстрактного
-// контракта событий handleMessage (см. src/agent.js): ядро о Telegram не знает, а здесь события
-// (assistant.delta, tool.started/completed и т. д.) превращаются в конкретные вызовы Bot API.
+// Telegram rendering of the agent core's streaming events. This is one possible consumer of the abstract
+// handleMessage event contract (see src/agent.js): the core knows nothing about Telegram, and here the events
+// (assistant.delta, tool.started/completed, etc.) are turned into concrete Bot API calls.
 //
-// Фабрика принимает зависимости извне (функцию вызова API tg, запуск индикатора набора, функцию разбиения
-// длинного текста и часы now), поэтому её можно протестировать без реального Telegram и без таймеров.
+// The factory takes its dependencies from outside (the tg API-call function, the typing-indicator starter, the
+// long-text splitting function, and the now clock), so it can be tested without a real Telegram and without timers.
 //
-// Базовая UX-модель: пока нет видимого текста — держим индикатор «печатает…»; при первом фрагменте ответа
-// создаём один черновик-сообщение и дальше редактируем его с троттлингом; вызовы инструментов показываем
-// одним отдельным status-сообщением, которое убираем при появлении ответа или в конце обработки.
+// Basic UX model: while there is no visible text we keep the "typing…" indicator; on the first answer fragment
+// we create a single draft message and then edit it with throttling; tool calls are shown as one separate status
+// message, which we remove when the answer appears or at the end of processing.
 
-// Разбиение по умолчанию: режем по длине на куски не длиннее limit. Telegram-адаптер передаёт сюда свой
-// splitText, который дополнительно старается резать по границам строк.
+// Default splitting: cut by length into chunks no longer than limit. The Telegram adapter passes in its own
+// splitText, which additionally tries to cut at line boundaries.
 function defaultSplit(text, limit) {
   const parts = [];
   let rest = String(text);
@@ -25,31 +25,31 @@ function defaultSplit(text, limit) {
 }
 
 export function createTelegramProgress({ chatId, tg, startTyping = null, options = {} }) {
-  const editIntervalMs = options.editIntervalMs ?? 500; // не чаще одного редактирования за это время
-  const minEditChars = options.minEditChars ?? 20; // и не реже, чем накопится столько новых символов
-  const minFirstDraftChars = options.minFirstDraftChars ?? 50; // первый черновик — только когда текста накопилось столько
-  const maxLen = options.maxLen ?? 4000; // предел длины одного сообщения Telegram
-  const toolStatuses = options.toolStatuses !== false; // показывать ли статус вызова инструмента
+  const editIntervalMs = options.editIntervalMs ?? 500; // at most one edit within this interval
+  const minEditChars = options.minEditChars ?? 20; // and at least once this many new chars accumulate
+  const minFirstDraftChars = options.minFirstDraftChars ?? 50; // first draft only once this much text has accumulated
+  const maxLen = options.maxLen ?? 4000; // length limit of a single Telegram message
+  const toolStatuses = options.toolStatuses !== false; // whether to show the tool-call status
   const now = options.now || (() => Date.now());
 
-  // Профиль форматирования финального ответа. Промежуточный черновик и статусы инструментов всегда идут
-  // сырым текстом (parseMode не применяется): незакрытый тег во время инкрементального редактирования
-  // сломал бы отображение. Разметка применяется только к целому финальному тексту в complete().
+  // Formatting profile for the final answer. The intermediate draft and tool statuses always go as raw text
+  // (parseMode is not applied): an unclosed tag during incremental editing would break the display. Markup is
+  // applied only to the whole final text in complete().
   const format = options.format || {};
-  const finalParseMode = format.parseMode || null; // режим разметки финала ('HTML' или null)
-  const finalPostProcess = format.postProcess || ((t) => t); // санитайзер финального текста
-  const finalSplit = format.split || options.splitText || defaultSplit; // разбивка финала по границам тегов
+  const finalParseMode = format.parseMode || null; // markup mode for the final ('HTML' or null)
+  const finalPostProcess = format.postProcess || ((t) => t); // sanitizer for the final text
+  const finalSplit = format.split || options.splitText || defaultSplit; // split the final at tag boundaries
 
   const state = {
-    typingStop: null, // функция остановки индикатора «печатает…»
-    draftId: null, // message_id черновика ответа (создаётся при первом фрагменте текста)
-    statusId: null, // message_id status-сообщения вызова инструмента
-    buffer: '', // накопленный текст ответа
-    lastEditAt: 0, // момент последнего редактирования черновика
-    lastEditLen: 0, // длина буфера на момент последнего редактирования
-    lastEditText: null, // последний отправленный текст (чтобы не повторять идентичный edit)
-    closed: false, // обработка завершена (complete/fail вызваны)
-    sent: [], // отправленные сообщения ответа — для сохранения внешних ссылок
+    typingStop: null, // function that stops the "typing…" indicator
+    draftId: null, // message_id of the answer draft (created on the first text fragment)
+    statusId: null, // message_id of the tool-call status message
+    buffer: '', // accumulated answer text
+    lastEditAt: 0, // time of the last draft edit
+    lastEditLen: 0, // buffer length at the time of the last edit
+    lastEditText: null, // last sent text (to avoid repeating an identical edit)
+    closed: false, // processing finished (complete/fail called)
+    sent: [], // sent answer messages — for storing external references
   };
 
   function clip(text) {
@@ -67,14 +67,14 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
       try {
         state.typingStop();
       } catch {
-        /* остановка индикатора необязательна */
+        /* stopping the indicator is optional */
       }
       state.typingStop = null;
     }
   }
 
-  // Показать или обновить одно status-сообщение инструмента. Пока идёт показ ответа
-  // (черновик уже создан), статус инструмента не смешиваем с текстом ответа.
+  // Show or update a single tool status message. While the answer is being shown
+  // (the draft already exists), we don't mix the tool status with the answer text.
   async function showToolStatus(title) {
     if (!toolStatuses || state.draftId !== null) {
       return;
@@ -87,12 +87,12 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
       try {
         await tg('editMessageText', { chat_id: chatId, message_id: state.statusId, text });
       } catch {
-        /* «не изменено» или сообщение недоступно — не критично */
+        /* "not modified" or the message is unavailable — not critical */
       }
     }
   }
 
-  // Убрать status-сообщение инструмента. Делается при появлении ответа и в конце обработки.
+  // Remove the tool status message. Done when the answer appears and at the end of processing.
   async function clearToolStatus() {
     if (state.statusId === null) {
       return;
@@ -102,12 +102,12 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     try {
       await tg('deleteMessage', { chat_id: chatId, message_id: id });
     } catch {
-      /* сообщение уже могло быть удалено */
+      /* the message may already have been deleted */
     }
   }
 
-  // Редактирование черновика с троттлингом: не чаще editIntervalMs и не менее чем на minEditChars новых
-  // символов, кроме принудительного финального flush.
+  // Throttled draft editing: no more often than editIntervalMs and not for fewer than minEditChars new
+  // characters, except for a forced final flush.
   async function maybeEdit(force) {
     if (state.draftId === null) {
       return;
@@ -129,15 +129,16 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
       state.lastEditLen = state.buffer.length;
       state.lastEditText = text;
     } catch {
-      // Ошибки редактирования (текст не изменился, сообщение недоступно) не должны ронять ответ:
-      // финальный текст всё равно будет гарантированно доставлен методом complete().
+      // Edit errors (text unchanged, message unavailable) must not bring down the answer:
+      // the final text will be delivered for sure by the complete() method anyway.
     }
   }
 
-  // Принять очередной фрагмент текста ответа. Черновик создаётся не на первом же символе, а когда накопился
-  // осмысленный объём текста (minFirstDraftChars): иначе пользователь видит мигающий пузырь из одной-двух букв,
-  // который сразу переписывается. Пока порог не достигнут, держим индикатор «печатает…». Короткий ответ, который
-  // завершится не дойдя до порога, доставит целиком метод complete() — отдельного черновика для него не будет.
+  // Accept the next fragment of answer text. The draft is created not on the very first character but once a
+  // meaningful amount of text has accumulated (minFirstDraftChars): otherwise the user sees a flickering bubble of
+  // one or two letters that is immediately rewritten. Until the threshold is reached we keep the "typing…"
+  // indicator. A short answer that ends before reaching the threshold is delivered in full by complete() — there
+  // will be no separate draft for it.
   async function appendDelta(text) {
     if (!text) {
       return;
@@ -146,7 +147,7 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     if (state.draftId === null) {
       if (state.buffer.trim().length < minFirstDraftChars) {
         return;
-      } // ждём, пока накопится осмысленный объём
+      } // wait until a meaningful amount has accumulated
       stopTyping();
       await clearToolStatus();
       const res = await tg('sendMessage', { chat_id: chatId, text: clip(state.buffer) });
@@ -160,7 +161,7 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     await maybeEdit(false);
   }
 
-  // Единая точка приёма абстрактных событий ядра.
+  // Single entry point for accepting the core's abstract events.
   async function onEvent(event) {
     if (!event || state.closed) {
       return;
@@ -177,14 +178,14 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
       case 'assistant.delta':
         await appendDelta(event.text);
         break;
-      // tool.completed, assistant.completed, agent.completed обрабатываются методом complete():
-      // финальный текст — источник правды, поэтому промежуточные сигналы завершения не дублируем.
+      // tool.completed, assistant.completed, agent.completed are handled by the complete() method:
+      // the final text is the source of truth, so we don't duplicate intermediate completion signals.
       default:
         break;
     }
   }
 
-  // Отправить финальный кусок в разметке канала с откатом на сырой текст при ошибке парсинга разметки.
+  // Send the final chunk in the channel's markup, falling back to raw text on a markup parse error.
   async function sendFinal(text) {
     if (!finalParseMode) {
       return tg('sendMessage', { chat_id: chatId, text });
@@ -192,19 +193,19 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     try {
       return await tg('sendMessage', { chat_id: chatId, text, parse_mode: finalParseMode });
     } catch {
-      return tg('sendMessage', { chat_id: chatId, text }); // последний рубеж: без разметки
+      return tg('sendMessage', { chat_id: chatId, text }); // last resort: no markup
     }
   }
 
-  // Привести черновик к финальному куску редактированием. Возвращает true при успехе. Сначала пробуем
-  // с разметкой, при ошибке парсинга — без неё; если не вышло вовсе, сообщаем неуспех вызывающему.
+  // Turn the draft into the final chunk by editing. Returns true on success. First we try with markup, on a
+  // parse error — without it; if it failed entirely, we report failure to the caller.
   async function editFinal(messageId, text) {
     if (finalParseMode) {
       try {
         await tg('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: finalParseMode });
         return true;
       } catch {
-        /* разметка не принята — пробуем без неё ниже */
+        /* markup was rejected — we try without it below */
       }
     }
     try {
@@ -215,9 +216,9 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     }
   }
 
-  // Принудительно дописать финальный текст: гарантирует, что пользователь получил полный ответ целиком,
-  // включая длинный ответ, который не помещается в одно сообщение. Финал — единственное место, где
-  // применяется разметка канала: текст очищается санитайзером и режется по границам тегов.
+  // Force-write the final text: guarantees the user received the complete answer in full, including a long
+  // answer that does not fit in a single message. The final is the only place where the channel's markup is
+  // applied: the text is cleaned by the sanitizer and cut at tag boundaries.
   async function complete(finalText) {
     state.closed = true;
     stopTyping();
@@ -228,11 +229,11 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     const tail = parts.slice(1);
 
     if (state.draftId === null) {
-      // Текстовых фрагментов не было (например, ответ пришёл целиком после инструментов) — шлём заново.
+      // There were no text fragments (e.g. the answer arrived whole after the tools) — send anew.
       const first = await sendFinal(head);
       state.sent = first ? [first] : [];
     } else {
-      // Черновик есть — финальным редактированием приводим его к началу полного ответа с разметкой.
+      // There is a draft — with a final edit we bring it to the start of the full answer with markup.
       state.buffer = head;
       const ok = await editFinal(state.draftId, head);
       state.lastEditText = head;
@@ -252,15 +253,15 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     return state.sent;
   }
 
-  // Обработка сбоя: гасим индикатор и убираем статус инструмента. Сам текст ошибки отправляет вызывающая
-  // сторона (Telegram-адаптер), потому что формулировка сбоя — забота канала.
+  // Failure handling: stop the indicator and remove the tool status. The error text itself is sent by the
+  // caller (the Telegram adapter), because the wording of a failure is the channel's concern.
   async function fail() {
     state.closed = true;
     stopTyping();
     await clearToolStatus();
   }
 
-  // Окончательная очистка ресурсов (на случай, если complete/fail не были вызваны).
+  // Final resource cleanup (in case complete/fail were not called).
   function finish() {
     stopTyping();
   }

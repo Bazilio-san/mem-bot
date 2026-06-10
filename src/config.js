@@ -1,27 +1,27 @@
-// Конфигурация приложения. Полностью строится пакетом node-config из YAML-иерархии config/:
-// значения по умолчанию — config/default.yaml; окружение — development/production/test.yaml
-// (выбирается по NODE_ENV); секреты — config/local.yaml; переопределения окружением —
-// config/custom-environment-variables.yaml. Существующий .env по-прежнему читается (через bootstrap-загрузчик
-// ниже) и переопределяет значения через ту же карту переменных окружения.
+// Application configuration. It is fully assembled by the node-config package from the YAML hierarchy under config/:
+// default values come from config/default.yaml; environment-specific overrides from development/production/test.yaml
+// (selected by NODE_ENV); secrets from config/local.yaml; environment-variable overrides from
+// config/custom-environment-variables.yaml. The existing .env is still read (via the bootstrap loader
+// below) and overrides values through the same environment-variable map.
 //
-// Здесь структура НЕ пересобирается: config — это снимок готового дерева node-config. Код добавляет лишь
-// проверку обязательных параметров и несколько инвариантов, которые невозможно выразить средствами YAML,
-// и в случае ошибки валит процесс с понятным сообщением.
+// The structure is NOT rebuilt here: config is a snapshot of the ready node-config tree. The code only adds
+// validation of required parameters and a few invariants that cannot be expressed in YAML,
+// and on error it aborts the process with a clear message.
 //
-// Модели по умолчанию: основной агент и извлечение фактов — gpt-5.4-mini, классификация запроса — gpt-5.4-nano,
-// эмбеддинги — text-embedding-3-small (1536 измерений). Любую модель можно переопределить переменными
-// окружения MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL/EMBED_MODEL или в config/local.yaml. Если задан llm.baseURL
-// (OPENAI_BASE_URL), клиент OpenAI шлёт запросы в OpenAI-совместимый прокси (например, LiteLLM); пустое
-// значение означает прямой вызов https://api.openai.com/v1.
-import './bootstrap/dotenv.js'; // ПЕРВОЙ строкой: наполняет process.env до загрузки node-config
-import nodeConfig from 'config'; // node-config читает каталог config/ при первом импорте
+// Default models: main agent and fact extraction use gpt-5.4-mini, query classification uses gpt-5.4-nano,
+// embeddings use text-embedding-3-small (1536 dimensions). Any model can be overridden via the environment
+// variables MAIN_MODEL/AUX_MODEL/EXTRACT_MODEL/EMBED_MODEL or in config/local.yaml. If llm.baseURL
+// (OPENAI_BASE_URL) is set, the OpenAI client sends requests to an OpenAI-compatible proxy (for example, LiteLLM);
+// an empty value means a direct call to https://api.openai.com/v1.
+import './bootstrap/dotenv.js'; // FIRST line: populates process.env before node-config is loaded
+import nodeConfig from 'config'; // node-config reads the config/ directory on first import
 import { normalizeVoiceId } from './voice/voices.js';
 
-// Готовое дерево конфигурации как обычный изменяемый объект. Форма совпадает со структурой config/default.yaml.
+// The ready configuration tree as a plain mutable object. Its shape matches the structure of config/default.yaml.
 export const config = nodeConfig.util.toObject();
 
-// Падение с понятным сообщением, если обязательные параметры не заданы.
-// Пустая строка, null или отсутствие ключа считаются «не задано» (пустой host у af-db-ts = выключенная БД).
+// Abort with a clear message if required parameters are not set.
+// An empty string, null, or a missing key all count as "not set" (an empty host for af-db-ts = disabled DB).
 export function requireConfig(paths) {
   const missing = paths.filter((p) => {
     const v = nodeConfig.has(p) ? nodeConfig.get(p) : undefined;
@@ -29,15 +29,16 @@ export function requireConfig(paths) {
   });
   if (missing.length) {
     throw new Error(
-      `Не заданы обязательные параметры конфигурации: ${missing.join(', ')}. ` +
-        `Задайте их в config/local.yaml или через переменные окружения ` +
-        `(см. config/custom-environment-variables.yaml).`,
+      `Required configuration parameters are not set: ${missing.join(', ')}. ` +
+        `Set them in config/local.yaml or via environment variables ` +
+        `(see config/custom-environment-variables.yaml).`,
     );
   }
 }
 
-// Универсальный минимум для любого процесса: рабочая БД и доступ к LLM.
-// Канальные и частные требования каждая точка входа проверяет сама (например, telegram.apiKey в боте).
+// Universal minimum for any process: a working DB and access to the LLM.
+// Channel-specific and per-entry-point requirements are checked by each entry point itself (e.g. telegram.apiKey in
+// the bot).
 requireConfig([
   'db.postgres.dbs.main.host',
   'db.postgres.dbs.main.database',
@@ -46,32 +47,32 @@ requireConfig([
   'llm.apiKey',
 ]);
 
-// --- Инварианты: тоже падаем с понятным сообщением ---
-// Гистерезис: целевой размер дайджеста строго меньше порога запуска, иначе сжатие будет срабатывать сразу
-// после самого себя и зациклится.
+// --- Invariants: also abort with a clear message ---
+// Hysteresis: the target digest size must be strictly less than the trigger threshold, otherwise compression would
+// fire immediately after itself and loop forever.
 if (config.historyCompression.shrinkTokens >= config.historyCompression.maxTokens) {
-  throw new Error('historyCompression.shrinkTokens должен быть строго меньше historyCompression.maxTokens.');
+  throw new Error('historyCompression.shrinkTokens must be strictly less than historyCompression.maxTokens.');
 }
-// Жёсткий потолок длины озвучиваемого текста.
+// Hard ceiling on the length of the text to be voiced.
 if (config.voiceOutput.maxChars > 500) {
-  throw new Error('voiceOutput.maxChars не может превышать 500.');
+  throw new Error('voiceOutput.maxChars cannot exceed 500.');
 }
 
-// --- Минимальные неизбежные нормализации (то, что нельзя выразить в YAML) ---
-// Пустой baseURL означает «прямой OpenAI API» — приводим '' к undefined для клиента OpenAI.
+// --- Minimal unavoidable normalizations (things that cannot be expressed in YAML) ---
+// An empty baseURL means "direct OpenAI API" — coerce '' to undefined for the OpenAI client.
 if (!config.llm.baseURL) {
   config.llm.baseURL = undefined;
 }
-// Тембр голоса канонизируем и проверяем на известность (только если синтез включён).
+// Canonicalize the voice timbre and check it is known (only if synthesis is enabled).
 if (config.voiceOutput.enabled) {
   const v = normalizeVoiceId(config.voiceOutput.voice);
   if (!v) {
-    throw new Error(`Неизвестный voiceOutput.voice: "${config.voiceOutput.voice}".`);
+    throw new Error(`Unknown voiceOutput.voice: "${config.voiceOutput.voice}".`);
   }
   config.voiceOutput.voice = v;
 }
 
-// debug в YAML и окружении — строка категорий через запятую; разбираем её только здесь.
+// debug in YAML and the environment is a comma-separated list of categories; we parse it only here.
 export function debugEnabled(category) {
   const list = String(config.debug || '')
     .split(',')

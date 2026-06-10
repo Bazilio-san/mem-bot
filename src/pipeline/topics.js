@@ -1,6 +1,6 @@
-// Тематический трекинг (критерий 13). Категоризация тем пользователя, обновление с экспоненциальным
-// сглаживанием вовлечённости и форматирование для справочного блока промпта. Закрывает анти-паттерн
-// «бот зациклился на одной теме»: недавние темы не повторяются, выгоревшие обходятся, живые развиваются.
+// Topic tracking (criterion 13). Categorization of the user's topics, updating with exponential
+// smoothing of engagement, and formatting for the prompt reference block. Closes the anti-pattern
+// "the bot got stuck on one topic": recent topics are not repeated, burned-out ones are avoided, lively ones develop.
 import { query } from '../db.js';
 
 const RECENT_DAYS = 3,
@@ -9,7 +9,7 @@ const BURNED_MENTIONS = 5,
   BURNED_ENGAGEMENT = 0.4,
   HIGH_ENERGY = 0.7;
 
-// Категоризация тем пользователя в рамках домена.
+// Categorization of the user's topics within a domain.
 export async function getTopicContext(userId, domainId) {
   const { rows } = await query(
     `SELECT topic_key, mention_count, user_engagement_score, last_mentioned_at, first_mentioned_at
@@ -49,7 +49,7 @@ export async function getTopicContext(userId, domainId) {
   };
 }
 
-// Обновление статистики тем. Оценка вовлечённости сглаживается: 70% прежней + 30% новой.
+// Updating topic statistics. The engagement score is smoothed: 70% of the previous + 30% of the new.
 export async function upsertTopicMentions(userId, domainId, topics) {
   for (const t of topics) {
     if (!t.topic_key) {
@@ -68,7 +68,7 @@ export async function upsertTopicMentions(userId, domainId, topics) {
   }
 }
 
-// Форматирование тем для справочного блока промпта.
+// Formatting topics for the prompt reference block.
 export function formatTopicContext(ctx) {
   const s = [];
   if (ctx.recentTopics.length) {

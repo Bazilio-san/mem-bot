@@ -1,10 +1,10 @@
 import { setReplyMode } from '../../../repo.js';
 
-// Переключение формы ответа бота: текстом или голосом. Общедоступный инструмент (это безобидная
-// пользовательская настройка), подключается только при включённом голосовом выводе (VOICE_OUTPUT_ENABLED).
-// Сам синтез речи здесь не вызывается — это обязанность канала доставки; ядро лишь хранит и возвращает
-// предпочтение. Исполнитель помечает выбранный режим в контексте запроса (ctx.replyMode), чтобы смена
-// подействовала уже на текущий ответ (handleMessage берёт итоговый режим из ctx.replyMode).
+// Switches the bot's reply form between text and voice. A publicly available tool (this is a harmless
+// user setting), enabled only when voice output is turned on (VOICE_OUTPUT_ENABLED). Speech synthesis
+// itself is not invoked here — that is the delivery channel's responsibility; the core only stores and
+// returns the preference. The executor marks the chosen mode in the request context (ctx.replyMode), so
+// the change takes effect already on the current reply (handleMessage takes the final mode from ctx.replyMode).
 export const setReplyModeTool = {
   name: 'voice_or_text',
   title: 'Настраиваю формат ответа...',

@@ -4,31 +4,31 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { loadMcpServers } from './config.js';
 import { debugEnabled } from '../config.js';
 
-const CALL_TIMEOUT_MS = 90_000; // предел ожидания ответа инструмента MCP; зависший сервер не блокирует агента
+const CALL_TIMEOUT_MS = 90_000; // wait limit for an MCP tool response; a hung server doesn't block the agent
 
-// Трассировка вызовов инструментов MCP: запросы и ответы. Включается категорией DEBUG=mcp:tool (или DEBUG=*).
-// Идёт в stderr, чтобы не смешиваться с пользовательским выводом, и по умолчанию выключена.
+// Tracing of MCP tool calls: requests and responses. Enabled by the DEBUG=mcp:tool category (or DEBUG=*).
+// Goes to stderr so it doesn't mix with user output, and is off by default.
 function dbgTool(...args) {
   if (debugEnabled('mcp:tool')) {
     console.error('[mcp:tool]', ...args);
   }
 }
 
-// Одно живое подключение к серверу. Храним клиента, чтобы переиспользовать соединение между вызовами
-// и уметь переподключаться при разрыве, не пересобирая реестр инструментов.
+// A single live connection to a server. We keep the client to reuse the connection across calls and to be
+// able to reconnect on a drop without rebuilding the tool registry.
 class McpConnection {
   constructor(server) {
     this.server = server;
     this.client = null;
   }
 
-  // Установить соединение, если его ещё нет. Повторный вызов при живом клиенте — это пустая операция.
+  // Establish the connection if there isn't one yet. A repeat call with a live client is a no-op.
   async ensureConnected() {
     if (this.client) {
       return this.client;
     }
     const client = new Client({ name: 'mem-bot', version: '1.0.0' });
-    // Заголовки транспорта пробрасываем только если они заданы в конфигурации — это место для будущего токена.
+    // Forward transport headers only if they are set in the configuration — this is the place for a future token.
     const options = this.server.headers ? { requestInit: { headers: this.server.headers } } : undefined;
     const transport = new StreamableHTTPClientTransport(new URL(this.server.url), options);
     await client.connect(transport);
@@ -36,7 +36,7 @@ class McpConnection {
     return client;
   }
 
-  // Принудительно сбросить клиента — следующий ensureConnected() создаст новое соединение.
+  // Forcibly reset the client — the next ensureConnected() will create a new connection.
   async reset() {
     const old = this.client;
     this.client = null;
@@ -44,12 +44,12 @@ class McpConnection {
       try {
         await old.close();
       } catch {
-        /* сервер уже мог разорвать связь — это не ошибка */
+        /* the server may have already dropped the connection — this is not an error */
       }
     }
   }
 
-  // Получить полный список инструментов сервера с учётом постраничной выдачи (курсора).
+  // Get the full list of server tools, accounting for paginated output (cursor).
   async listAllTools() {
     const client = await this.ensureConnected();
     const all = [];
@@ -62,25 +62,25 @@ class McpConnection {
     return all;
   }
 
-  // Вызвать инструмент. При ошибке, похожей на разрыв связи, переподключаемся один раз и повторяем.
-  // Каждый запрос и ответ трассируется под категорией DEBUG=mcp:tool.
+  // Call a tool. On an error that looks like a dropped connection, reconnect once and retry.
+  // Every request and response is traced under the DEBUG=mcp:tool category.
   async call(name, args) {
     const label = `${this.server.alias}__${name}`;
-    dbgTool(`-> ${label} запрос:`, JSON.stringify(args || {}));
+    dbgTool(`-> ${label} request:`, JSON.stringify(args || {}));
     try {
       const res = await this.invokeOnce(name, args);
-      dbgTool(`<- ${label} ответ`, res?.isError ? '(isError)' : '(ok)', ':', JSON.stringify(res?.content ?? res));
+      dbgTool(`<- ${label} response`, res?.isError ? '(isError)' : '(ok)', ':', JSON.stringify(res?.content ?? res));
       return res;
     } catch (err) {
       if (!isConnectionError(err)) {
-        dbgTool(`xx ${label} ошибка:`, String(err?.message || err));
+        dbgTool(`xx ${label} error:`, String(err?.message || err));
         throw err;
       }
-      dbgTool(`-- ${label} разрыв связи, переподключаюсь и повторяю:`, String(err?.message || err));
+      dbgTool(`-- ${label} connection dropped, reconnecting and retrying:`, String(err?.message || err));
       await this.reset();
       const res = await this.invokeOnce(name, args);
       dbgTool(
-        `<- ${label} ответ после переподключения`,
+        `<- ${label} response after reconnect`,
         res?.isError ? '(isError)' : '(ok)',
         ':',
         JSON.stringify(res?.content ?? res),
@@ -89,17 +89,18 @@ class McpConnection {
     }
   }
 
-  // Один сетевой вызов инструмента без логики повтора — общая часть для первой попытки и повтора.
-  // Тайм-аут идёт ТРЕТЬИМ аргументом callTool(params, resultSchema, options): второй аргумент — это схема
-  // разбора ответа, и опции вызова туда класть нельзя, иначе SDK примет их за схему и валидация упадёт.
+  // A single network tool call without retry logic — the shared part for the first attempt and the retry.
+  // The timeout is the THIRD argument of callTool(params, resultSchema, options): the second argument is the
+  // response-parsing schema, and call options must not go there, otherwise the SDK treats them as a schema
+  // and validation fails.
   async invokeOnce(name, args) {
     const client = await this.ensureConnected();
     return client.callTool({ name, arguments: args || {} }, undefined, { timeout: CALL_TIMEOUT_MS });
   }
 }
 
-// Грубая, но достаточная эвристика «это разрыв связи, имеет смысл переподключиться».
-// Тайм-аут вызова сюда намеренно не попадает: повторять заведомо долгий вызов смысла нет.
+// A rough but sufficient heuristic for "this is a dropped connection, worth reconnecting".
+// A call timeout intentionally does not fall here: retrying a known-slow call makes no sense.
 function isConnectionError(err) {
   const msg = String(err?.message || err).toLowerCase();
   return (
@@ -112,7 +113,7 @@ function isConnectionError(err) {
   );
 }
 
-// Текстовые блоки ответа MCP склеиваем в одну строку — модели нужен текст, а не структура транспорта.
+// We join the text blocks of an MCP response into one string — the model needs text, not transport structure.
 function describeContent(content) {
   if (!Array.isArray(content)) {
     return '';
@@ -123,21 +124,21 @@ function describeContent(content) {
     .join('\n');
 }
 
-// Превратить одно описание инструмента MCP в объект формата локального реестра инструментов.
+// Turn a single MCP tool description into an object in the local tool registry format.
 function wrapMcpTool(connection, server, mcpTool) {
   const prefixedName = `${server.alias}__${mcpTool.name}`;
   const requiresAdmin = server.requiresAdmin === true;
   return {
     name: prefixedName,
-    // «Голое» имя инструмента на сервере (без префикса псевдонима) и сам псевдоним. Нужны фильтру видимости
-    // по активному skill: skill перечисляет инструменты под логическим именем без префикса, поэтому сопоставление
-    // должно уметь сводить «yafly__search_flights» к «search_flights».
+    // The "bare" tool name on the server (without the alias prefix) and the alias itself. Needed by the
+    // visibility filter for the active skill: a skill lists tools under a logical name without a prefix, so
+    // the matching must be able to reduce "yafly__search_flights" to "search_flights".
     mcpName: mcpTool.name,
     mcpAlias: server.alias,
     title: `Вызываю инструмент ${server.title}: ${mcpTool.name}...`,
     requiresAdmin,
-    // Если инструмент только для администратора, прячем его и из справки о возможностях для остальных,
-    // повторяя поведение локальных admin-инструментов (см. global-fact-*). Иначе инструмент виден всегда.
+    // If the tool is admin-only, we also hide it from the capability help for everyone else, mirroring the
+    // behavior of local admin tools (see global-fact-*). Otherwise the tool is always visible.
     isEnabled: requiresAdmin ? (ctx) => ctx.isAdmin === true : undefined,
     definition: {
       type: 'function',
@@ -148,7 +149,7 @@ function wrapMcpTool(connection, server, mcpTool) {
       },
     },
     async handler(ctx, args) {
-      // Имя на сервере — без префикса; префикс существует только на стороне модели.
+      // The name on the server has no prefix; the prefix exists only on the model side.
       const res = await connection.call(mcpTool.name, args);
       if (res.isError) {
         return { error: `Ошибка инструмента ${prefixedName}: ${describeContent(res.content)}` };
@@ -158,27 +159,27 @@ function wrapMcpTool(connection, server, mcpTool) {
   };
 }
 
-// Вывести в журнал список MCP-серверов, объявленных в конфигурации (.mcp.json), включая выключенные.
-// Это даёт на старте полную картину «что вообще заявлено к подключению» ещё до попыток соединения.
+// Log the list of MCP servers declared in the configuration (.mcp.json), including disabled ones.
+// At startup this gives a full picture of "what is declared for connection at all" before any connection attempts.
 function logDeclaredServers(servers) {
   if (servers.length === 0) {
     console.log(
-      'MCP: в конфигурации (.mcp.json) не объявлено ни одного сервера — внешние инструменты не подключаются.',
+      'MCP: no servers are declared in the configuration (.mcp.json) — no external tools are connected.',
     );
     return;
   }
-  console.log(`MCP: в конфигурации объявлено серверов — ${servers.length}. Полный список:`);
+  console.log(`MCP: servers declared in the configuration — ${servers.length}. Full list:`);
   for (const s of servers) {
-    const state = s.enabled ? 'включён' : 'выключен (disabled)';
-    const admin = s.requiresAdmin ? ', доступен только администратору' : '';
-    console.log(`  • «${s.title}» [псевдоним ${s.alias}] — ${state}, транспорт HTTP, адрес ${s.url}${admin}.`);
+    const state = s.enabled ? 'enabled' : 'disabled';
+    const admin = s.requiresAdmin ? ', admin-only' : '';
+    console.log(`  • "${s.title}" [alias ${s.alias}] — ${state}, HTTP transport, address ${s.url}${admin}.`);
   }
 }
 
-// Подключиться ко всем включённым серверам и вернуть готовые к регистрации обёртки инструментов.
-// Перед подключением в журнал выводится полный объявленный список серверов, а затем по каждому
-// включённому серверу — факт подключения: успех (с временем и числом инструментов) либо причина сбоя.
-// Недоступный сервер логируется и пропускается: агент продолжает работать на остальных инструментах.
+// Connect to all enabled servers and return tool wrappers ready for registration.
+// Before connecting, the full declared server list is logged, and then for each enabled server the
+// connection result is logged: success (with time and tool count) or the failure reason.
+// An unreachable server is logged and skipped: the agent keeps working on the remaining tools.
 export async function loadMcpTools() {
   const servers = loadMcpServers();
   logDeclaredServers(servers);
@@ -188,7 +189,7 @@ export async function loadMcpTools() {
   let failedCount = 0;
   for (const server of servers) {
     if (!server.enabled) {
-      console.log(`MCP «${server.title}»: пропущен, так как выключен в конфигурации.`);
+      console.log(`MCP "${server.title}": skipped because it is disabled in the configuration.`);
       continue;
     }
     const connection = new McpConnection(server);
@@ -200,22 +201,22 @@ export async function loadMcpTools() {
       }
       connectedCount += 1;
       console.log(
-        `MCP «${server.title}» (${server.url}): подключение успешно за ${Date.now() - startedAt} мс, ` +
-          `получено инструментов — ${tools.length}.`,
+        `MCP "${server.title}" (${server.url}): connected successfully in ${Date.now() - startedAt} ms, ` +
+          `tools received — ${tools.length}.`,
       );
     } catch (err) {
       failedCount += 1;
       console.error(
-        `MCP «${server.title}» (${server.url}): подключение не удалось за ${Date.now() - startedAt} мс — ` +
-          `${err.message}. Сервер пропущен, остальные инструменты остаются доступны.`,
+        `MCP "${server.title}" (${server.url}): connection failed in ${Date.now() - startedAt} ms — ` +
+          `${err.message}. Server skipped, the remaining tools stay available.`,
       );
     }
   }
 
   const enabledCount = servers.filter((s) => s.enabled).length;
   console.log(
-    `MCP: итог подключения — успешно ${connectedCount} из ${enabledCount} включённых ` +
-      `(сбоев ${failedCount}), всего получено инструментов — ${collected.length}.`,
+    `MCP: connection summary — ${connectedCount} of ${enabledCount} enabled succeeded ` +
+      `(${failedCount} failures), total tools received — ${collected.length}.`,
   );
   return collected;
 }

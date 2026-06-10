@@ -1,10 +1,10 @@
-// Клиент к LLM через OpenAI SDK. Если OPENAI_BASE_URL задан, SDK работает с OpenAI-совместимым прокси
-// вроде LiteLLM; если не задан, обращается напрямую к OpenAI API.
-// Используется Chat Completions API (а не Responses API), потому что он совместим с обоими режимами.
-// Доступны три операции: обычный чат с инструментами, чат со строгим JSON по схеме и получение эмбеддингов.
-// Каждая операция как побочный эффект логирует обращение в журнал (src/pipeline/llm-log.js): замеряет время,
-// извлекает токены из ответа провайдера и кладёт запись в буфер. Логирование обёрнуто в защиту от исключений,
-// поэтому сбой журнала не влияет на возвращаемый результат, а форма возвращаемого значения не меняется.
+// LLM client via the OpenAI SDK. If OPENAI_BASE_URL is set, the SDK works with an OpenAI-compatible proxy
+// like LiteLLM; if not set, it talks directly to the OpenAI API.
+// The Chat Completions API is used (not the Responses API) because it is compatible with both modes.
+// Three operations are available: a regular chat with tools, a chat with strict schema-based JSON, and embeddings.
+// As a side effect, each operation logs the call to the journal (src/pipeline/llm-log.js): it measures the time,
+// extracts tokens from the provider's response and puts a record into the buffer. Logging is wrapped in exception
+// protection, so a journal failure does not affect the returned result, and the shape of the return value stays the same.
 import OpenAI from 'openai';
 import { config, debugEnabled } from './config.js';
 import { logLlmRequest } from './pipeline/llm-log.js';
@@ -17,16 +17,16 @@ function dbg(...args) {
   }
 }
 
-// Безопасно залогировать обращение: любая ошибка журналирования гасится, чтобы не повлиять на ответ модели.
+// Safely log a call: any logging error is swallowed so it does not affect the model's response.
 function safeLog(input) {
   try {
     logLlmRequest(input);
   } catch {
-    // журнал не должен ломать основной поток
+    // the journal must not break the main flow
   }
 }
 
-// Извлечь токены из объекта usage ответа провайдера в единый вид. Поля могут отсутствовать (тогда null).
+// Extract tokens from the provider's usage object into a uniform shape. Fields may be missing (then null).
 function extractUsage(usage) {
   if (!usage) {
     return { promptTokens: null, completionTokens: null, totalTokens: null, cachedTokens: 0 };
@@ -39,9 +39,9 @@ function extractUsage(usage) {
   };
 }
 
-// Чат с поддержкой инструментов. Возвращает объект message ответа модели
-// (с полями content и tool_calls), чтобы вызывающий код мог отработать цикл инструментов.
-// Необязательный параметр kind задаёт тип запроса для журнала (по умолчанию выводится по конечной точке).
+// Chat with tool support. Returns the model's response message object
+// (with content and tool_calls fields), so the caller can run the tool loop.
+// The optional kind parameter sets the request type for the journal (defaults to being derived from the endpoint).
 export async function chat({ model = config.llm.mainModel, messages, tools, toolChoice, kind }) {
   const body = { model, messages };
   if (tools && tools.length) {
@@ -74,19 +74,19 @@ export async function chat({ model = config.llm.mainModel, messages, tools, tool
   return msg;
 }
 
-// --- Сборка потокового ответа модели -----------------------------------------
-// При потоковом вызове Chat Completions ответ приходит частями (chunks). Текст ответа лежит
-// в delta.content, а вызовы инструментов — в delta.tool_calls, причём части одного вызова
-// приходят по индексу: сначала может прийти id, затем имя функции, затем много фрагментов
-// аргументов. Эти три чистые функции собирают из потока такой же финальный объект message,
-// какой возвращает непотоковый chat, и потому покрыты модульными тестами отдельно от сети.
+// --- Assembling the streaming model response ---------------------------------
+// In a streaming Chat Completions call the response arrives in parts (chunks). The response text is in
+// delta.content, and tool calls are in delta.tool_calls, with parts of a single call arriving by index:
+// first the id may arrive, then the function name, then many fragments of the arguments. These three pure
+// functions assemble from the stream the same final message object that the non-streaming chat returns,
+// and are therefore covered by unit tests separately from the network.
 
-// Создать пустой аккумулятор потокового ответа.
+// Create an empty accumulator for the streaming response.
 export function createDeltaAccumulator() {
   return { role: 'assistant', content: '', tool_calls: [] };
 }
 
-// Добавить одну delta (содержимое choices[0].delta из очередного chunk) в аккумулятор.
+// Add a single delta (the choices[0].delta content of the next chunk) to the accumulator.
 export function accumulateChatDelta(acc, delta) {
   if (!delta) {
     return acc;
@@ -119,8 +119,8 @@ export function accumulateChatDelta(acc, delta) {
   return acc;
 }
 
-// Превратить аккумулятор в финальный объект message, идентичный по форме ответу непотокового chat:
-// поле tool_calls присутствует только если инструменты действительно вызывались.
+// Turn the accumulator into a final message object identical in shape to the non-streaming chat response:
+// the tool_calls field is present only if tools were actually called.
 export function finalizeChatMessage(acc) {
   const message = { role: 'assistant', content: acc.content };
   const calls = acc.tool_calls.filter(Boolean);
@@ -130,14 +130,14 @@ export function finalizeChatMessage(acc) {
   return message;
 }
 
-// Потоковый аналог chat: возвращает такой же финальный объект message (с полями content и tool_calls),
-// но по мере поступления текста вызывает onDelta(chunkText), чтобы канал мог показывать ответ постепенно.
-// Если инструменты не вызываются, onDelta получает текст ответа по частям; на ходу аргументы инструментов
-// не разбираются — это делает вызывающий код после получения готового сообщения.
-// stream_options.include_usage просит провайдера прислать финальный чанк с заполненным usage, чтобы по
-// завершении потока залогировать фактические токены. Откат на непотоковый chat при ошибке делает вызывающий
-// код (см. runModelTurn в src/agent.js) — там логирование выполняет уже сам chat, поэтому здесь повторно не
-// логируем путь ошибки.
+// Streaming counterpart of chat: returns the same final message object (with content and tool_calls fields),
+// but as text arrives it calls onDelta(chunkText) so the channel can show the response incrementally.
+// If tools are not called, onDelta receives the response text in parts; tool arguments are not parsed on the
+// fly — the caller does that after receiving the finished message.
+// stream_options.include_usage asks the provider to send a final chunk with usage filled in, so that on
+// stream completion the actual tokens can be logged. The fallback to non-streaming chat on error is done by the
+// caller (see runModelTurn in src/agent.js) — there chat itself does the logging, so we do not log the error
+// path again here.
 export async function chatStream({
   model = config.llm.mainModel,
   messages,
@@ -165,7 +165,7 @@ export async function chatStream({
   let usageRaw = null;
   for await (const chunk of stream) {
     chunks++;
-    // Финальный чанк с usage обычно приходит с пустым choices — забираем последний непустой usage.
+    // The final chunk with usage usually arrives with empty choices — we take the last non-empty usage.
     if (chunk.usage) {
       usageRaw = chunk.usage;
     }
@@ -195,11 +195,11 @@ export async function chatStream({
   return message;
 }
 
-// Чат со структурированным выводом по JSON Schema. Возвращает разобранный объект.
-// Используется режим json_object с описанием схемы прямо в промпте: строгий режим
-// json_schema в strict-режиме отклоняет схемы со свободными полями (data, entities),
-// поэтому надёжнее задавать схему текстом и требовать соответствия ей.
-// Необязательный параметр kind задаёт тип запроса для журнала.
+// Chat with structured output per a JSON Schema. Returns the parsed object.
+// The json_object mode is used with the schema described directly in the prompt: the strict
+// json_schema mode rejects schemas with free-form fields (data, entities),
+// so it is more reliable to specify the schema as text and require conformance to it.
+// The optional kind parameter sets the request type for the journal.
 export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result', kind }) {
   const schemaText = JSON.stringify(schema);
   const sys = `${system || ''}
@@ -245,18 +245,18 @@ ${schemaText}
   try {
     return JSON.parse(content);
   } catch {
-    // На случай, если модель всё же обернула JSON в текст — вырезаем первый объект.
+    // In case the model still wrapped the JSON in text — extract the first object.
     const m = content.match(/\{[\s\S]*\}/);
     if (m) {
       return JSON.parse(m[0]);
     }
-    throw new Error('Модель вернула не-JSON: ' + content.slice(0, 200));
+    throw new Error('Model returned non-JSON: ' + content.slice(0, 200));
   }
 }
 
-// Получить эмбеддинг текста для смыслового поиска памяти. При ошибке возвращает null,
-// тогда система откатывается на полнотекстовый и структурный поиск без векторов.
-// Необязательный параметр kind задаёт тип запроса для журнала (по умолчанию 'embedding').
+// Get a text embedding for semantic memory search. On error it returns null,
+// in which case the system falls back to full-text and structural search without vectors.
+// The optional kind parameter sets the request type for the journal (defaults to 'embedding').
 export async function embed(text, { kind } = {}) {
   const model = config.llm.embedModel;
   const startedAt = Date.now();
@@ -282,7 +282,7 @@ export async function embed(text, { kind } = {}) {
       status: 'error',
       error: err.message || err,
     });
-    dbg('эмбеддинг недоступен:', err.message);
+    dbg('embedding unavailable:', err.message);
     return null;
   }
 }

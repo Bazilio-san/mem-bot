@@ -1,11 +1,11 @@
-// Раскладка эмодзи Telegram для системы реакций. Здесь и только здесь живёт соответствие между конкретными
-// эмодзи Telegram и абстрактными ключами реакций ядра (like, okay, heart, …). Ядро (src/pipeline/reactions.js)
-// оперирует только абстрактными ключами и про эмодзи Telegram ничего не знает: вход с эмодзи приводится к ключу
-// здесь, а исходящий ключ разворачивается обратно в эмодзи для отправки.
+// Telegram emoji layout for the reaction system. Here and only here lives the mapping between concrete Telegram
+// emoji and the core's abstract reaction keys (like, okay, heart, …). The core (src/pipeline/reactions.js)
+// operates only on abstract keys and knows nothing about Telegram emoji: an incoming emoji is reduced to a key
+// here, and an outgoing key is expanded back into an emoji for sending.
 import { REACTION_KEYS } from '../pipeline/reactions.js';
 
-// Вход: эмодзи реакции Telegram приводится к абстрактному ключу реакции. Несколько похожих эмодзи могут
-// соответствовать одному ключу (например, 😁/🤣/😄 — это laugh).
+// Input: a Telegram reaction emoji is reduced to an abstract reaction key. Several similar emoji may map to one
+// key (for example, 😁/🤣/😄 are all laugh).
 const emojiToKey = new Map([
   ['👍', 'like'],
   ['👌', 'okay'],
@@ -23,7 +23,7 @@ const emojiToKey = new Map([
   ['😭', 'sad'],
 ]);
 
-// Выход: абстрактный ключ реакции разворачивается в эмодзи Telegram для метода setMessageReaction.
+// Output: an abstract reaction key is expanded into a Telegram emoji for the setMessageReaction method.
 const keyToEmoji = {
   like: '👍',
   okay: '👌',
@@ -35,11 +35,11 @@ const keyToEmoji = {
   sad: '😢',
 };
 
-// Ключи реакций, которые Telegram-канал умеет ставить исходящими (для профиля возможностей доставки).
+// Reaction keys the Telegram channel can set as outgoing (for the delivery capability profile).
 export const TELEGRAM_REACTION_KEYS = REACTION_KEYS.filter((key) => key in keyToEmoji);
 
-// Привести входящую реакцию Telegram (объект из обновления message_reaction) к абстрактному ключу.
-// Возвращает null, если это не эмодзи-реакция или эмодзи не отображается ни на один известный ключ.
+// Reduce an incoming Telegram reaction (the object from a message_reaction update) to an abstract key.
+// Returns null if it is not an emoji reaction or the emoji does not map to any known key.
 export function normalizeTelegramReaction(reaction) {
   if (!reaction || reaction.type !== 'emoji') {
     return null;
@@ -47,7 +47,7 @@ export function normalizeTelegramReaction(reaction) {
   return emojiToKey.get(reaction.emoji) || null;
 }
 
-// Развернуть абстрактный ключ реакции в эмодзи Telegram. Возвращает null для неизвестного ключа.
+// Expand an abstract reaction key into a Telegram emoji. Returns null for an unknown key.
 export function reactionKeyToEmoji(key) {
   return REACTION_KEYS.includes(key) ? keyToEmoji[key] || null : null;
 }

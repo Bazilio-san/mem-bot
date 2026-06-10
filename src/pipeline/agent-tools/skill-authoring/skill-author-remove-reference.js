@@ -1,7 +1,7 @@
 import { removeReference } from '../../skills/writer.js';
 import { authoringEnabled } from '../../skills/authoring-support.js';
 
-// Удалить файл справочника навыка (требует подтверждения).
+// Delete a skill reference file (requires confirmation).
 export const skillAuthorRemoveReferenceTool = {
   name: 'skill_author_remove_reference',
   title: 'Удаляю справочник навыка...',
@@ -33,7 +33,7 @@ The path must be relative inside references/** (no absolute paths or "..").`,
   },
   async handler(ctx, args) {
     if (args.confirm !== true) {
-      return { removed: false, error: 'Нужно подтверждение confirm=true.' };
+      return { removed: false, error: 'Confirmation required: confirm=true.' };
     }
     return removeReference(args.name, args.path, { confirm: true });
   },

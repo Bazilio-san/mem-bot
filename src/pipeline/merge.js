@@ -1,12 +1,12 @@
-// Контур записи памяти: фильтр приватности → поиск похожих → решение о слиянии →
-// сохранение/обновление/архивирование. Не плодит дубли: обновляет существующий факт
-// или помечает старый как заменённый.
+// Memory write loop: privacy filter -> search for similar -> merge decision ->
+// save/update/archive. Does not breed duplicates: it updates an existing fact
+// or marks the old one as superseded.
 import { query, vectorToSql } from '../db.js';
 import { getDomainId } from '../repo.js';
 import { validateAndCanonicalize } from '../schema/validate.js';
 import { buildDedupeIdentity, decideDedupe, embedForDedupe, findDedupeCandidates } from './memory-dedupe.js';
 
-// Порог автосохранения (раздел 19): важность ≥0.6, уверенность ≥0.7, не чувствительное.
+// Auto-save threshold (section 19): importance >=0.6, confidence >=0.7, not sensitive.
 function passesAutoSave(c) {
   if (c.requires_confirmation) {
     return false;
@@ -54,7 +54,7 @@ async function insertMemory(userId, domainId, c, sourceConversationId, extraMeta
   return rows[0];
 }
 
-// Обновить существующий факт новым значением, сохранив историю предыдущего значения.
+// Update an existing fact with a new value, preserving the history of the previous value.
 async function updateMemory(targetId, c, extraMeta = null, opts = {}) {
   const vec = opts.vector ?? (await embedForDedupe(c));
   const { rows: prev } = await query('SELECT memory_text, data FROM mem.memory_items WHERE id = $1', [targetId]);
@@ -85,7 +85,7 @@ async function updateMemory(targetId, c, extraMeta = null, opts = {}) {
   return targetId;
 }
 
-// Архивировать старый факт, пометив, чем он заменён.
+// Archive the old fact, marking what it was replaced by.
 async function archiveMemory(oldId, replacedById, extraMeta = {}) {
   await query(
     `UPDATE mem.memory_items
@@ -95,27 +95,27 @@ async function archiveMemory(oldId, replacedById, extraMeta = {}) {
   );
 }
 
-// Обработать один кандидат. Возвращает применённое действие.
+// Process a single candidate. Returns the applied action.
 export async function processCandidate(userId, domainKey, candidate, sourceConversationId = null) {
   const domainId = await getDomainId(domainKey);
 
-  // Фильтр приватности: чувствительное и неподтверждённое не сохраняем как обычный факт.
+  // Privacy filter: do not save sensitive and unconfirmed data as a regular fact.
   if (candidate.requires_confirmation || candidate.sensitivity === 'high' || candidate.sensitivity === 'secret') {
     return { action: 'needs_confirmation', candidate };
   }
   if (!passesAutoSave(candidate)) {
-    return { action: 'ignored', reason: 'низкая важность/уверенность', candidate };
+    return { action: 'ignored', reason: 'low importance/confidence', candidate };
   }
 
-  // Применить схему домена: проверить data и привести entity_key к словарю.
-  // Схема обязательна для предметных фактов: если у домена нет схемы, сущность не объявлена
-  // или data не проходит валидацию — факт отклоняется и НЕ сохраняется.
+  // Apply the domain schema: validate data and canonicalize entity_key against the vocabulary.
+  // The schema is mandatory for domain facts: if the domain has no schema, the entity is not declared,
+  // or data fails validation, the fact is rejected and NOT saved.
   const v = await validateAndCanonicalize(domainKey, candidate);
   if (!v.ok) {
     return { action: 'rejected', reason: v.reason, issues: v.issues, candidate: v.candidate };
   }
   ({ candidate } = v);
-  // Метаданные схемы (версия и замечания канонизации) кладём в строку факта.
+  // Schema metadata (version and canonicalization notes) is placed into the fact row.
   const schemaMeta =
     v.schema_version == null
       ? null
@@ -194,7 +194,7 @@ export async function processCandidate(userId, domainKey, candidate, sourceConve
   return { action: 'ignored', candidate };
 }
 
-// Обработать все кандидаты после ответа.
+// Process all candidates after the reply.
 export async function persistCandidates(userId, domainKey, candidates, sourceConversationId = null) {
   const results = [];
   for (const c of candidates) {

@@ -1,7 +1,7 @@
 import { proposeSchemaEdit } from '../../skills/author.js';
 import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/authoring-support.js';
 
-// Точечно поправить схему домена навыка: добавить/убрать сущность, поле, значение словаря, синоним, режим ключа.
+// Make targeted edits to a skill's domain schema: add/remove an entity, field, vocabulary value, synonym, or key mode.
 export const skillAuthorSchemaEditTool = {
   name: 'skill_author_schema_edit',
   title: 'Правлю схему навыка...',
@@ -37,7 +37,7 @@ unless apply=true.`,
   async handler(ctx, args) {
     const skill = editableOrStaged(ctx, args.name);
     if (!skill.definition) {
-      return { error: 'У навыка нет схемы. Сначала создайте её через skill_author_schema_generate.' };
+      return { error: 'The skill has no schema. Create one first via skill_author_schema_generate.' };
     }
     const { definition, summary, issues } = await proposeSchemaEdit({
       definition: skill.definition,

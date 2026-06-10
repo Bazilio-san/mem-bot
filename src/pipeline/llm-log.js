@@ -1,17 +1,18 @@
-// Эмиттер журнала LLM-запросов: единая точка записи с асинхронной пакетной выгрузкой в БД.
-// Логирование не блокирует ответ пользователю и никогда не роняет основной поток: любая ошибка подготовки
-// или вставки гасится внутри. Записи копятся в буфере, фоновый таймер раз в config.llmLog.flushIntervalMs
-// забирает пакет и одним многострочным INSERT пишет его в log.llm_request; триггер БД сам заполняет
-// узкую таблицу log.llm_usage. При штатной остановке flushLlmLog() сливает остаток буфера.
+// LLM request log emitter: a single write point with asynchronous batched flushing to the database.
+// Logging doesn't block the user's response and never crashes the main flow: any preparation or insertion
+// error is swallowed inside. Records accumulate in a buffer; a background timer, once per
+// config.llmLog.flushIntervalMs, takes a batch and writes it to log.llm_request with a single multi-row
+// INSERT; a database trigger fills the narrow log.llm_usage table itself. On a graceful shutdown
+// flushLlmLog() drains the rest of the buffer.
 import { config } from '../config.js';
 import { query } from '../db.js';
 import { getLlmContext } from './llm-context.js';
 import { priceUsd } from './llm-pricing.js';
 
-// Словарь типов запросов (request_kind). Единственное место, куда добавляется новый тип. Для конечных
-// точек со строго одним назначением (эмбеддинги, распознавание и синтез речи) тип выводится по конечной
-// точке. Для chat.completions тип ОБЯЗАН передаваться вызывающим кодом явно: у этой конечной точки много
-// разных назначений, поэтому угаданного значения по умолчанию для неё нет.
+// Dictionary of request kinds (request_kind). The single place where a new kind is added. For endpoints
+// with a strictly single purpose (embeddings, speech recognition and synthesis) the kind is inferred from
+// the endpoint. For chat.completions the kind MUST be passed by the calling code explicitly: this endpoint
+// has many different purposes, so there's no guessed default value for it.
 export const REQUEST_KINDS = Object.freeze({
   MAIN_AGENT_ANSWER: 'main_agent_answer',
   DELIVERY_INTENT: 'delivery_intent',
@@ -26,31 +27,31 @@ export const REQUEST_KINDS = Object.freeze({
   EMBEDDING: 'embedding',
   STT: 'stt',
   TTS: 'tts',
-  // Запасной маркер: тип запроса не был передан. Это сигнал об ошибке вызывающего кода — каждый вызов
-  // chat.completions обязан указывать kind. Записи с этим типом в журнале выдают «нелегальные» вызовы.
+  // Fallback marker: the request kind wasn't passed. This signals a bug in the calling code — every
+  // chat.completions call must specify kind. Records with this kind in the log expose "illegal" calls.
   UNTYPED: 'untyped',
 });
 
-// Тип запроса по умолчанию для конечной точки. Намеренно НЕ содержит chat.completions: для неё пропуск
-// kind считается ошибкой и помечается REQUEST_KINDS.UNTYPED, а не подменяется правдоподобным значением.
+// Default request kind by endpoint. Deliberately does NOT include chat.completions: for it a missing
+// kind is treated as an error and marked REQUEST_KINDS.UNTYPED, rather than substituted with a plausible value.
 const DEFAULT_KIND_BY_ENDPOINT = {
   embeddings: REQUEST_KINDS.EMBEDDING,
   'audio.transcriptions': REQUEST_KINDS.STT,
   'audio.speech': REQUEST_KINDS.TTS,
 };
 
-// Функция записи в БД. По умолчанию — общая обёртка query() из src/db.js; в модульных тестах подменяется
-// через __setDbQueryForTests, чтобы проверять буферизацию и выгрузку без реальной базы.
+// The database write function. By default it's the shared query() wrapper from src/db.js; in unit tests it's
+// swapped via __setDbQueryForTests to verify buffering and flushing without a real database.
 let dbQuery = query;
 
-// Подменить функцию записи в БД (только для тестов). Возвращает прежнюю реализацию, чтобы её можно было вернуть.
+// Swap the database write function (tests only). Returns the previous implementation so it can be restored.
 export function __setDbQueryForTests(fn) {
   const prev = dbQuery;
   dbQuery = fn || query;
   return prev;
 }
 
-// Колонки полного журнала в порядке вставки. Индексы payload и binary_meta помечены как jsonb.
+// Columns of the full log in insertion order. The payload and binary_meta indexes are marked as jsonb.
 export const COLUMNS = [
   'request_id',
   'request_kind',
@@ -77,17 +78,17 @@ export const COLUMNS = [
 ];
 const JSONB_INDEXES = new Set([COLUMNS.indexOf('payload'), COLUMNS.indexOf('binary_meta')]);
 
-// Внутренний буфер подготовленных записей и состояние фоновой выгрузки.
+// Internal buffer of prepared records and the background flush state.
 const buffer = [];
 let flushTimer = null;
 let flushing = false;
-// Жёсткий потолок размера буфера: при недоступной БД он не должен расти бесконечно. Сверх потолка
-// отбрасываем самые старые записи с предупреждением (явное усечение, без тихой потери).
+// Hard cap on the buffer size: with the database unavailable it must not grow without bound. Above the cap
+// we drop the oldest records with a warning (explicit truncation, no silent loss).
 const MAX_BUFFER = 5000;
-// Порог досрочной выгрузки: как только в буфере накопилось столько записей, выгружаем не дожидаясь таймера.
+// Early flush threshold: as soon as this many records have accumulated in the buffer, we flush without waiting for the timer.
 const EARLY_FLUSH_AT = 50;
 
-// Текущие настройки логирования (с разумными значениями по умолчанию, если секция llmLog отсутствует).
+// Current logging settings (with sensible defaults if the llmLog section is absent).
 function llmLogConfig() {
   const c = config.llmLog || {};
   return {
@@ -98,12 +99,12 @@ function llmLogConfig() {
   };
 }
 
-// Признак прогона тестов: записи помечаются is_test, чтобы их можно было подчистить после прогона.
+// Test-run flag: records are marked is_test so they can be cleaned up after the run.
 function isTestRun() {
   return process.env.NODE_ENV === 'test';
 }
 
-// Вывести провайдера из базового URL: groq → 'groq', пустой/api.openai.com → 'openai', иначе 'proxy'.
+// Infer the provider from the base URL: groq → 'groq', empty/api.openai.com → 'openai', otherwise 'proxy'.
 function providerFromBaseURL(baseURL) {
   const url = String(baseURL || '').toLowerCase();
   if (!url || url.includes('api.openai.com')) {
@@ -115,8 +116,8 @@ function providerFromBaseURL(baseURL) {
   return 'proxy';
 }
 
-// Усечь payload до предельного размера: длинные строковые значения внутри обрезаются, флаг truncated
-// поднимается. Возвращает строку JSON, готовую для вставки в колонку jsonb, и признак усечения.
+// Truncate the payload to the size limit: long string values inside are clipped and the truncated flag is
+// raised. Returns a JSON string ready for insertion into the jsonb column, and a truncation flag.
 function buildPayloadJson(payload, maxChars) {
   if (payload === null || payload === undefined) {
     return { json: null, truncated: false };
@@ -125,16 +126,16 @@ function buildPayloadJson(payload, maxChars) {
   try {
     serialized = JSON.stringify(payload);
   } catch {
-    return { json: JSON.stringify({ error: 'payload не сериализуется' }), truncated: true };
+    return { json: JSON.stringify({ error: 'payload is not serializable' }), truncated: true };
   }
   if (serialized.length <= maxChars) {
     return { json: serialized, truncated: false };
   }
-  // Рекурсивно обрезаем длинные строки (тексты сообщений, input эмбеддинга) до разумной длины.
+  // Recursively clip long strings (message texts, embedding input) to a reasonable length.
   const perString = 2000;
   const trunc = (v) => {
     if (typeof v === 'string') {
-      return v.length > perString ? `${v.slice(0, perString)}…[+${v.length - perString} симв.]` : v;
+      return v.length > perString ? `${v.slice(0, perString)}…[+${v.length - perString} chars]` : v;
     }
     if (Array.isArray(v)) {
       return v.map(trunc);
@@ -150,14 +151,14 @@ function buildPayloadJson(payload, maxChars) {
   };
   let reduced = JSON.stringify(trunc(payload));
   if (reduced.length > maxChars) {
-    // Крайний случай: даже после обрезки строк объект велик — сохраняем усечённый снимок строкой.
+    // Edge case: even after clipping strings the object is large — store a truncated snapshot as a string.
     reduced = JSON.stringify({ _truncated: reduced.slice(0, maxChars) });
   }
   return { json: reduced, truncated: true };
 }
 
-// Собрать одну запись журнала из входных данных и контекста корреляции. Возвращает плоский объект под
-// колонки log.llm_request (payload/binary_meta — уже строки JSON). Никогда не бросает: при сбое вернёт null.
+// Build a single log record from the input data and the correlation context. Returns a flat object matching
+// the log.llm_request columns (payload/binary_meta are already JSON strings). Never throws: on failure returns null.
 export function buildRecord(input) {
   try {
     const cfg = llmLogConfig();
@@ -165,12 +166,13 @@ export function buildRecord(input) {
     const endpoint = input.endpoint || null;
     let kind = input.kind || ctx.kind || (endpoint ? DEFAULT_KIND_BY_ENDPOINT[endpoint] : null) || null;
     if (!kind) {
-      // Тип не передан и не выводится по конечной точке (для chat.completions это всегда так). Помечаем
-      // запись как «нелегальную» отдельным типом и шумим в лог, чтобы пропущенный kind было видно.
+      // The kind wasn't passed and can't be inferred from the endpoint (for chat.completions this is always
+      // the case). We mark the record as "illegal" with a dedicated kind and warn in the log so the missing
+      // kind is visible.
       kind = REQUEST_KINDS.UNTYPED;
-      const where = endpoint || 'неизвестной конечной точки';
+      const where = endpoint || 'an unknown endpoint';
       console.warn(
-        `[llm-log] Вызов ${where} без request_kind — запись помечена «${REQUEST_KINDS.UNTYPED}». Каждый вызов обязан передавать kind.`,
+        `[llm-log] Call to ${where} without request_kind — record marked "${REQUEST_KINDS.UNTYPED}". Every call must pass kind.`,
       );
     }
 
@@ -180,7 +182,7 @@ export function buildRecord(input) {
       input.totalTokens ??
       (promptTokens != null || completionTokens != null ? (promptTokens || 0) + (completionTokens || 0) : null);
 
-    // Стоимость рассчитываем только при наличии токенов. Для эмбеддингов считаем по total как по входящим.
+    // Compute cost only when tokens are present. For embeddings we count by total as if they were input tokens.
     let price = { priceUsd: null, modelPriced: null };
     if (input.model && (promptTokens != null || completionTokens != null || totalTokens != null)) {
       if (endpoint === 'embeddings') {
@@ -228,8 +230,8 @@ export function buildRecord(input) {
   }
 }
 
-// Положить запись в буфер. Возвращает управление немедленно (ничего не ждёт) и никогда не бросает.
-// input — объект для buildRecord; если передан уже собранный record (с полем request_kind), кладём его как есть.
+// Put a record into the buffer. Returns control immediately (waits for nothing) and never throws.
+// input is an object for buildRecord; if an already-built record (with a request_kind field) is passed, we store it as is.
 export function logLlmRequest(input) {
   try {
     if (!llmLogConfig().enabled || !input) {
@@ -243,18 +245,18 @@ export function logLlmRequest(input) {
     if (buffer.length > MAX_BUFFER) {
       const dropped = buffer.length - MAX_BUFFER;
       buffer.splice(0, dropped);
-      console.warn(`[llm-log] Буфер переполнен: отброшено ${dropped} самых старых записей журнала.`);
+      console.warn(`[llm-log] Buffer overflow: dropped ${dropped} oldest log records.`);
     }
     ensureTimer();
     if (buffer.length >= EARLY_FLUSH_AT) {
       flushLlmLog().catch(() => {});
     }
   } catch {
-    // Логирование не должно влиять на основной ответ — глушим любые сбои.
+    // Logging must not affect the main response — we swallow any failures.
   }
 }
 
-// Запустить фоновый таймер выгрузки, если он ещё не запущен. unref(), чтобы таймер не удерживал процесс.
+// Start the background flush timer if it isn't running yet. unref() so the timer doesn't keep the process alive.
 function ensureTimer() {
   if (flushTimer) {
     return;
@@ -268,7 +270,7 @@ function ensureTimer() {
   }
 }
 
-// Выполнить один многострочный INSERT для пакета записей.
+// Perform a single multi-row INSERT for a batch of records.
 async function insertBatch(records) {
   const values = [];
   const tuples = records.map((r) => {
@@ -283,9 +285,9 @@ async function insertBatch(records) {
   await dbQuery(sql, values);
 }
 
-// Принудительно выгрузить накопленные записи. Берёт из буфера пакеты до batchSize и пишет их по очереди.
-// При ошибке вставки возвращает записи пакета обратно в начало буфера (с учётом потолка) и прекращает
-// текущий проход — следующая попытка случится по таймеру или при следующем вызове.
+// Force-flush the accumulated records. Takes batches of up to batchSize from the buffer and writes them one by
+// one. On an insertion error it returns the batch's records back to the front of the buffer (respecting the cap)
+// and stops the current pass — the next attempt happens on the timer or on the next call.
 export async function flushLlmLog() {
   if (flushing || buffer.length === 0) {
     return;
@@ -298,12 +300,12 @@ export async function flushLlmLog() {
       try {
         await insertBatch(batch);
       } catch (err) {
-        // Возвращаем неудавшийся пакет в начало буфера, чтобы не потерять записи при временной недоступности БД.
+        // Return the failed batch to the front of the buffer so records aren't lost during a temporary DB outage.
         buffer.unshift(...batch);
         if (buffer.length > MAX_BUFFER) {
           buffer.splice(MAX_BUFFER);
         }
-        console.warn(`[llm-log] Не удалось записать журнал (${batch.length} зап.): ${String(err.message || err)}`);
+        console.warn(`[llm-log] Failed to write log (${batch.length} records): ${String(err.message || err)}`);
         break;
       }
     }

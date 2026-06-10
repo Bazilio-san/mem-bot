@@ -1,9 +1,9 @@
-// Быстрый подсчёт затрат на LLM поверх узкого журнала log.llm_usage. Эти функции готовят почву для будущего
-// интерфейса (он в рамках текущей задачи не реализуется): суммарная стоимость за период, разбивка по типам
-// запросов и затраты на отдельный ход диалога. Все запросы идут через общую обёртку query() из src/db.js.
+// Fast LLM cost accounting on top of the narrow log.llm_usage table. These functions lay the groundwork for a
+// future interface (not implemented within the current task): total cost over a period, a breakdown by request
+// kind, and the cost of a single dialog turn. All queries go through the shared query() wrapper from src/db.js.
 import { query } from '../db.js';
 
-// Собрать условие WHERE и параметры из набора фильтров. Возвращает { clause, params } для подстановки в запрос.
+// Build the WHERE clause and parameters from a set of filters. Returns { clause, params } to splice into a query.
 function buildFilters({ from, to, userId, kind, model }, startIndex = 1) {
   const conditions = [];
   const params = [];
@@ -32,8 +32,8 @@ function buildFilters({ from, to, userId, kind, model }, startIndex = 1) {
   return { clause, params };
 }
 
-// Суммарные токены и стоимость с фильтрами по периоду, пользователю, типу запроса и модели.
-// Возвращает { tokens, priceUsd } — суммы по total_tokens и price_usd (пропущенные значения считаются нулём).
+// Total tokens and cost with filters by period, user, request kind and model.
+// Returns { tokens, priceUsd } — sums over total_tokens and price_usd (missing values are treated as zero).
 export async function getCost({ from, to, userId, kind, model } = {}) {
   const { clause, params } = buildFilters({ from, to, userId, kind, model });
   const { rows } = await query(
@@ -45,8 +45,8 @@ export async function getCost({ from, to, userId, kind, model } = {}) {
   return { tokens: Number(rows[0].tokens), priceUsd: Number(rows[0].price_usd) };
 }
 
-// Затраты с группировкой по типу запроса (request_kind) — для интерфейса, где разные виды запросов показываются
-// отдельно. Возвращает массив { requestKind, tokens, priceUsd }, отсортированный по убыванию стоимости.
+// Costs grouped by request kind (request_kind) — for an interface where different request kinds are shown
+// separately. Returns an array of { requestKind, tokens, priceUsd }, sorted by descending cost.
 export async function getCostByKind({ from, to } = {}) {
   const { clause, params } = buildFilters({ from, to });
   const { rows } = await query(
@@ -61,8 +61,8 @@ export async function getCostByKind({ from, to } = {}) {
   return rows.map((r) => ({ requestKind: r.request_kind, tokens: Number(r.tokens), priceUsd: Number(r.price_usd) }));
 }
 
-// Затраты на один ход диалога по его requestId. Узкий журнал не хранит request_id, поэтому соединяем его с
-// полным журналом log.llm_request по llm_request_id. Возвращает { tokens, priceUsd }.
+// Cost of a single dialog turn by its requestId. The narrow table doesn't store request_id, so we join it with
+// the full log.llm_request table on llm_request_id. Returns { tokens, priceUsd }.
 export async function getDialogCost(requestId) {
   const { rows } = await query(
     `SELECT COALESCE(SUM(u.total_tokens), 0)::bigint AS tokens,

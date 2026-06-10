@@ -1,7 +1,7 @@
 import { refineBlock } from '../../skills/author.js';
 import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/authoring-support.js';
 
-// Переписать или улучшить блок «# Skill Prompt» навыка по инструкции (под капотом — модель).
+// Rewrite or improve the skill's "# Skill Prompt" block following an instruction (model-backed under the hood).
 export const skillAuthorWritePromptTool = {
   name: 'skill_author_write_prompt',
   title: 'Правлю промпт ответа навыка...',

@@ -1,31 +1,31 @@
-// Обёртка над пулом подключений PostgreSQL. Доступ к базе идёт через пакет af-db-ts: он сам читает параметры
-// подключения из node-config по пути db.postgres.dbs.<connectionId> (рабочая БД памяти — алиас 'main').
-// Тонкие обёртки query()/getPool() сохраняют прежний контракт, чтобы потребители не менялись.
-// config.js импортируется ПЕРВЫМ: его bootstrap-загрузчик наполняет process.env из .env и инициализирует
-// node-config до того, как пакет af-db-ts на этапе своего импорта прочитает дерево конфигурации.
+// Wrapper around the PostgreSQL connection pool. Database access goes through the af-db-ts package: it reads the
+// connection parameters itself from node-config at the path db.postgres.dbs.<connectionId> (the working memory DB
+// is aliased 'main'). The thin query()/getPool() wrappers keep the previous contract, so consumers do not change.
+// config.js is imported FIRST: its bootstrap loader populates process.env from .env and initializes
+// node-config before the af-db-ts package reads the configuration tree during its own import.
 import { config } from './config.js';
 import pg from 'pg';
 import { registerTypes as registerPgvector } from 'pgvector/pg';
 import { queryPg, getPoolPg, getDbConfigPg, closeAllDb } from 'af-db-ts';
 
-// Логическое имя рабочего подключения к БД памяти.
+// Logical name of the working connection to the memory DB.
 const CONNECTION_ID = 'main';
 
-// pgvector регистрируется вручную: af-db-ts не включает его автоматически. Функцию регистрации типа vector
-// передаём только если расширение объявлено в usedExtensions рабочего подключения. Тогда vector-колонки
-// возвращаются как number[]. Функции вызываются один раз при создании пула (на каждом новом клиенте).
+// pgvector is registered manually: af-db-ts does not enable it automatically. We pass the vector-type
+// registration function only if the extension is declared in the working connection's usedExtensions. Then
+// vector columns are returned as number[]. The functions are called once when the pool is created (per new client).
 const registerTypesFunctions = config.db.postgres.dbs[CONNECTION_ID]?.usedExtensions?.includes('pgvector')
   ? [registerPgvector]
   : [];
 
-// Получить (закэшированный) пул pg рабочей БД памяти. Асинхронно: af-db-ts при первом обращении создаёт пул
-// и сразу открывает первое соединение для раннего обнаружения ошибок подключения.
+// Get the (cached) pg pool of the working memory DB. Asynchronous: on first access af-db-ts creates the pool
+// and immediately opens the first connection for early detection of connection errors.
 export function getPool() {
   return getPoolPg({ connectionId: CONNECTION_ID, registerTypesFunctions });
 }
 
-// Выполнить запрос к рабочей БД памяти. throwError: true сохраняет прежнее поведение — ошибка пробрасывается
-// вызывающему коду, а не молча глотается.
+// Run a query against the working memory DB. throwError: true keeps the previous behavior — the error is
+// propagated to the caller rather than silently swallowed.
 export async function query(text, params) {
   return queryPg({
     connectionId: CONNECTION_ID,
@@ -36,19 +36,20 @@ export async function query(text, params) {
   });
 }
 
-// Послать асинхронное уведомление PostgreSQL по каналу (команда NOTIFY). Используется, чтобы мгновенно
-// разбудить ожидающий воркер планировщика при появлении новой задачи. Имя канала — фиксированный
-// идентификатор из кода, а не пользовательский ввод, поэтому его безопасно подставлять в текст запроса
-// напрямую (NOTIFY не принимает параметры-плейсхолдеры).
+// Send an asynchronous PostgreSQL notification over a channel (the NOTIFY command). Used to instantly
+// wake the waiting scheduler worker when a new task appears. The channel name is a fixed
+// identifier from the code, not user input, so it is safe to substitute directly into the query text
+// (NOTIFY does not accept placeholder parameters).
 export async function notify(channel) {
   await query(`NOTIFY ${channel}`);
 }
 
-// Создать выделенное подключение, подписанное на канал асинхронных уведомлений PostgreSQL (команда LISTEN).
-// Это подключение живёт отдельно от пула af-db-ts: пул переиспользует соединения под обычные запросы, а здесь
-// нужно одно постоянно открытое соединение, которое только слушает. Параметры подключения берутся из той же
-// конфигурации через getDbConfigPg('main'). При обрыве связи подписка восстанавливается автоматически.
-// Возвращается объект с промисом `ready` (готовность первой подписки) и методом `close()` для остановки.
+// Create a dedicated connection subscribed to a PostgreSQL async notification channel (the LISTEN command).
+// This connection lives separately from the af-db-ts pool: the pool reuses connections for ordinary queries,
+// while here we need one permanently open connection that only listens. The connection parameters are taken
+// from the same configuration via getDbConfigPg('main'). On a connection drop the subscription is restored
+// automatically. Returns an object with a `ready` promise (readiness of the first subscription) and a `close()`
+// method to stop it.
 export function createListener(channel, onNotification) {
   let client = null;
   let stopped = false;
@@ -65,7 +66,7 @@ export function createListener(channel, onNotification) {
     await client.query(`LISTEN ${channel}`);
   }
 
-  // Переподключиться с небольшой задержкой, чтобы не зациклиться на мгновенно повторяющихся сбоях.
+  // Reconnect after a small delay to avoid looping on instantly repeating failures.
   function scheduleReconnect() {
     if (stopped || reconnecting) {
       return;
@@ -91,12 +92,12 @@ export function createListener(channel, onNotification) {
   };
 }
 
-// Преобразовать массив чисел в строковый литерал вектора pgvector: [0.1,0.2,...].
+// Convert an array of numbers into a pgvector string literal: [0.1,0.2,...].
 export function vectorToSql(vector) {
   return `[${vector.join(',')}]`;
 }
 
-// Закрыть все пулы подключений af-db-ts (рабочий и служебный) при остановке процесса.
+// Close all af-db-ts connection pools (working and service) when the process stops.
 export async function closePool() {
   await closeAllDb();
 }

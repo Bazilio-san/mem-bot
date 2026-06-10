@@ -1,13 +1,13 @@
-// Контур защищённой памяти. Чувствительные данные (паспорт, телефон, адрес и т.п.)
-// шифруются на уровне приложения (AES-256-GCM) и кладутся в отдельную таблицу.
-// В обычную память и в промпт попадает только безопасное резюме (redacted_summary),
-// никогда не полное значение. Сохранение требует явного согласия пользователя.
+// Protected memory loop. Sensitive data (passport, phone, address, etc.)
+// is encrypted at the application level (AES-256-GCM) and placed in a separate table.
+// Only a safe summary (redacted_summary) makes it into regular memory and the prompt,
+// never the full value. Saving requires the user's explicit consent.
 import crypto from 'node:crypto';
 import { query } from './../db.js';
 import { config } from '../config.js';
 import { getDomainId } from '../repo.js';
 
-// Ключ шифрования выводится из AUTH_SECRET детерминированно (32 байта для AES-256).
+// The encryption key is derived deterministically from AUTH_SECRET (32 bytes for AES-256).
 const KEY = crypto.createHash('sha256').update(config.authSecret).digest();
 
 export function encrypt(plaintext) {
@@ -15,7 +15,7 @@ export function encrypt(plaintext) {
   const cipher = crypto.createCipheriv('aes-256-gcm', KEY, iv);
   const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  // Формат: [12 байт IV][16 байт тег аутентификации][шифртекст].
+  // Format: [12-byte IV][16-byte authentication tag][ciphertext].
   return Buffer.concat([iv, tag, enc]);
 }
 
@@ -32,16 +32,16 @@ function hashOf(value) {
   return crypto.createHash('sha256').update(value).digest();
 }
 
-// Замаскировать значение для безопасного резюме: показываем тип и хвост, скрываем середину.
+// Mask the value for a safe summary: show the type and the tail, hide the middle.
 export function redact(recordType, rawValue) {
   const v = String(rawValue).replace(/\s+/g, '');
   const tail = v.slice(-2);
   return `сохранён ${recordType}, оканчивается на ...${tail}; полное значение не раскрывать без необходимости`;
 }
 
-// Сохранить защищённую запись. По умолчанию согласие неизвестно — данные хранятся,
-// но помечены как требующие подтверждения. consentStatus='granted' ставится только
-// при явном согласии пользователя.
+// Save a protected record. By default consent is unknown — the data is stored,
+// but marked as requiring confirmation. consentStatus='granted' is set only
+// with the user's explicit consent.
 export async function saveSecureRecord({
   userId,
   domainKey = 'general',
@@ -65,7 +65,7 @@ export async function saveSecureRecord({
   return rows[0];
 }
 
-// Подтвердить согласие на хранение ранее сохранённой записи.
+// Confirm consent to store a previously saved record.
 export async function grantConsent(secureRecordId) {
   await query(
     `UPDATE mem.secure_records SET consent_status='granted', consent_at=now(), updated_at=now() WHERE id=$1`,
@@ -73,8 +73,8 @@ export async function grantConsent(secureRecordId) {
   );
 }
 
-// Получить безопасные резюме защищённых записей пользователя (для MEMORY_CONTEXT).
-// Полные значения здесь не раскрываются — только redacted_summary.
+// Get safe summaries of the user's protected records (for MEMORY_CONTEXT).
+// Full values are not revealed here — only redacted_summary.
 export async function listSecureSummaries(userId, limit = 3) {
   const { rows } = await query(
     `SELECT id, record_type, subject_key, display_name, redacted_summary, consent_status
@@ -86,8 +86,8 @@ export async function listSecureSummaries(userId, limit = 3) {
   return rows;
 }
 
-// Раскрыть полное значение защищённой записи. Доступно ТОЛЬКО при явной цели (purpose)
-// и при наличии согласия. Каждый доступ фиксируется.
+// Reveal the full value of a protected record. Available ONLY with an explicit purpose
+// and with consent present. Every access is logged.
 export async function getSecureValue(secureRecordId, purpose) {
   if (!purpose || purpose.trim().length < 3) {
     throw new Error('Для доступа к защищённым данным требуется указать цель (purpose).');

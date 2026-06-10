@@ -1,7 +1,7 @@
 import { generateDomainSchema } from '../../skills/author.js';
 import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/authoring-support.js';
 
-// Сгенерировать (или пересоздать) закрытую схему доменной памяти навыка: сущности, поля data, словари ключей.
+// Generate (or regenerate) the skill's closed domain-memory schema: entities, data fields, key dictionaries.
 export const skillAuthorSchemaGenerateTool = {
   name: 'skill_author_schema_generate',
   title: 'Генерирую схему навыка...',

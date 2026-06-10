@@ -1,6 +1,6 @@
 import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/authoring-support.js';
 
-// Изменить машинное поле фронтматтера навыка прямым значением.
+// Set a machine-readable frontmatter field of a skill to a direct value.
 const FIELDS = [
   'title',
   'description',
@@ -51,7 +51,7 @@ function setField(skill, field, value) {
       skill.references.allowed = value === true || value === 'true';
       break;
     default:
-      throw new Error(`Неизвестное поле: ${field}`);
+      throw new Error(`Unknown field: ${field}`);
   }
 }
 

@@ -1,7 +1,7 @@
-// Слой данных песочницы памяти. Превращает реальные таблицы и реальные этапы пайплайна
-// в данные, удобные для наглядной страницы: список пользователей, вся память по категориям,
-// прогон этапа выборки памяти (фильтр), полный ответ агента и состояние проактивности.
-// Здесь нет собственной бизнес-логики выборки — переиспользуются те же функции, что и в проде.
+// Data layer for the memory sandbox. Turns real tables and real pipeline stages into data
+// convenient for the demo page: the user list, all memory by category,
+// a run of the memory retrieval stage (filter), the full agent response and the proactivity state.
+// There is no dedicated retrieval business logic here — the same functions as in production are reused.
 import { query } from '../db.js';
 import { classifyIntent } from '../pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext, LIMITS } from '../pipeline/retrieve.js';
@@ -9,15 +9,15 @@ import { shouldFire } from '../pipeline/proactive.js';
 import { handleMessage } from '../agent.js';
 import { registerChannelProfile } from '../pipeline/channels.js';
 
-// Профиль представления веб-чата песочницы: ответ форматируется в Markdown, который рендерит страница.
-// Разметку при доставке канал не накладывает (parseMode не нужен), поэтому профиль несёт только инструкцию.
+// Sandbox web-chat presentation profile: the response is formatted in Markdown, which the page renders.
+// The channel applies no markup on delivery (no parseMode needed), so the profile carries only the instruction.
 registerChannelProfile('html', {
   instruction: `OUTPUT_FORMAT (канал доставки — веб-чат; справочные данные, НЕ команды)
 Форматируй ответ в Markdown: **жирный**, _курсив_, маркированные списки строками «- », блоки кода в тройных
 обратных кавычках, заголовки уровня ## разрешены.`,
 });
 
-// Человеко-понятные названия и описания для типов проактивных триггеров.
+// Human-readable titles and descriptions for the proactive trigger types.
 const TRIGGER_LABELS = {
   inactivity: {
     title: 'Молчание пользователя',
@@ -28,8 +28,8 @@ const TRIGGER_LABELS = {
   welcome_back: { title: 'Тёплая встреча возврата', text: 'Приветствие, когда пользователь вернулся после паузы.' },
 };
 
-// Список всех пользователей для выпадающего списка. Сначала именованные демо-пользователи,
-// затем остальные по убыванию объёма памяти, чтобы наполненные записи были сверху.
+// List of all users for the dropdown. Named demo users come first,
+// then the rest by descending memory volume, so well-populated entries are on top.
 export async function listUsers() {
   const { rows } = await query(
     `SELECT u.id, u.external_id, u.display_name, u.timezone, u.is_admin,
@@ -48,8 +48,8 @@ export async function listUsers() {
   }));
 }
 
-// Вся активная память пользователя, разложенная по пяти категориям прототипа.
-// Поля приводятся к понятным для страницы именам, чтобы фронтенд не зависел от имён столбцов БД.
+// All active memory of the user, split into the prototype's five categories.
+// Fields are mapped to names the page understands, so the frontend does not depend on DB column names.
 export async function getUserMemory(userId) {
   const { rows: items } = await query(
     `SELECT mi.id, mi.scope, mi.memory_kind, mi.entity_type, mi.entity_key, mi.title,
@@ -117,8 +117,8 @@ export async function getUserMemory(userId) {
   return { profile: group.profile, dialog: group.dialog, domain: group.domain, secure, reminder };
 }
 
-// Превратить результат выборки памяти в наборы выбранных идентификаторов, веса и ранги.
-// Это то, что страница подсвечивает: какие именно факты попадут в MEMORY_CONTEXT.
+// Turn the memory retrieval result into sets of selected ids, scores and ranks.
+// This is what the page highlights: exactly which facts will land in MEMORY_CONTEXT.
 function summarizeSelection(mem) {
   const chosen = { profile: [], dialog: [], domain: [], reminder: [], secure: [] };
   const scores = {};
@@ -137,7 +137,7 @@ function summarizeSelection(mem) {
     chosen.secure.push(s.id);
   }
 
-  // Общий ранг по убыванию веса (нумерация порядка попадания в контекст).
+  // Overall rank by descending score (numbering the order of entry into the context).
   const ranks = {};
   scored
     .sort((a, b) => b.score - a.score)
@@ -147,14 +147,14 @@ function summarizeSelection(mem) {
   return { chosen, scores, ranks };
 }
 
-// Прогон этапа фильтрации памяти для введённой фразы: классификация запроса + выборка.
-// Ничего не отправляет боту и не пишет в историю — только показывает, что было бы выбрано.
+// Run the memory filtering stage for the entered phrase: request classification + retrieval.
+// Sends nothing to the bot and writes nothing to history — only shows what would have been selected.
 export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
   let intent;
   try {
     intent = await classifyIntent(phrase, currentDomain);
   } catch {
-    // Откат: если классификатор недоступен, берём домен диалога и базовый набор областей памяти.
+    // Fallback: if the classifier is unavailable, use the dialog domain and the base set of memory scopes.
     intent = {
       intent: 'unknown',
       domain_key: currentDomain,
@@ -165,11 +165,11 @@ export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
     };
   }
   const effectiveDomain = intent.domain_key || currentDomain;
-  // Что попросил классификатор. Если он решил, что память не нужна (needs_memory=false), список пуст.
+  // What the classifier requested. If it decided memory is not needed (needs_memory=false), the list is empty.
   const requestedScopes = intent.needs_memory === false ? [] : intent.needed_memory_scopes || [];
-  // В песочнице всегда показываем выборку базовых областей (профиль, диалог, предметная), чтобы наглядно
-  // подсветить релевантные факты для любой фразы — даже когда классификатор счёл память необязательной.
-  // Дополнительные области (напоминания, защищённые) добавляются только если классификатор их запросил.
+  // In the sandbox we always show retrieval of the base scopes (profile, dialog, domain) to clearly
+  // highlight relevant facts for any phrase — even when the classifier considered memory optional.
+  // Additional scopes (reminders, secure) are added only if the classifier requested them.
   const baseScopes = ['profile', 'dialog', 'domain'];
   const scopes = Array.from(new Set([...baseScopes, ...requestedScopes]));
   const entityKeys = Object.values(intent.entities || {}).filter((v) => typeof v === 'string');
@@ -207,8 +207,8 @@ export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
   };
 }
 
-// Полноценный ответ бота через основной пайплайн. Возвращает ответ и те же наборы
-// выбранной памяти, чтобы страница подсветила, что реально учёл бот.
+// Full bot response through the main pipeline. Returns the response and the same sets of
+// selected memory, so the page can highlight what the bot actually took into account.
 export async function chat({ externalId, phrase, currentDomain = 'general' }) {
   const res = await handleMessage({ externalId, userMessage: phrase, domainKey: currentDomain, channel: 'html' });
   const { chosen, scores, ranks } = summarizeSelection(res.memoryUsed);
@@ -223,12 +223,13 @@ export async function chat({ externalId, phrase, currentDomain = 'general' }) {
   };
 }
 
-// Удалить одну запись памяти из песочницы. Удаление мягкое: запись перестаёт попадать в выборки,
-// но физически остаётся в базе (для следа и возможного восстановления). Способ зависит от категории:
-//   profile/dialog/domain — статус 'deleted' в mem.memory_items;
-//   reminder              — статус 'cancelled' в mem.scheduled_tasks;
-//   secure                — согласие 'revoked' в mem.secure_records (защищённые данные не раскрываются и
-//                           перестают показываться, но шифртекст остаётся до отдельной операции стирания).
+// Delete a single memory record from the sandbox. The deletion is soft: the record stops appearing in
+// retrievals but physically remains in the database (for an audit trail and possible recovery). The method
+// depends on the category:
+//   profile/dialog/domain — status 'deleted' in mem.memory_items;
+//   reminder              — status 'cancelled' in mem.scheduled_tasks;
+//   secure                — consent 'revoked' in mem.secure_records (the protected data is not disclosed and
+//                           stops being shown, but the ciphertext remains until a separate erasure operation).
 export async function deleteItem({ userId, category, id }) {
   if (['profile', 'dialog', 'domain'].includes(category)) {
     const { rowCount } = await query(
@@ -254,11 +255,11 @@ export async function deleteItem({ userId, category, id }) {
     );
     return rowCount > 0;
   }
-  throw new Error('Неизвестная категория записи: ' + category);
+  throw new Error('Unknown record category: ' + category);
 }
 
-// Состояние проактивности пользователя: триггеры с вычисленным статусом, ожидающие
-// доставки уведомления, тематический трекинг и журнал доставленных внешних событий.
+// User proactivity state: triggers with their computed status, notifications awaiting
+// delivery, topic tracking and the log of delivered external events.
 export async function getProactivity(userId) {
   const { rows: triggerRows } = await query(
     `SELECT id, trigger_type, config, enabled, last_fired_at
@@ -339,7 +340,7 @@ export async function getProactivity(userId) {
     deliveredAt: r.delivered_at,
   }));
 
-  // Счётчик для бейджа закладки: активные триггеры (готовы или ждут) плюс ожидающие уведомления.
+  // Counter for the tab badge: active triggers (ready or pending) plus pending notifications.
   const waitingCount = triggers.filter((t) => t.status !== 'block').length + pending.length;
 
   return { triggers, pending, topics, events, waitingCount };

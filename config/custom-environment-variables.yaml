@@ -211,6 +211,7 @@ streaming:
     __format: boolean
 
 telegram:
+  botUsername: TELEGRAM_BOT_USERNAME
   apiKey: TELEGRAM_API_KEY
   maxConcurrency:
     __name: TELEGRAM_MAX_CONCURRENCY

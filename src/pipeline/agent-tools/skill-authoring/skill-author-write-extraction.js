@@ -1,7 +1,7 @@
 import { refineBlock } from '../../skills/author.js';
 import { authoringEnabled, editableOrStaged, applyOrStage } from '../../skills/authoring-support.js';
 
-// Переписать или улучшить блок «## Fact Extraction Prompt» навыка по инструкции (под капотом — модель).
+// Rewrite or improve the skill's "## Fact Extraction Prompt" block following an instruction (model-backed under the hood).
 export const skillAuthorWriteExtractionTool = {
   name: 'skill_author_write_extraction',
   title: 'Правлю промпт извлечения навыка...',

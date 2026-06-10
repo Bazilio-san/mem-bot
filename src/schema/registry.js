@@ -1,24 +1,24 @@
-// Доступ к схеме доменной памяти. Источник истины — реестр skills: закрытая схема data и правила
-// канонизации entity_key живут в файле domain-schema.json рядом со SKILL.md и загружаются в память при
-// старте. Этот модуль — тонкая обёртка над реестром skills для слоя записи памяти (extract.js, validate.js):
-// он отдаёт определение домена по доменному ключу и спецификацию отдельной сущности.
+// Access to the domain memory schema. The source of truth is the skills registry: the closed data schema
+// and the entity_key canonicalization rules live in the domain-schema.json file next to SKILL.md and are
+// loaded into memory at startup. This module is a thin wrapper over the skills registry for the memory-write
+// layer (extract.js, validate.js): it returns a domain definition by domain key and the spec of a single entity.
 import { getDomainDefinitionByKey } from '../pipeline/skills/registry.js';
 
-// Загрузить определение домена по его ключу. Возвращает объект definition (закрытая схема и словари
-// entity_key) или null, если у домена нет схемы (домен без предметных сущностей).
+// Load a domain definition by its key. Returns a definition object (closed schema and entity_key
+// dictionaries) or null if the domain has no schema (a domain without subject entities).
 export async function loadDomainDefinition(domainKey) {
   return getDomainDefinitionByKey(domainKey);
 }
 
-// Идентификатор источника схемы для записи в metadata факта. Возвращает строковый маркер 'skill', если у
-// домена есть схема, иначе null. Схема версионируется вместе со skill в системе контроля версий, поэтому
-// числовой версии во время выполнения нет.
+// Identifier of the schema source for writing into a fact's metadata. Returns the string marker 'skill' if
+// the domain has a schema, otherwise null. The schema is versioned together with the skill in version
+// control, so there is no numeric version at runtime.
 export async function getActiveVersion(domainKey) {
   return getDomainDefinitionByKey(domainKey) ? 'skill' : null;
 }
 
-// Спецификация конкретной сущности домена: правило ключа и закрытая схема data.
-// Возвращает { entity_type, entity_key, data_schema } или null, если сущности нет в схеме.
+// Spec of a specific domain entity: the key rule and the closed data schema.
+// Returns { entity_type, entity_key, data_schema } or null if the entity is not in the schema.
 export async function getEntitySpec(domainKey, entityType) {
   const definition = await loadDomainDefinition(domainKey);
   if (!definition || !entityType) {

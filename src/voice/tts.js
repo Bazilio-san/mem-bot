@@ -1,32 +1,32 @@
-// Синтез голосового ответа (текст в речь, TTS) для Telegram-канала.
-// Модуль относится к канальному слою: ядро ИИ-бота про него не знает и его не вызывает. Здесь собраны
-// три обязанности голосовой доставки, скрытые от адаптера за простыми функциями:
-//   1) выбор текста для озвучивания (целиком короткий ответ либо краткое резюме длинного/со списками/кодом);
-//   2) сам синтез речи через OpenAI-compatible audio/speech, возвращающий байты OGG/OPUS;
-//   3) вспомогательные проверки разметки и соблюдение жёсткого лимита длины.
-// Поставщик и модель скрыты внутри: при необходимости их меняют через конфигурацию, не трогая адаптер.
+// Synthesis of a voice reply (text to speech, TTS) for the Telegram channel.
+// The module belongs to the channel layer: the AI bot core knows nothing about it and does not call it. Here
+// are three voice-delivery responsibilities, hidden from the adapter behind simple functions:
+//   1) choosing the text to voice (the whole short reply, or a brief summary of a long one / one with lists or code);
+//   2) the speech synthesis itself via OpenAI-compatible audio/speech, returning OGG/OPUS bytes;
+//   3) helper markup checks and enforcing a hard length limit.
+// The provider and model are hidden inside: if needed, they are changed via configuration without touching the adapter.
 import { config } from '../config.js';
 import { chat } from '../llm.js';
 import { logLlmRequest } from '../pipeline/llm-log.js';
 
-// Снять разметку перед синтезом речи. Ответ может прийти с разметкой канала (теги HTML для Telegram либо
-// Markdown для веб-чата), и эти знаки нельзя отдавать в синтез — иначе бот зачитает теги и звёздочки вслух.
-// Удаляются HTML-теги, восстанавливаются экранированные сущности (&lt; &gt; &amp;) и снимаются основные
-// знаки Markdown (звёздочки, подчёркивания, обратные кавычки, решётки заголовков, маркеры цитат).
+// Strip markup before speech synthesis. The reply may arrive with channel markup (HTML tags for Telegram or
+// Markdown for the web chat), and these characters must not go into synthesis — otherwise the bot reads tags
+// and asterisks aloud. HTML tags are removed, escaped entities (&lt; &gt; &amp;) are restored, and the main
+// Markdown markers (asterisks, underscores, backticks, heading hashes, quote markers) are stripped.
 export function stripMarkup(text) {
   return String(text || '')
-    .replace(/<[^>]+>/g, '') // HTML-теги
+    .replace(/<[^>]+>/g, '') // HTML tags
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&') // экранированные сущности обратно
-    .replace(/`{1,3}/g, '') // обратные кавычки кода
-    .replace(/(\*\*|__|\*|_)/g, '') // жирный/курсив Markdown
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // решётки заголовков в начале строки
-    .replace(/^\s*>\s?/gm, ''); // маркеры цитат в начале строки
+    .replace(/&amp;/g, '&') // escaped entities back
+    .replace(/`{1,3}/g, '') // code backticks
+    .replace(/(\*\*|__|\*|_)/g, '') // Markdown bold/italic
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // heading hashes at line start
+    .replace(/^\s*>\s?/gm, ''); // quote markers at line start
 }
 
-// Признак, что ответ содержит код или длинные списки и потому плохо звучит вслух. Срабатывает на блоки кода
-// в тройных обратных кавычках и на два и более подряд идущих пунктов маркированного или нумерованного списка.
+// Flag that the reply contains code or long lists and therefore sounds bad aloud. Triggers on code blocks in
+// triple backticks and on two or more consecutive bullet or numbered list items.
 export function hasCodeOrList(text) {
   const s = String(text || '');
   if (/```/.test(s)) {
@@ -36,8 +36,8 @@ export function hasCodeOrList(text) {
   return listLines.length >= 2;
 }
 
-// Обрезать строку до предела по возможности на границе предложения. Если подходящей границы в пределах лимита
-// нет (она пришлась бы на самое начало), режем жёстко по лимиту. Результат очищается от крайних пробелов.
+// Trim a string down to the limit, on a sentence boundary where possible. If there is no suitable boundary
+// within the limit (it would fall at the very start), cut hard at the limit. The result is trimmed of edge whitespace.
 export function clampToLimit(text, limit) {
   const s = String(text || '').trim();
   if (s.length <= limit) {
@@ -48,12 +48,13 @@ export function clampToLimit(text, limit) {
   let cut = m ? m[0].length : -1;
   if (cut < limit * 0.5) {
     cut = limit;
-  } // удобной границы нет — режем по лимиту
+  } // no convenient boundary — cut at the limit
   return s.slice(0, cut).trim();
 }
 
-// Построить краткое резюме длинного ответа вспомогательной быстрой моделью. Инструкция требует уложиться в
-// заданный предел символов и передать смысл без кода и списков, потому что озвучивается именно это резюме.
+// Build a brief summary of a long reply with a fast helper model. The instruction requires staying within
+// the given character limit and conveying the meaning without code or lists, because it is this summary that
+// gets voiced.
 async function summarizeForVoice(answer, summaryLimit) {
   const messages = [
     {
@@ -68,16 +69,16 @@ async function summarizeForVoice(answer, summaryLimit) {
   return (msg.content || '').trim();
 }
 
-// Выбрать текст для озвучивания и признак того, что это резюме (а не полный ответ).
-// Короткий ответ без кода и списков озвучивается целиком. Иначе строится резюме в пределах лимита; если резюме
-// получить не удалось (пустой ответ модели), возвращается text: null — это сигнал каналу откатиться на текст.
-// Параметр opts.summarize позволяет подменить построение резюме в тестах; по умолчанию используется модель.
+// Pick the text to voice and a flag indicating it is a summary (not the full reply).
+// A short reply without code or lists is voiced in full. Otherwise a summary is built within the limit; if
+// the summary could not be obtained (empty model reply), text: null is returned — a signal for the channel
+// to fall back to text. The opts.summarize parameter lets tests override summary building; by default the model is used.
 export async function buildVoiceText(answer, opts = {}) {
   const hardLimit = config.voiceOutput.maxChars;
   const summaryLimit = Math.min(config.voiceOutput.summaryMaxChars, hardLimit);
   const raw = String(answer || '').trim();
-  // Признак кода и списков проверяется по исходному размеченному тексту: именно разметка (блоки кода,
-  // пункты списка) служит сигналом построить резюме, поэтому снимать её до проверки нельзя.
+  // The code-and-list flag is checked against the original marked-up text: it's exactly the markup (code
+  // blocks, list items) that signals building a summary, so it must not be stripped before the check.
   const codeOrList = hasCodeOrList(raw);
   const clean = stripMarkup(raw).trim();
 
@@ -96,20 +97,20 @@ export async function buildVoiceText(answer, opts = {}) {
   return { text: text || null, summarized: true };
 }
 
-// Синтезировать речь из текста и вернуть байты голосового сообщения в формате OGG/OPUS.
-// Запрос идёт напрямую (fetch) к конечной точке audio/speech выбранного base URL: OPENAI_BASE_URL для прокси
-// или https://api.openai.com/v1 для прямого OpenAI API. Некоторые прокси периодически обрывают соединение по
-// тайм-ауту, поэтому делаем несколько повторных попыток. Заголовок content-type у прокси может быть
-// недостоверен, поэтому ориентируемся на запрошенный формат.
-// Параметр opts.fetch позволяет подменить сеть в тестах; по умолчанию используется глобальный fetch.
+// Synthesize speech from text and return the voice-message bytes in OGG/OPUS format.
+// The request goes directly (fetch) to the audio/speech endpoint of the chosen base URL: OPENAI_BASE_URL for
+// the proxy or https://api.openai.com/v1 for the direct OpenAI API. Some proxies occasionally drop the
+// connection on a timeout, so we make several retry attempts. The proxy's content-type header may be
+// unreliable, so we rely on the requested format.
+// The opts.fetch parameter lets tests override the network; by default the global fetch is used.
 export async function synthesizeSpeech(text, opts = {}) {
   const fetchImpl = opts.fetch || globalThis.fetch;
   const baseURL = (config.llm.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
   const url = `${baseURL}/audio/speech`;
   const { model, format } = config.voiceOutput;
   const voice = opts.voice || config.voiceOutput.voice;
-  // Для журнала вход — это текст (он сохраняется в payload), а синтезированное аудио на выходе описывается
-  // только метаданными в binary_meta. Сами байты аудио в журнал не попадают.
+  // For the log, the input is text (it is stored in payload), while the synthesized audio output is described
+  // only by metadata in binary_meta. The audio bytes themselves are not written to the log.
   const logPayload = { model, voice, format, input: text };
   let lastErr;
   const startedAt = Date.now();
@@ -134,7 +135,7 @@ export async function synthesizeSpeech(text, opts = {}) {
       }
       const buf = Buffer.from(await res.arrayBuffer());
       if (!buf.length) {
-        throw new Error('провайдер TTS вернул пустой аудиоответ');
+        throw new Error('TTS provider returned an empty audio response');
       }
       try {
         logLlmRequest({
@@ -147,7 +148,7 @@ export async function synthesizeSpeech(text, opts = {}) {
           durationMs: Date.now() - startedAt,
         });
       } catch {
-        // журнал не должен влиять на синтез
+        // logging must not affect synthesis
       }
       return buf;
     } catch (err) {
@@ -166,7 +167,7 @@ export async function synthesizeSpeech(text, opts = {}) {
       error: lastErr?.message || lastErr,
     });
   } catch {
-    // журнал не должен влиять на синтез
+    // logging must not affect synthesis
   }
   throw lastErr;
 }

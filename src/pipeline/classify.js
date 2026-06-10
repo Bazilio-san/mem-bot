@@ -1,12 +1,12 @@
-// Этап 1 пайплайна: быстрая классификация входящего сообщения дешёвой моделью.
-// Классификатор выбирает один наиболее подходящий skill (источник истины — skill_name), а доменный ключ
-// для адресации памяти выводится из выбранного skill уже кодом. Заодно определяет намерение, важные
-// сущности, какие виды памяти нужны и нужны ли инструменты.
+// Pipeline stage 1: fast classification of the incoming message with a cheap model.
+// The classifier picks the single best-fitting skill (skill_name is the source of truth), and the domain key
+// for addressing memory is derived from the chosen skill in code. It also determines the intent, important
+// entities, which kinds of memory are needed, and whether tools are needed.
 import { chatJSON } from '../llm.js';
 import { config } from '../config.js';
 import { listSkillRoutes } from './skills/registry.js';
 
-// Схема результата классификации. Источник истины — skill_name, ограниченный списком доступных skills.
+// Schema of the classification result. The source of truth is skill_name, restricted to the available skills.
 function buildSchema(routeNames) {
   return {
     type: 'object',
@@ -40,7 +40,7 @@ function buildSchema(routeNames) {
   };
 }
 
-// Системный промпт: перечень skills с правилом применения для каждого.
+// System prompt: a list of skills with a usage rule for each one.
 function buildSystemPrompt(routes) {
   const list = routes
     .map((r) => {

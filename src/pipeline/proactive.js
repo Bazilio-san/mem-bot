@@ -1,6 +1,6 @@
-// Проактивный контур (критерии 15 и 16): бот сам пишет первым по уместному поводу.
-// Проверяет триггеры пользователя, применяет анти-спам (last_fired_at), генерирует и доставляет сообщение.
-// Доставка переиспользует существующую очередь mem.notification_outbox и сохранение реплики в историю диалога.
+// Proactive loop (criteria 15 and 16): the bot writes first when there's an appropriate occasion.
+// Checks the user's triggers, applies anti-spam (last_fired_at), generates and delivers the message.
+// Delivery reuses the existing mem.notification_outbox queue and saves the reply into the dialog history.
 import { config } from '../config.js';
 import { query } from '../db.js';
 import { ensureConversation, saveMessage, getLastUserMessageTime, listUsersWithTriggers } from '../repo.js';
@@ -14,7 +14,7 @@ import {
   recordProactiveSent,
 } from './proactiveContactPolicy.js';
 
-// Анти-спам: срабатывал ли триггер за последние N минут.
+// Anti-spam: whether the trigger fired within the last N minutes.
 function firedRecently(lastFiredAt, minutes) {
   if (!lastFiredAt) {
     return false;
@@ -22,7 +22,7 @@ function firedRecently(lastFiredAt, minutes) {
   return (Date.now() - new Date(lastFiredAt).getTime()) / 60000 < minutes;
 }
 
-// Анти-спам: срабатывал ли триггер уже сегодня (для ежедневного приветствия).
+// Anti-spam: whether the trigger already fired today (for the daily greeting).
 function firedToday(lastFiredAt) {
   if (!lastFiredAt) {
     return false;
@@ -40,7 +40,7 @@ async function lastInactivityMinutes(userId) {
   return (Date.now() - last.getTime()) / 60000;
 }
 
-// Проверка одного триггера. Возвращает true, если нужно сработать.
+// Evaluate a single trigger. Returns true if it should fire.
 export async function shouldFire(trigger, userId) {
   const cfg = trigger.config || {};
   if (trigger.trigger_type === 'inactivity') {
@@ -76,7 +76,7 @@ export async function shouldFire(trigger, userId) {
   return false;
 }
 
-// Сгенерировать и доставить проактивное сообщение, затем обновить last_fired_at.
+// Generate and deliver a proactive message, then update last_fired_at.
 export async function fire(trigger, user, { candidate = null, state = null } = {}) {
   const effectiveCandidate = candidate || classifyTriggerCandidate(trigger);
   const effectiveState = state || (await getContactState(user.id));
@@ -93,9 +93,9 @@ export async function fire(trigger, user, { candidate = null, state = null } = {
     return false;
   }
 
-  // Доставка 1: сообщение появляется в истории диалога как реплика ассистента.
+  // Delivery 1: the message appears in the dialog history as an assistant reply.
   const message = await saveMessage(conversation.id, user.id, 'assistant', text);
-  // Доставка 2: очередь внешней доставки (Telegram, push, e-mail — как доделка базового требования).
+  // Delivery 2: external delivery queue (Telegram, push, e-mail — as a follow-up on the base requirement).
   await query(
     `INSERT INTO mem.notification_outbox (user_id, channel, message_text, payload)
      VALUES ($1, 'default', $2, $3::jsonb)`,
@@ -117,7 +117,7 @@ export async function fire(trigger, user, { candidate = null, state = null } = {
   return true;
 }
 
-// Один проход проактивности по всем пользователям с включёнными триггерами.
+// A single proactive pass over all users with enabled triggers.
 export async function checkProactiveTriggers() {
   if (!config.proactive.enabled) {
     return { fired: 0 };
@@ -142,7 +142,7 @@ export async function checkProactiveTriggers() {
           allowed.push({ trigger: t, candidate, decision });
         }
       } catch (err) {
-        console.error('Проактивный триггер не сработал:', t.trigger_type, err.message);
+        console.error('Proactive trigger failed:', t.trigger_type, err.message);
       }
     }
     const chosen = chooseBestAllowed(allowed);
@@ -152,7 +152,7 @@ export async function checkProactiveTriggers() {
           fired++;
         }
       } catch (err) {
-        console.error('Проактивный триггер не сработал:', chosen.trigger.trigger_type, err.message);
+        console.error('Proactive trigger failed:', chosen.trigger.trigger_type, err.message);
       }
     }
   }

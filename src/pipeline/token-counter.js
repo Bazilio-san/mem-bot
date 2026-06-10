@@ -1,11 +1,11 @@
-// Оценка размера текста в токенах. Используется для решения, надо ли сжимать холодную зону истории,
-// и для контроля итогового размера дайджеста. Размеры считаются НАШИМ кодом, а не моделью:
-// языковая модель ненадёжно считает собственные токены, поэтому доверять ей расчёт порога нельзя.
+// Estimates the size of text in tokens. Used to decide whether to compress the cold zone of history,
+// and to control the final digest size. Sizes are computed by OUR code, not by the model: a language
+// model counts its own tokens unreliably, so its threshold calculation can't be trusted.
 
-// Грубая оценка числа токенов. Для кириллицы делитель меньше привычных 4 символов на токен,
-// потому что кириллица кодируется плотнее и деление на 4 сильно занижает размер.
-// Заниженная оценка опасна: сжатие запустится слишком поздно, и холодная зона раздуется сверх порога.
-// Для срабатывания порога безопаснее завышать оценку, чем занижать.
+// Rough estimate of the token count. For Cyrillic the divisor is smaller than the usual 4 chars per token,
+// because Cyrillic is encoded more densely and dividing by 4 badly underestimates the size.
+// An underestimate is dangerous: compression would start too late and the cold zone would swell past the
+// threshold. For triggering the threshold it's safer to overestimate than to underestimate.
 export function estimateTokens(text) {
   if (!text) {
     return 0;
@@ -16,8 +16,8 @@ export function estimateTokens(text) {
   return Math.ceil(chars / charsPerToken);
 }
 
-// Сумма токенов набора сообщений. Если у сообщения уже проставлен token_count — берём его,
-// иначе оцениваем по содержимому. Так считается размер непокрытой холодной зоны.
+// Sum of tokens across a set of messages. If a message already has token_count set, we take it,
+// otherwise we estimate from its content. This is how the size of the uncovered cold zone is computed.
 export function sumMessageTokens(messages = []) {
   let total = 0;
   for (const m of messages) {
@@ -27,8 +27,8 @@ export function sumMessageTokens(messages = []) {
   return total;
 }
 
-// Размер уже существующей активной сводки в токенах. Берём сохранённое значение, если оно есть,
-// иначе оцениваем по тексту сводки.
+// Size of an already existing active summary in tokens. We take the stored value if present,
+// otherwise we estimate from the summary text.
 export function estimateSummaryTokens(summary) {
   if (!summary) {
     return 0;

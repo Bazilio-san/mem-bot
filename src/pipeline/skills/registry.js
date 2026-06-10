@@ -1,26 +1,26 @@
-// Рантайм-реестр skills: единый источник домена. Каждый каталог skills/<name>/ с файлом SKILL.md
-// задаёт доменный namespace памяти и всё поведение домена — признаки классификации, prompt основного
-// ответа, prompt извлечения фактов, закрытую схему доменной памяти, список инструментов и справочники.
+// Runtime skills registry: the single source of a domain. Each skills/<name>/ directory with a SKILL.md file
+// defines a domain memory namespace and all of the domain's behavior — classification signals, the main-answer
+// prompt, the fact-extraction prompt, the closed domain memory schema, the tool list, and references.
 //
-// Реестр читает файлы один раз при первом обращении и держит разобранные skills в памяти процесса.
-// Источник истины для схемы домена — файл рядом со skill (domain-schema.json или блок ## Domain Schema),
-// а не таблица в базе данных. Это и есть «один механизм»: домен — проекция skill.
+// The registry reads files once on first access and keeps the parsed skills in process memory.
+// The source of truth for a domain schema is the file next to the skill (domain-schema.json or the ## Domain
+// Schema block), not a table in the database. This is the "single mechanism": a domain is a projection of a skill.
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { validateDefinition } from '../../schema/meta.js';
 import { splitSkillFile, extractSection, extractJsonBlock } from './parse.js';
 
-// Кэш разобранного реестра на процесс. null означает «ещё не загружали».
+// Per-process cache of the parsed registry. null means "not loaded yet".
 let cache = null;
 
-// Абсолютный путь к каталогу skills. Относительный config.skills.dir разрешается от корня проекта (cwd).
+// Absolute path to the skills directory. A relative config.skills.dir is resolved from the project root (cwd).
 function skillsDir() {
   return path.isAbsolute(config.skills.dir) ? config.skills.dir : path.resolve(process.cwd(), config.skills.dir);
 }
 
-// Прочитать и разобрать один каталог skill. Возвращает полный объект описания skill.
-// Бросает ошибку с понятным текстом, если описание невалидно — на старте лучше упасть явно.
+// Read and parse one skill directory. Returns the full skill definition object.
+// Throws a clear error if the definition is invalid — better to fail loudly at startup.
 function loadOneSkill(dir, name) {
   const skillFile = path.join(dir, 'SKILL.md');
   const raw = fs.readFileSync(skillFile, 'utf8');
@@ -28,19 +28,19 @@ function loadOneSkill(dir, name) {
 
   const issues = [];
   if (!fm.domain_key) {
-    issues.push(`skill «${name}»: во фронтматтере не задан domain_key.`);
+    issues.push(`skill «${name}»: domain_key is not set in the frontmatter.`);
   }
   const whenToUse = fm.classification?.when_to_use;
   if (!whenToUse) {
-    issues.push(`skill «${name}»: не задан classification.when_to_use.`);
+    issues.push(`skill «${name}»: classification.when_to_use is not set.`);
   }
   const skillPrompt = extractSection(body, '# Skill Prompt');
   if (!skillPrompt) {
-    issues.push(`skill «${name}»: отсутствует блок «# Skill Prompt».`);
+    issues.push(`skill «${name}»: the "# Skill Prompt" block is missing.`);
   }
 
-  // Схема доменной памяти: из отдельного файла (memory.schema: *.json) или из блока ## Domain Schema.
-  // Схема необязательна (домен может быть без предметных сущностей), но если задана — обязана быть валидной.
+  // Domain memory schema: from a separate file (memory.schema: *.json) or from the ## Domain Schema block.
+  // The schema is optional (a domain may have no subject entities), but if set it must be valid.
   let definition = null;
   const schemaRef = fm.memory?.schema;
   try {
@@ -52,23 +52,23 @@ function loadOneSkill(dir, name) {
       definition = block ? extractJsonBlock(block) : null;
     }
   } catch (err) {
-    issues.push(`skill «${name}»: не удалось прочитать схему домена — ${err.message}`);
+    issues.push(`skill «${name}»: failed to read the domain schema — ${err.message}`);
   }
 
-  // Схема с единственным полем domain_key/title без сущностей — это «пустая» схема (домен без предметных
-  // сущностей). Валидируем мета-схемой только определения с непустым списком сущностей.
+  // A schema with only a domain_key/title field and no entities is an "empty" schema (a domain with no subject
+  // entities). We validate against the meta-schema only definitions with a non-empty entity list.
   if (definition && Array.isArray(definition.entities) && definition.entities.length) {
     const { ok, issues: defIssues } = validateDefinition(definition);
     if (!ok) {
-      issues.push(`skill «${name}»: схема домена невалидна:\n  - ${defIssues.join('\n  - ')}`);
+      issues.push(`skill «${name}»: the domain schema is invalid:\n  - ${defIssues.join('\n  - ')}`);
     }
     if (ok && definition.domain_key !== fm.domain_key) {
       issues.push(
-        `skill «${name}»: domain_key схемы «${definition.domain_key}» не совпадает с domain_key skill «${fm.domain_key}».`,
+        `skill «${name}»: schema domain_key «${definition.domain_key}» does not match skill domain_key «${fm.domain_key}».`,
       );
     }
   } else {
-    definition = null; // нет предметных сущностей — домен без схемы (свободные факты профиля)
+    definition = null; // no subject entities — a domain without a schema (free-form profile facts)
   }
 
   if (issues.length) {
@@ -81,7 +81,7 @@ function loadOneSkill(dir, name) {
     domain_key: fm.domain_key,
     title: fm.title || name,
     description: fm.description || '',
-    enabled: fm.enabled !== false, // по умолчанию включён
+    enabled: fm.enabled !== false, // enabled by default
     classification: {
       when_to_use: whenToUse,
       positive_signals: Array.isArray(fm.classification?.positive_signals) ? fm.classification.positive_signals : [],
@@ -103,12 +103,12 @@ function loadOneSkill(dir, name) {
     },
     skillPrompt,
     factExtractionPrompt: extractSection(body, '## Fact Extraction Prompt'),
-    definition, // закрытая схема доменной памяти или null
+    definition, // closed domain memory schema or null
   };
 }
 
-// Загрузить весь реестр skills из каталога. Идемпотентно: повторные вызовы возвращают кэш.
-// Бросает ошибку при дубликатах name/domain_key или при невалидном описании любого skill.
+// Load the whole skills registry from the directory. Idempotent: repeated calls return the cache.
+// Throws on duplicate name/domain_key or on an invalid definition of any skill.
 export function loadSkills({ force = false } = {}) {
   if (cache && !force) {
     return cache;
@@ -122,7 +122,7 @@ export function loadSkills({ force = false } = {}) {
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory());
   } catch {
-    // Каталога skills нет — пустой реестр. Это допустимо, когда флаг выключен.
+    // No skills directory — empty registry. This is allowed when the flag is off.
     cache = { byName, byDomain };
     return cache;
   }
@@ -134,11 +134,11 @@ export function loadSkills({ force = false } = {}) {
     }
     const skill = loadOneSkill(skillDir, entry.name);
     if (byName.has(skill.name)) {
-      throw new Error(`Дублирующееся имя skill: «${skill.name}».`);
+      throw new Error(`Duplicate skill name: «${skill.name}».`);
     }
     if (byDomain.has(skill.domain_key)) {
       throw new Error(
-        `Несколько skills претендуют на domain_key «${skill.domain_key}»: «${byDomain.get(skill.domain_key).name}» и «${skill.name}».`,
+        `Multiple skills claim domain_key «${skill.domain_key}»: «${byDomain.get(skill.domain_key).name}» and «${skill.name}».`,
       );
     }
     byName.set(skill.name, skill);
@@ -149,22 +149,22 @@ export function loadSkills({ force = false } = {}) {
   return cache;
 }
 
-// Сбросить кэш реестра (для тестов и admin-reload).
+// Reset the registry cache (for tests and admin-reload).
 export function invalidateSkillsCache() {
   cache = null;
 }
 
-// Разобрать один каталог навыка в полный объект (для инструментария редактирования: пере-разбор одного навыка).
+// Parse one skill directory into a full object (for the editing toolkit: re-parsing a single skill).
 export function parseSkillDir(dir, name) {
   return loadOneSkill(dir, name);
 }
 
-// Все навыки реестра полными объектами (для проверок уникальности при создании и редактировании).
+// All registry skills as full objects (for uniqueness checks during creation and editing).
 export function getAllSkills() {
   return [...loadSkills().byName.values()];
 }
 
-// Компактный список для роутера: только поля, нужные классификатору.
+// Compact list for the router: only the fields the classifier needs.
 export function listSkillRoutes() {
   const { byName } = loadSkills();
   return [...byName.values()]
@@ -180,56 +180,56 @@ export function listSkillRoutes() {
     }));
 }
 
-// Полное описание skill по имени.
+// Full skill definition by name.
 export function getSkill(name) {
   return loadSkills().byName.get(name) || null;
 }
 
-// Активный skill для доменного ключа.
+// Active skill for a domain key.
 export function getSkillByDomain(domainKey) {
   return loadSkills().byDomain.get(domainKey) || null;
 }
 
-// Содержимое блока «# Skill Prompt».
+// Contents of the "# Skill Prompt" block.
 export function getSkillPrompt(name) {
   return getSkill(name)?.skillPrompt || '';
 }
 
-// Содержимое блока «## Fact Extraction Prompt».
+// Contents of the "## Fact Extraction Prompt" block.
 export function getFactExtractionPrompt(name) {
   return getSkill(name)?.factExtractionPrompt || '';
 }
 
-// Закрытая схема доменной памяти skill (объект definition) или null.
+// Closed domain memory schema of a skill (the definition object) or null.
 export function getDomainSchema(name) {
   return getSkill(name)?.definition || null;
 }
 
-// Схема домена по доменному ключу (мост для слоя записи памяти: validateAndCanonicalize/extract).
+// Domain schema by domain key (a bridge for the memory-writing layer: validateAndCanonicalize/extract).
 export function getDomainDefinitionByKey(domainKey) {
   return getSkillByDomain(domainKey)?.definition || null;
 }
 
-// Прочитать справочник skill из каталога references/**. Запрещает абсолютные пути и выход через «..».
-// Возвращает содержимое файла, обрезанное до config.skills.referenceMaxBytes. Бросает ошибку при нарушении.
+// Read a skill reference from the references/** directory. Forbids absolute paths and escaping via "..".
+// Returns the file contents truncated to config.skills.referenceMaxBytes. Throws on a violation.
 export function getReference(name, relPath) {
   const skill = getSkill(name);
   if (!skill) {
-    throw new Error(`Неизвестный skill: «${name}».`);
+    throw new Error(`Unknown skill: «${name}».`);
   }
   if (!skill.references.allowed) {
-    throw new Error(`У skill «${name}» чтение справочников выключено.`);
+    throw new Error(`Reference reading is disabled for skill «${name}».`);
   }
 
   const rel = String(relPath || '').replace(/\\/g, '/');
   if (!rel || path.isAbsolute(rel) || rel.split('/').includes('..')) {
-    throw new Error('Недопустимый путь к справочнику.');
+    throw new Error('Invalid reference path.');
   }
   const refRoot = path.resolve(skill.dir, 'references');
   const target = path.resolve(refRoot, rel);
-  // Двойная защита: итоговый путь обязан оставаться внутри references данного skill.
+  // Double protection: the resulting path must stay inside this skill's references.
   if (target !== refRoot && !target.startsWith(refRoot + path.sep)) {
-    throw new Error('Путь к справочнику выходит за пределы каталога skill.');
+    throw new Error('Reference path escapes the skill directory.');
   }
   const buf = fs.readFileSync(target);
   const limit = config.skills.referenceMaxBytes;

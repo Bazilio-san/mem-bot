@@ -1,20 +1,20 @@
-// Универсальный механизм применения схемы домена при записи факта.
-// Делает две вещи: проверяет candidate.data по закрытой схеме сущности и приводит
-// candidate.entity_key к стабильному виду по правилу домена (словарь синонимов или slug).
+// A universal mechanism for applying the domain schema when writing a fact.
+// It does two things: validates candidate.data against the entity's closed schema and brings
+// candidate.entity_key to a stable form by the domain rule (synonym dictionary or slug).
 //
-// Схема обязательна. Предметный факт (тот, у которого задан entity_type) сохраняется
-// только если у домена есть активная схема, в ней объявлена эта сущность, и data проходит
-// валидацию. Иначе факт отклоняется (ok=false) и НЕ сохраняется — никакого «мягкого» режима.
-// Факт без entity_type (например свободное предпочтение профиля) схемой не описывается и
-// пропускается без изменений: это не сущность домена, а валидировать в нём нечего.
+// The schema is mandatory. A subject fact (one with entity_type set) is saved only if the domain
+// has an active schema, that schema declares this entity, and data passes validation. Otherwise the
+// fact is rejected (ok=false) and is NOT saved — there is no "soft" mode.
+// A fact without entity_type (e.g. a free-form profile preference) is not described by a schema and
+// passes through unchanged: it is not a domain entity, and there is nothing to validate.
 import { ajv } from './meta.js';
 import { getEntitySpec, loadDomainDefinition, getActiveVersion } from './registry.js';
 import { config } from '../config.js';
 import { embed } from '../llm.js';
 
-// ---- Транслитерация и slug --------------------------------------------------
+// ---- Transliteration and slug -----------------------------------------------
 
-// Сопоставление кириллических букв латинским сочетаниям для построения slug.
+// Mapping of Cyrillic letters to Latin combinations for building a slug.
 const TRANSLIT = {
   а: 'a',
   б: 'b',
@@ -51,8 +51,8 @@ const TRANSLIT = {
   я: 'ya',
 };
 
-// Привести произвольную строку к slug: транслитерация кириллицы, нижний регистр,
-// разделение дефисами, без лишних символов. Например «Стамбул» становится «stambul».
+// Convert an arbitrary string to a slug: transliterate Cyrillic, lowercase, hyphen separation, no extra
+// characters. For example "Стамбул" becomes "stambul".
 export function slugify(value) {
   const lower = String(value || '')
     .trim()
@@ -67,11 +67,11 @@ export function slugify(value) {
       out += '-';
     }
   }
-  // Схлопнуть повторяющиеся дефисы и обрезать их по краям.
+  // Collapse repeated hyphens and trim them at the edges.
   return out.replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
-// ---- Косинусная близость для канонизации ключа по смыслу --------------------
+// ---- Cosine similarity for canonicalizing a key by meaning ------------------
 
 function cosine(a, b) {
   let dot = 0;
@@ -88,9 +88,9 @@ function cosine(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// Подобрать ближайший по смыслу ключ словаря к присланному значению через эмбеддинги.
-// Возвращает { key, score } или null, если эмбеддинги недоступны. Используется только
-// как запасной вариант, когда точное совпадение и синонимы не сработали.
+// Find the dictionary key closest in meaning to the given value via embeddings.
+// Returns { key, score } or null if embeddings are unavailable. Used only as a fallback
+// when an exact match and synonyms did not work.
 async function nearestVocabKey(value, vocabulary) {
   const valueVec = await embed(value);
   if (!valueVec) {
@@ -110,10 +110,10 @@ async function nearestVocabKey(value, vocabulary) {
   return best;
 }
 
-// ---- Канонизация entity_key -------------------------------------------------
+// ---- entity_key canonicalization --------------------------------------------
 
-// Привести entity_key кандидата к каноническому виду по правилу сущности.
-// Возвращает { entity_key, issues }.
+// Bring the candidate's entity_key to canonical form by the entity rule.
+// Returns { entity_key, issues }.
 async function canonicalizeKey(rawKey, keySpec) {
   const issues = [];
   const { mode } = keySpec;
@@ -128,12 +128,12 @@ async function canonicalizeKey(rawKey, keySpec) {
 
   // fixed_vocab
   const vocabulary = keySpec.vocabulary || [];
-  // 1. Точное совпадение со словарём — ничего менять не нужно.
+  // 1. Exact match with the dictionary — nothing to change.
   if (vocabulary.includes(rawKey)) {
     return { entity_key: rawKey, issues };
   }
 
-  // 2. Поиск по синонимам: «откуда» приводим к каноническому «departure».
+  // 2. Synonym lookup: "откуда" is mapped to the canonical "departure".
   const lowered = String(rawKey).trim().toLowerCase();
   for (const [canonical, synonyms] of Object.entries(keySpec.synonyms || {})) {
     if ((synonyms || []).some((s) => String(s).trim().toLowerCase() === lowered)) {
@@ -141,7 +141,7 @@ async function canonicalizeKey(rawKey, keySpec) {
     }
   }
 
-  // 3. Ближайший по смыслу ключ словаря (эмбеддинги), если близость выше порога.
+  // 3. The dictionary key closest in meaning (embeddings), if similarity is above the threshold.
   const nearest = await nearestVocabKey(rawKey, vocabulary);
   if (nearest && nearest.score >= config.schema.keyEmbedThreshold) {
     issues.push(
@@ -150,19 +150,18 @@ async function canonicalizeKey(rawKey, keySpec) {
     return { entity_key: nearest.key, issues };
   }
 
-  // 4. Запасной вариант: slug от исходного значения, плюс пометка о незаканонизированном ключе.
+  // 4. Fallback: a slug from the original value, plus a note about the un-canonicalized key.
   const fallback = slugify(rawKey) || rawKey;
   issues.push(`entity_key «${rawKey}» не найден в словаре домена; записан как «${fallback}».`);
   return { entity_key: fallback, issues };
 }
 
-// ---- Кодовая нормализация data ----------------------------------------------
+// ---- Code-level normalization of data ---------------------------------------
 
-// Дешёвая нормализация объекта data под закрытую схему: отбрасывает лишние ключи,
-// приводит очевидные типы (число-строка → число, одиночное значение → массив, когда
-// схема ждёт массив), подставляет null отсутствующим полям. Это не «мягкий режим»,
-// а приведение заведомо однозначных расхождений; то, что после неё всё ещё не сходится,
-// считается невалидным и факт отклоняется.
+// Cheap normalization of the data object to fit the closed schema: drops extra keys, coerces obvious types
+// (numeric string -> number, single value -> array when the schema expects an array), fills missing fields
+// with null. This is not a "soft mode" but coercion of unambiguous mismatches; whatever still doesn't fit
+// afterwards is considered invalid and the fact is rejected.
 function normalizeData(data, dataSchema) {
   const props = dataSchema.properties || {};
   const out = {};
@@ -171,13 +170,13 @@ function normalizeData(data, dataSchema) {
     const types = Array.isArray(fieldSchema.type) ? fieldSchema.type : [fieldSchema.type];
 
     if (value === undefined) {
-      // Отсутствующее поле: null, если допустим, иначе пустой массив для массива.
+      // Missing field: null if allowed, otherwise an empty array for an array.
       value = types.includes('null') ? null : types.includes('array') ? [] : null;
     } else if (types.includes('array') && !Array.isArray(value) && value !== null) {
-      // Одиночное значение там, где ждут массив — оборачиваем в массив.
+      // A single value where an array is expected — wrap it in an array.
       value = [value];
     } else if ((types.includes('integer') || types.includes('number')) && typeof value === 'string') {
-      // Строка-число — приводим к числу, если получается.
+      // A numeric string — coerce to a number if possible.
       const num = Number(value);
       if (!Number.isNaN(num)) {
         value = types.includes('integer') ? Math.trunc(num) : num;
@@ -188,19 +187,19 @@ function normalizeData(data, dataSchema) {
   return out;
 }
 
-// ---- Главная функция --------------------------------------------------------
+// ---- Main function ----------------------------------------------------------
 
-// Проверить и канонизировать кандидата перед сохранением в память.
-// Возвращает { ok, candidate, issues, schema_version, reason? }.
+// Validate and canonicalize a candidate before saving it to memory.
+// Returns { ok, candidate, issues, schema_version, reason? }.
 //
-// Правила (схема обязательна):
-//  - нет entity_type → факт не является сущностью домена, пропускаем без изменений (ok=true);
-//  - есть entity_type, но у домена нет схемы → ok=false (reason 'domain_without_schema');
-//  - есть entity_type, но он не объявлен в схеме домена → ok=false (reason 'entity_not_in_schema');
-//  - data не проходит валидацию даже после нормализации → ok=false (reason 'data_invalid').
-// При ok=false вызывающий код (processCandidate) факт НЕ сохраняет.
+// Rules (the schema is mandatory):
+//  - no entity_type -> the fact is not a domain entity, pass it through unchanged (ok=true);
+//  - has entity_type but the domain has no schema -> ok=false (reason 'domain_without_schema');
+//  - has entity_type but it is not declared in the domain schema -> ok=false (reason 'entity_not_in_schema');
+//  - data does not pass validation even after normalization -> ok=false (reason 'data_invalid').
+// On ok=false the calling code (processCandidate) does NOT save the fact.
 export async function validateAndCanonicalize(domainKey, candidate) {
-  // Факт без сущности схемой не описывается — валидировать нечего.
+  // A fact without an entity is not described by a schema — nothing to validate.
   if (!candidate.entity_type) {
     return { ok: true, candidate, issues: [], schema_version: null };
   }
@@ -233,7 +232,7 @@ export async function validateAndCanonicalize(domainKey, candidate) {
   let data = candidate.data || {};
 
   if (!validateData(data)) {
-    // Один уровень — дешёвая кодовая нормализация. Если и после неё не сходится — факт невалиден.
+    // One pass — cheap code-level normalization. If it still doesn't fit afterwards — the fact is invalid.
     data = normalizeData(data, spec.data_schema);
     if (!validateData(data)) {
       for (const e of validateData.errors || []) {
@@ -243,7 +242,7 @@ export async function validateAndCanonicalize(domainKey, candidate) {
     }
   }
 
-  // Канонизация ключа по правилу сущности.
+  // Canonicalize the key by the entity rule.
   const { entity_key: canonicalKey, issues: keyIssues } = await canonicalizeKey(candidate.entity_key, spec.entity_key);
   issues.push(...keyIssues);
 

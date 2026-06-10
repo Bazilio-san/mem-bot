@@ -1,41 +1,41 @@
 // src/mcp/config.js
-// Список подключаемых MCP-серверов читается из JSON-файла в формате Claude Code (.mcp.json).
-// Файл не под контролем версий (см. .gitignore): у каждого окружения он свой и может содержать секреты.
-// Отсутствие файла или ошибка разбора не должны ронять процесс — в этом случае серверов просто нет.
+// The list of MCP servers to connect to is read from a JSON file in Claude Code format (.mcp.json).
+// The file is not under version control (see .gitignore): each environment has its own and it may contain secrets.
+// A missing file or a parse error must not crash the process — in that case there are simply no servers.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config } from '../config.js';
 
-// Путь к файлу конфигурации. По умолчанию .mcp.json в корне проекта; можно переопределить параметром
-// config.mcp.configPath (переменная окружения MCP_CONFIG_PATH), если файл лежит в другом месте.
-// Путь резолвится относительно текущего рабочего каталога процесса (process.cwd()).
+// Path to the configuration file. Defaults to .mcp.json in the project root; can be overridden via
+// config.mcp.configPath (the MCP_CONFIG_PATH environment variable) if the file lives elsewhere.
+// The path is resolved relative to the process's current working directory (process.cwd()).
 const CONFIG_PATH = resolve(process.cwd(), config.mcp.configPath);
 
-// Привести одну запись из секции mcpServers формата Claude Code к внутреннему описанию сервера.
-// Поддерживается только транспорт по HTTP (StreamableHTTP): для записи нужен url. Поля title,
-// requiresAdmin и disabled — необязательные расширения; их нет в стандартном формате Claude Code.
+// Normalize a single entry from the mcpServers section of the Claude Code format into an internal server
+// description. Only HTTP transport (StreamableHTTP) is supported: an entry needs a url. The title,
+// requiresAdmin and disabled fields are optional extensions; they are not in the standard Claude Code format.
 function normalizeServer(alias, raw) {
   const type = raw.type || 'http';
   if (type !== 'http' && type !== 'sse') {
-    console.error(`MCP «${alias}»: транспорт «${type}» не поддерживается (нужен http/sse). Пропускаю.`);
+    console.error(`MCP "${alias}": transport "${type}" is not supported (http/sse required). Skipping.`);
     return null;
   }
   if (!raw.url) {
-    console.error(`MCP «${alias}»: не задан url. Пропускаю.`);
+    console.error(`MCP "${alias}": url is not set. Skipping.`);
     return null;
   }
   return {
-    alias, // короткий префикс, попадёт в имена инструментов модели
-    title: raw.title || alias, // человекочитаемое имя для журналов и статусов
+    alias, // short prefix, ends up in the model's tool names
+    title: raw.title || alias, // human-readable name for logs and statuses
     url: raw.url,
-    headers: raw.headers || null, // заголовки транспорта — место для будущего токена авторизации
-    enabled: raw.disabled !== true, // совместимо с полем «disabled» из формата Claude Code
+    headers: raw.headers || null, // transport headers — the place for a future authorization token
+    enabled: raw.disabled !== true, // compatible with the "disabled" field of the Claude Code format
     requiresAdmin: raw.requiresAdmin === true,
   };
 }
 
-// Прочитать и разобрать .mcp.json. Любой сбой (нет файла, битый JSON, не тот формат) приводит к пустому
-// списку серверов, а не к падению процесса. Содержательная причина пишется в журнал.
+// Read and parse .mcp.json. Any failure (no file, broken JSON, wrong format) results in an empty server
+// list rather than a crashed process. The meaningful reason is written to the log.
 export function loadMcpServers() {
   let text;
   try {
@@ -43,8 +43,8 @@ export function loadMcpServers() {
   } catch (err) {
     if (err.code === 'ENOENT') {
       return [];
-    } // файла нет — это штатная ситуация, не ошибка
-    console.error(`MCP: не удалось прочитать ${CONFIG_PATH}: ${err.message}. MCP-серверы отключены.`);
+    } // no file — this is a normal situation, not an error
+    console.error(`MCP: failed to read ${CONFIG_PATH}: ${err.message}. MCP servers are disabled.`);
     return [];
   }
 
@@ -52,13 +52,13 @@ export function loadMcpServers() {
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    console.error(`MCP: ${CONFIG_PATH} содержит некорректный JSON: ${err.message}. MCP-серверы отключены.`);
+    console.error(`MCP: ${CONFIG_PATH} contains invalid JSON: ${err.message}. MCP servers are disabled.`);
     return [];
   }
 
   const servers = parsed && parsed.mcpServers;
   if (!servers || typeof servers !== 'object') {
-    console.error(`MCP: в ${CONFIG_PATH} нет объекта «mcpServers». MCP-серверы отключены.`);
+    console.error(`MCP: ${CONFIG_PATH} has no "mcpServers" object. MCP servers are disabled.`);
     return [];
   }
 

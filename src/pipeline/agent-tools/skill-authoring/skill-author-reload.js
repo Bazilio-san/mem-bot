@@ -1,7 +1,7 @@
 import { loadSkills, invalidateSkillsCache, getAllSkills } from '../../skills/registry.js';
 import { authoringEnabled } from '../../skills/authoring-support.js';
 
-// Перечитать реестр навыков с диска (после правок файлов вне бота).
+// Reload the skills registry from disk (after editing files outside the bot).
 export const skillAuthorReloadTool = {
   name: 'skill_author_reload',
   title: 'Перезагружаю реестр навыков...',

@@ -1,7 +1,7 @@
 import { validateSkill } from '../../skills/writer.js';
 import { authoringEnabled, editableOrStaged } from '../../skills/authoring-support.js';
 
-// Проверить навык без записи: подготовленный в этом диалоге черновик или сохранённый на диске.
+// Validate a skill without writing: the draft prepared in this conversation, or the on-disk skill.
 export const skillAuthorValidateTool = {
   name: 'skill_author_validate',
   title: 'Проверяю навык...',
