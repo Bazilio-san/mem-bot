@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const { execSync, spawn } = require('child_process');
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const VERSION = '2026.06.10-0200';
 console.log(`Update script version: ${VERSION}`);
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 // Name of this folder
 const scriptDirName = path.basename(__dirname);
 process.chdir(__dirname);
@@ -20,7 +23,7 @@ const lastDeployLogFile = path.join(CWD, `deploy__${scriptDirName}__last_deploy.
 const appRuntimeLogFile = path.join(CWD, `${scriptDirName}-server.log`);
 
 const DEFAULT_CONFIG = {
-  branch: 'main',
+  branch: 'master',
   serviceName: 'mem-bot',
   serviceStartCommand: 'npm run server',
   serviceNodeEnv: 'production',

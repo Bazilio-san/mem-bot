@@ -15,12 +15,16 @@ const r = '\x1b[1;31m', lr = '\x1b[0;31m';
 const y = '\x1b[1;33m', ly = '\x1b[0;33m';
 const c0 = '\x1b[0m';
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const { execSync, spawn, spawnSync } = require('child_process');
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { execSync, spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 /* Script configuration */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const SCRIPT_DIR = __dirname; // deploy/
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '..'); // Project root
 process.chdir(PROJECT_ROOT);
@@ -229,22 +233,13 @@ async function detectPort () {
   if (PORT) return PORT;
   // Try to load config from project root
   try {
-    // Ensure module resolution relative to project root
-    const createRequire = require('module').createRequire;
-    const projectRequire = createRequire(path.join(PROJECT_ROOT, 'package.json'));
-    let cfg;
-    try {
-      cfg = projectRequire('config');
+      const projectRequire = createRequire(path.join(PROJECT_ROOT, 'package.json'));
+      const cfg = projectRequire('config');
+      const port = cfg?.webServer?.port || cfg?.server?.port;
+      if (port && String(port).match(/^[0-9]{2,5}$/)) return String(port);
     } catch (e) {
-      // Try dynamic import
-      cfg = await new Function('p', 'return import(p)')('config');
-      cfg = cfg.default || cfg;
+      // ignore, will fail below
     }
-    const port = cfg?.webServer?.port || cfg?.server?.port;
-    if (port && String(port).match(/^[0-9]{2,5}$/)) return String(port);
-  } catch (e) {
-    // ignore, will fail below
-  }
   err(`${r}**** Error: Could not detect port from config ****${c0}`);
   process.exit(1);
 }
