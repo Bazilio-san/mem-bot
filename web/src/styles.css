@@ -104,6 +104,21 @@ body {
   white-space: nowrap;
 }
 
+/* Компактные строки: ужимаем вертикальные отступы ячеек тела и заголовков таблицы PrimeVue,
+   чтобы в один экран помещалось больше фактов. Горизонтальные отступы оставляем от темы Aura. */
+.memory-group .p-datatable-tbody > tr > td,
+.memory-group .p-datatable-thead > tr > th {
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.2;
+}
+
+/* Кнопка удаления не должна раздувать строку: убираем лишнюю высоту у иконочной кнопки. */
+.memory-group .col-actions .p-button {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
 .empty,
 .error {
   padding: 16px;

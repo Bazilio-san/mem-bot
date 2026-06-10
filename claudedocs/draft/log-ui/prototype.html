@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mem-bot · Логи LLM — прототип</title>
+<style>
+  :root {
+    --c-user: #ffffdc; --c-intent: #fff5e3; --c-stage: #d6cffd; --c-req: #e3f2fd; --c-resp: #e8f5e8;
+    --c-toolcall: #d2f5e8; --c-toolres: #eafbda; --c-embed: #f5edff; --c-post: #ffe7e3; --c-compress: #ffebd9;
+    --c-proactive: #c5ebf1; --c-voice: #f0e6af; --c-answer: #ebffe8; --c-error: #faabda; --c-other: #e5e5e5;
+    --ink: #2b2b2b; --ink-dim: #8a8a8a; --accent: #e8a33d; --line: #ddd;
+    font-size: 14px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.45 "Segoe UI", Roboto, sans-serif; color: var(--ink); background: #f3f4f6;
+         height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; cursor: pointer; }
+
+  /* ---------- Шапка ---------- */
+  .topbar { display: flex; align-items: center; gap: 16px; padding: 8px 14px; background: #fff;
+            border-bottom: 1px solid var(--line); z-index: 30; }
+  .brand { font-weight: 600; color: var(--accent); white-space: nowrap; }
+  .search { position: relative; flex: 0 0 420px; }
+  .search input { width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .suggestions { position: absolute; top: 34px; left: 0; right: 0; background: #fff; border: 1px solid var(--line);
+                 border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.12); display: none; overflow: hidden; }
+  .suggestions.open { display: block; }
+  .sg { padding: 7px 10px; display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+  .sg:hover { background: #f3f6ff; }
+  .sg .nm { font-weight: 600; } .sg .ext { color: var(--ink-dim); font-size: 12px; }
+  .sg .last { margin-left: auto; color: var(--ink-dim); font-size: 11px; }
+  .cur-user { display: flex; align-items: center; gap: 8px; color: var(--ink-dim); }
+  .cur-user b { color: var(--ink); }
+
+  /* ---------- Каркас ---------- */
+  .main { flex: 1; display: grid; grid-template-columns: 380px 1fr; min-height: 0; }
+
+  /* ---------- Чат ---------- */
+  .chat-pane { display: flex; flex-direction: column; background: #e7ebf0; border-right: 1px solid var(--line);
+               min-height: 0; }
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .day-sep { align-self: center; font-size: 11px; color: #777; background: rgba(255,255,255,.75);
+             padding: 2px 10px; border-radius: 10px; margin: 6px 0; }
+  .lazy-hint { align-self: center; font-size: 11px; color: #999; padding: 4px; }
+
+  .msg { display: flex; align-items: flex-end; gap: 6px; max-width: 92%; }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg.bot  { align-self: flex-start; }
+  .bubble { padding: 6px 10px; border-radius: 12px; background: #fff; box-shadow: 0 1px 1px rgba(0,0,0,.08);
+            white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble { background: var(--c-user); border-bottom-right-radius: 3px; }
+  .msg.bot  .bubble { background: #fff; border-bottom-left-radius: 3px; }
+  .bubble .time { font-size: 10px; color: #999; margin-left: 8px; white-space: nowrap; }
+  .log-btn { flex: none; border: 1px solid var(--line); background: #fff; color: #777; border-radius: 6px;
+             width: 24px; height: 24px; font-size: 13px; line-height: 1; padding: 0; }
+  .log-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .msg.active .bubble { outline: 2px solid var(--accent); }
+
+  .svc-badge { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11px;
+               color: #555; background: var(--c-other); border: 1px solid rgba(0,0,0,.08); border-radius: 12px;
+               padding: 2px 10px; cursor: pointer; }
+  .svc-badge:hover { filter: brightness(.96); }
+  .svc-badge.active { outline: 2px solid var(--accent); }
+  .svc-badge .t { color: #999; }
+
+  .chat-input { display: flex; gap: 6px; padding: 8px; background: #fff; border-top: 1px solid var(--line); }
+  .chat-input input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .chat-input button { border: none; background: var(--accent); color: #fff; border-radius: 6px; padding: 0 14px; }
+
+  /* ---------- Журнал ---------- */
+  .log-pane { display: flex; flex-direction: column; min-height: 0; background: #fff; }
+  .log-head { display: flex; align-items: center; gap: 14px; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+  .log-head .ttl { color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .log-head .totals { color: var(--ink-dim); font-size: 12px; }
+  .log-head .sp { flex: 1; }
+  .hbtn { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 3px 9px; color: #666; }
+  .hbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .hbtn.ai { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  .log-rows { flex: 1; overflow-y: auto; }
+  .row { border-bottom: 1px solid rgba(0,0,0,.05); }
+  .row-h { display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer; user-select: none; }
+  .row-h:hover { filter: brightness(.97); }
+  .row-h .n { width: 22px; text-align: right; color: #999; font-size: 11px; flex: none; }
+  .row-h .ic { flex: none; width: 18px; text-align: center; }
+  .row-h .cap { font-weight: 500; white-space: nowrap; }
+  .row-h .meta { color: #9aa0a6; font-size: 11px; margin-left: 6px; white-space: nowrap; }
+  .row-h .err-meta { color: #b3261e; }
+  .row-h .when { margin-left: auto; color: #9aa0a6; font-size: 11px; white-space: nowrap; }
+  .row-h .chev { color: #9aa0a6; width: 14px; flex: none; text-align: center; }
+  .row-body { padding: 8px 12px 10px 44px; font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+              background: rgba(255,255,255,.45); }
+  .row.collapsed .row-body { display: none; }
+  .grp-collapsed { display: none !important; }
+  .stage .cap { font-weight: 600; }
+  .truncated-note { font-size: 11px; color: #b3261e; background: #fff3f2; border: 1px solid #f3c1bd;
+                    border-radius: 5px; padding: 2px 8px; display: inline-block; margin-bottom: 6px; }
+
+  /* ---------- Payload: прогрессивное раскрытие ---------- */
+  .pp-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-family: inherit; }
+  .chip { background: rgba(0,0,0,.06); border-radius: 5px; padding: 1px 8px; font-size: 11px; }
+  .chip b { font-weight: 600; }
+  .sect { margin-top: 8px; }
+  .sect-h { display: flex; align-items: center; gap: 8px; font: 600 12px "Segoe UI", sans-serif; color: #555;
+            margin-bottom: 4px; }
+  .mini { border: none; background: none; color: #4567d8; font-size: 11px; padding: 0; text-decoration: underline; }
+  .m-item { border: 1px solid rgba(0,0,0,.08); border-radius: 6px; margin-bottom: 4px; background: #fff; }
+  .m-head { display: flex; align-items: center; gap: 8px; padding: 3px 8px; cursor: pointer; }
+  .m-head:hover { background: #fafafa; }
+  .role { flex: none; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 1px 6px; text-transform: uppercase; }
+  .role.system { background: #ece6ff; color: #5b46b5; } .role.user { background: #fff7c2; color: #8a6d00; }
+  .role.assistant { background: #def0de; color: #2c6b2f; } .role.tool { background: #d9f2ec; color: #0e6e5c; }
+  .m-prev { color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .m-len { color: #aaa; font-size: 10px; flex: none; }
+  .m-body { border-top: 1px dashed rgba(0,0,0,.1); padding: 6px 8px; display: none; }
+  .m-item.open .m-body { display: block; }
+  .tcall-tag { font-size: 10px; background: var(--c-toolcall); border-radius: 4px; padding: 1px 6px; flex: none; }
+
+  .tool-item { border: 1px solid rgba(0,0,0,.08); border-radius: 6px; margin-bottom: 4px; background: #fff; }
+  .tool-h { display: flex; gap: 8px; align-items: baseline; padding: 3px 8px; cursor: pointer; }
+  .tool-h:hover { background: #fafafa; }
+  .tool-h .tn { font-weight: 600; color: #0e6e5c; }
+  .tool-h .td { color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+                font-family: "Segoe UI", sans-serif; }
+  .tool-b { display: none; border-top: 1px dashed rgba(0,0,0,.1); padding: 6px 8px;
+            font-family: "Segoe UI", sans-serif; }
+  .tool-item.open .tool-b { display: block; }
+  .tool-params { display: none; margin-top: 6px; }
+  .tool-item.params .tool-params { display: block; }
+
+  /* ---------- Просмотрщик содержимого ---------- */
+  .cv { position: relative; border: 1px solid rgba(0,0,0,.1); border-radius: 6px; background: #fcfcfc; }
+  .cv-bar { position: absolute; top: 4px; right: 6px; display: flex; gap: 4px; z-index: 2; }
+  .cv-bar select { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: #666; }
+  .cv-bar button { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: #666; }
+  .cv-out { padding: 8px 10px; max-height: 420px; overflow: auto; }
+  .cv-out pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .cv-out.rendered { font-family: "Segoe UI", sans-serif; }
+  .cv-out.rendered h1, .cv-out.rendered h2, .cv-out.rendered h3 { margin: 6px 0 4px; }
+  .cv-out.rendered ul { margin: 4px 0; padding-left: 20px; }
+  .cv-out.rendered code { background: rgba(0,0,0,.06); border-radius: 3px; padding: 0 4px; }
+  .jk { color: #000080; } .js { color: #1a7a1a; } .jn { color: #0000ff; } .jb { color: #007300; }
+
+  /* ---------- Модалы ---------- */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center;
+             justify-content: center; z-index: 100; }
+  .overlay.open { display: flex; }
+  .dlg { background: #fff; border-radius: 10px; width: min(860px, 92vw); max-height: 88vh; display: flex;
+         flex-direction: column; box-shadow: 0 16px 50px rgba(0,0,0,.3); }
+  .dlg-h { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line);
+           font-weight: 600; }
+  .dlg-h .x { margin-left: auto; border: none; background: none; font-size: 16px; color: #999; }
+  .dlg-b { padding: 14px 16px; overflow: auto; }
+  .frow { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .frow label { display: flex; gap: 5px; align-items: center; }
+  .frow select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .dlg textarea { width: 100%; min-height: 70px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  .ai-out { margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+            background: #fafafa; min-height: 60px; white-space: pre-wrap; display: none; }
+  .run { margin-top: 10px; border: none; background: var(--accent); color: #fff; border-radius: 6px;
+         padding: 7px 18px; font-weight: 600; }
+  .empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #aaa; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">mem-bot · Логи LLM</div>
+  <div class="search">
+    <input id="userQ" placeholder="Пользователь: id, telegram id или имя…" autocomplete="off">
+    <div class="suggestions" id="sugBox"></div>
+  </div>
+  <div class="cur-user">Пользователь: <b id="curUser">Наталья</b> <span id="curExt">(tg 123456789)</span></div>
+</header>
+
+<div class="main">
+  <aside class="chat-pane">
+    <div class="chat-scroll" id="chat"></div>
+    <div class="chat-input">
+      <input placeholder="Написать сообщение от имени админа…">
+      <button title="Отправить">➤</button>
+    </div>
+  </aside>
+  <section class="log-pane">
+    <div class="log-head" id="logHead" style="display:none">
+      <span class="ttl" id="lhTitle">Журнал</span>
+      <span class="totals" id="lhTotals"></span>
+      <span class="sp"></span>
+      <button class="hbtn" onclick="expandAll(true)" title="Развернуть всё">▼</button>
+      <button class="hbtn" onclick="expandAll(false)" title="Свернуть всё">▲</button>
+      <button class="hbtn ai" onclick="openAnalyze()">Спросить ИИ</button>
+    </div>
+    <div class="log-rows" id="rows"><div class="empty">Выберите сообщение или сервисный бэйдж слева</div></div>
+  </section>
+</div>
+
+<!-- Модал крупного содержимого -->
+<div class="overlay" id="cvOverlay">
+  <div class="dlg">
+    <div class="dlg-h"><span id="cvTitle">Содержимое</span><button class="x" onclick="closeOverlay('cvOverlay')">✕</button></div>
+    <div class="dlg-b" id="cvHost"></div>
+  </div>
+</div>
+
+<!-- Модал AI-анализа -->
+<div class="overlay" id="aiOverlay">
+  <div class="dlg">
+    <div class="dlg-h">Интеллектуальный анализ контекста запроса<button class="x" onclick="closeOverlay('aiOverlay')">✕</button></div>
+    <div class="dlg-b">
+      <div class="frow">
+        <label><input type="radio" name="eng" value="llm" checked onchange="aiEngine()"> Штатная LLM</label>
+        <select id="aiModel"><option>gpt-5.4-mini</option><option>gpt-5.4</option></select>
+        <label><input type="radio" name="eng" value="cli" onchange="aiEngine()"> CLI-инструмент</label>
+        <select id="aiCli" disabled><option>claude -p (в каталоге проекта)</option><option>codex exec</option></select>
+      </div>
+      <div class="frow" style="color:#888;font-size:12px">
+        Контекст: запрос № <b id="aiCtx" style="margin:0 4px">7</b> (Запрос → LLM, main_agent_answer) + ответ модели.
+      </div>
+      <textarea id="aiQ">Посмотри на запрос и ответ модели. Почему она ответила именно так? Что посоветуешь изменить в промпте или контексте?</textarea>
+      <button class="run" onclick="runAnalyze()">Запустить анализ</button>
+      <div class="ai-out" id="aiOut"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================ Утилиты */
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmtTok = (n) => n == null ? '' : `${n.toLocaleString('ru-RU')} ткн`;
+const fmtUsd = (p) => p == null ? '' : `$${p.toFixed(4)}`;
+
+function detectFormat(s) {
+  const t = String(s).trim();
+  if ((t.startsWith('{') || t.startsWith('['))) { try { JSON.parse(t); return 'JSON'; } catch {} }
+  if (/<\/(p|div|ul|li|b|i|a|table|span|h\d)>/i.test(t) || /<(br|hr)\s*\/?>/i.test(t)) return 'HTML';
+  if (/(^|\n)#{1,4} |\*\*[^*]+\*\*|```|(^|\n)[-*] /m.test(t)) return 'MD';
+  return 'RAW';
+}
+function jsonHi(obj) { // подсветка pretty-print JSON
+  const j = typeof obj === 'string' ? JSON.stringify(JSON.parse(obj), null, 2) : JSON.stringify(obj, null, 2);
+  return esc(j)
+    .replace(/(&quot;[^&]*?&quot;)(\s*:)/g, '<span class="jk">$1</span>$2')
+    .replace(/: (&quot;.*?&quot;)/g, ': <span class="js">$1</span>')
+    .replace(/: (-?\d+\.?\d*)/g, ': <span class="jn">$1</span>')
+    .replace(/: (true|false|null)/g, ': <span class="jb">$1</span>');
+}
+function mdRender(s) { // мини-рендер Markdown для прототипа (в продукте — marked + DOMPurify)
+  let h = esc(s)
+    .replace(/```([\s\S]*?)```/g, (_, c) => `<pre><code>${c}</code></pre>`)
+    .replace(/^### (.*)$/gm, '<h3>$1</h3>').replace(/^## (.*)$/gm, '<h2>$1</h2>').replace(/^# (.*)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^[-*] (.*)$/gm, '<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>');
+  return h.split(/\n{2,}/).map((p) => /^<(h\d|ul|pre)/.test(p.trim()) ? p : `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+}
+
+/* Просмотрщик содержимого: плавающий селект формата + копирование. */
+let cvSeq = 0;
+function contentViewer(content, { compactH = false } = {}) {
+  const id = `cv${++cvSeq}`;
+  const auto = detectFormat(content);
+  const opts = ['JSON', 'MD', 'HTML', 'RAW'].map((f) =>
+    `<option ${f === auto ? 'selected' : ''}>${f}</option>`).join('');
+  return `<div class="cv" data-content-id="${id}">
+    <div class="cv-bar">
+      <select onchange="cvRender('${id}', this.value)">${opts}</select>
+      <button onclick="navigator.clipboard.writeText(CV_STORE['${id}'])" title="Копировать">⧉</button>
+    </div>
+    <div class="cv-out" id="${id}" style="${compactH ? 'max-height:260px' : ''}"></div>
+    <script>void 0<\/script></div>
+    <template data-for="${id}">${esc(content)}</template>`;
+}
+const CV_STORE = {};
+function cvMount(scope) { // после вставки HTML инициализируем просмотрщики из <template>
+  scope.querySelectorAll('template[data-for]').forEach((tpl) => {
+    const id = tpl.dataset.for;
+    CV_STORE[id] = tpl.content.textContent;
+    tpl.remove();
+    const sel = scope.querySelector(`[data-content-id="${id}"] select`);
+    cvRender(id, sel ? sel.value : 'RAW');
+  });
+}
+function cvRender(id, mode) {
+  const out = document.getElementById(id);
+  const src = CV_STORE[id];
+  out.className = 'cv-out' + (mode === 'MD' || mode === 'HTML' ? ' rendered' : '');
+  if (mode === 'JSON') { try { out.innerHTML = `<pre>${jsonHi(src)}</pre>`; } catch { out.innerHTML = `<pre>${esc(src)}</pre>`; } }
+  else if (mode === 'MD') out.innerHTML = mdRender(src);
+  else if (mode === 'HTML') out.innerHTML = src; /* в продукте — обязательно DOMPurify.sanitize() */
+  else out.innerHTML = `<pre>${esc(src)}</pre>`;
+}
+
+/* ============================================================ Демо-данные */
+const USERS = [
+  { id: 'b2c1…9f04', ext: '123456789', name: 'Наталья', last: 'сегодня 16:53' },
+  { id: '7a90…1c22', ext: '987654321', name: 'Виктор', last: 'вчера 22:10' },
+  { id: '03de…77b1', ext: '555000111', name: 'Тестовый пользователь', last: '2026-06-01' },
+];
+
+const SYS_PROMPT = `Ты — персональный ассистент с долговременной памятью. Сегодня 2026-06-09, часовой пояс
+пользователя Europe/Moscow. Отвечай тепло и по-человечески, на «ты».
+
+# Память о пользователе
+Используй блок памяти ниже. Не выдумывай факты, которых в памяти нет.
+
+# Инструменты
+Для поиска по памяти используй memory_search, для напоминаний — reminder_create. Перед созданием напоминания
+уточни время, если оно не названо явно.
+
+# Формат ответа
+Канал — telegram: используй HTML-разметку Telegram (<b>, <i>), не используй Markdown.`;
+
+const MEMORY_JSON = JSON.stringify({
+  profile: [{ id: 'f1', text: 'Маму зовут Galина Петровна', importance: 0.8 }],
+  dialog: [{ id: 'd7', text: 'Вчера обсуждали подарок маме на день рождения' }],
+  reminders: [{ id: 'r2', text: 'Полить цветы', due: '2026-06-10T08:00:00+03:00' }],
+}, null, 0);
+
+const FINAL_MD = `Готово! 👍
+
+**Напоминание создано**: завтра, 10 июня в 10:00 — позвонить маме.
+
+Из памяти: вы говорили, что у неё день рождения **14 июня** — вот что я нашла:
+- обсуждали подарок (книга по садоводству);
+- она просила не дарить цветы.
+
+Хотите, я напомню и про подарок, например 12 июня?`;
+
+const REQ_PAYLOAD = {
+  model: 'gpt-5.4-mini', temperature: 0.6, max_tokens: 2048, stream: true,
+  messages: [
+    { role: 'system', content: SYS_PROMPT },
+    { role: 'system', content: MEMORY_JSON },
+    { role: 'user', content: 'Напомни завтра в 10:00 позвонить маме. И посмотри, что я говорила про её день рождения' },
+  ],
+  tools: [
+    { name: 'memory_search', description: 'Поиск по долговременной памяти пользователя. Использует векторное сходство (pgvector) и полнотекстовый поиск, возвращает релевантные факты с оценкой важности.', parameters: { type: 'object', properties: { query: { type: 'string' }, scope: { type: 'string', enum: ['profile', 'dialog', 'domain', 'all'] }, limit: { type: 'integer', default: 5 } }, required: ['query'] } },
+    { name: 'reminder_create', description: 'Создание напоминания. Время — ISO 8601 в часовом поясе пользователя. Планировщик доставит напоминание в указанный момент через канал по умолчанию.', parameters: { type: 'object', properties: { text: { type: 'string' }, due_at: { type: 'string', format: 'date-time' } }, required: ['text', 'due_at'] } },
+    { name: 'memory_save', description: 'Сохранение нового факта в долговременную память с категорией и важностью.', parameters: { type: 'object', properties: { text: { type: 'string' }, category: { type: 'string' }, importance: { type: 'number' } }, required: ['text', 'category'] } },
+  ],
+};
+
+function payloadBody(over = {}) { return { kind: 'payload', payload: { ...REQ_PAYLOAD, ...over } }; }
+
+const LOGS = {
+  cycle1: {
+    title: 'Цикл llm_1781013041198_2mrn9th11',
+    totals: { tokens: 18234, price: 0.0214, models: 'gpt-5.4-mini, text-embedding-3-small', durMs: 8400 },
+    rows: [
+      { kind: 'user_say', ic: '👤', cap: 'Сообщение пользователя', t: '16:50:27', indent: 0,
+        body: { kind: 'text', text: 'Напомни завтра в 10:00 позвонить маме. И посмотри, что я говорила про её день рождения' }, open: true },
+      { kind: 'intent_classify', ic: '🔎', cap: 'Классификация интента', t: '16:50:28', tokens: 412, price: 0.0004,
+        model: 'gpt-5.4-nano', dur: 620, indent: 0,
+        body: { kind: 'content', content: '{"intent":"reminder_and_memory","memory_scopes":["dialog","profile"],"needs_tools":true}' } },
+      { kind: 'stage', ic: '▶', cap: 'Основной ответ — итерация 1 (main_agent_answer)', t: '16:50:29', indent: 0, group: 'g1' },
+      { kind: 'llm_request', ic: '→', cap: 'Запрос → LLM', t: '16:50:29', tokens: 6938, price: 0.0072,
+        model: 'gpt-5.4-mini', indent: 1, group: 'g1', body: payloadBody() },
+      { kind: 'llm_response', ic: '←', cap: 'Ответ ← LLM', t: '16:50:31', dur: 2200, indent: 1, group: 'g1',
+        body: { kind: 'content', content: '{"finish_reason":"tool_calls","tool_calls":[{"id":"call_a1","function":{"name":"memory_search","arguments":"{\\"query\\":\\"день рождения мамы\\",\\"scope\\":\\"all\\",\\"limit\\":5}"}},{"id":"call_a2","function":{"name":"reminder_create","arguments":"{\\"text\\":\\"Позвонить маме\\",\\"due_at\\":\\"2026-06-10T10:00:00+03:00\\"}"}}]}' } },
+      { kind: 'tool_call', ic: '🛠', cap: 'Вызов инструмента: memory_search', t: '16:50:31', indent: 2, group: 'g1',
+        body: { kind: 'content', content: '{"query":"день рождения мамы","scope":"all","limit":5}' } },
+      { kind: 'embedding', ic: '↔', cap: 'Запрос эмбеддинга', t: '16:50:31', tokens: 91, price: 0.0002,
+        model: 'text-embedding-3-small', indent: 2, group: 'g1',
+        body: { kind: 'content', content: '{"input":"день рождения мамы","dims":1536,"count":1}' } },
+      { kind: 'tool_result', ic: '✅', cap: 'Результат инструмента: memory_search', t: '16:50:32', indent: 2, group: 'g1',
+        body: { kind: 'content', content: '{"items":[{"text":"Вчера обсуждали подарок маме на день рождения — книга по садоводству","score":0.91,"category":"dialog"},{"text":"Мама просила не дарить цветы","score":0.84,"category":"dialog"},{"text":"День рождения мамы — 14 июня","score":0.82,"category":"profile"}]}' } },
+      { kind: 'tool_call', ic: '🛠', cap: 'Вызов инструмента: reminder_create', t: '16:50:32', indent: 2, group: 'g1',
+        body: { kind: 'content', content: '{"text":"Позвонить маме","due_at":"2026-06-10T10:00:00+03:00"}' } },
+      { kind: 'tool_result', ic: '✅', cap: 'Результат инструмента: reminder_create', t: '16:50:32', indent: 2, group: 'g1',
+        body: { kind: 'content', content: '{"ok":true,"reminder_id":"r_8842","due_at":"2026-06-10T10:00:00+03:00"}' } },
+      { kind: 'stage', ic: '▶', cap: 'Основной ответ — итерация 2 (main_agent_answer)', t: '16:50:33', indent: 0, group: 'g2' },
+      { kind: 'llm_request', ic: '→', cap: 'Запрос → LLM', t: '16:50:33', tokens: 8120, price: 0.0091,
+        model: 'gpt-5.4-mini', indent: 1, group: 'g2',
+        body: payloadBody({ messages: [...REQ_PAYLOAD.messages,
+          { role: 'assistant', content: '', tool_calls: [{ function: { name: 'memory_search' } }, { function: { name: 'reminder_create' } }] },
+          { role: 'tool', content: '{"items":[…3 факта…]}' },
+          { role: 'tool', content: '{"ok":true,"reminder_id":"r_8842"}' }] }) },
+      { kind: 'llm_response', ic: '←', cap: 'Ответ ← LLM (финальный текст)', t: '16:50:35', dur: 2100, indent: 1, group: 'g2',
+        body: { kind: 'content', content: FINAL_MD } },
+      { kind: 'answer_user', ic: '💬', cap: 'Ответ пользователю', t: '16:50:35', indent: 0,
+        body: { kind: 'content', content: FINAL_MD }, open: true },
+      { kind: 'stage', ic: '▶', cap: 'Пост-обработка (после ответа, тот же request_id)', t: '16:50:36', indent: 0, group: 'g3' },
+      { kind: 'fact_extract', ic: '🧠', cap: 'Выгрузка фактов в память', t: '16:50:37', tokens: 1890, price: 0.0021,
+        model: 'gpt-5.4-mini', indent: 1, group: 'g3',
+        body: { kind: 'content', content: '{"facts":[{"text":"Пользователь планирует звонок маме 10 июня в 10:00","category":"dialog","importance":0.5}],"skipped":["дубликат: день рождения мамы 14 июня"]}' } },
+      { kind: 'topic_extract', ic: '🏷', cap: 'Темы разговора', t: '16:50:37', tokens: 783, price: 0.0008,
+        model: 'gpt-5.4-nano', indent: 1, group: 'g3',
+        body: { kind: 'content', content: '{"topics":["семья","напоминания"]}' } },
+    ],
+  },
+  svc1: {
+    title: 'Сервисный запрос · Сжатие истории (history_compress)',
+    totals: { tokens: 3412, price: 0.0021, models: 'gpt-5.4-mini', durMs: 2900 },
+    rows: [
+      { kind: 'history_compress', ic: '🗜', cap: 'Сжатие истории — запрос → LLM', t: '03:00:11', tokens: 3110,
+        price: 0.0019, model: 'gpt-5.4-mini', indent: 0,
+        body: payloadBody({ temperature: 0.2, messages: [
+          { role: 'system', content: 'Сожми старую часть диалога в краткий дайджест, сохрани имена, даты и договорённости.' },
+          { role: 'user', content: '…42 сообщения старой зоны диалога…' }] }), open: true },
+      { kind: 'llm_response', ic: '←', cap: 'Ответ ← LLM (дайджест)', t: '03:00:14', dur: 2900, indent: 1,
+        body: { kind: 'content', content: '{"summary":"Пользователь готовится ко дню рождения мамы (14 июня): выбрана книга по садоводству…","importance":0.6,"layer":"near"}' } },
+    ],
+  },
+  svc2: {
+    title: 'Сервисный запрос · Проактивное сообщение (proactive_message)',
+    totals: { tokens: 2207, price: 0.0017, models: 'gpt-5.4-mini', durMs: 1800 },
+    rows: [
+      { kind: 'event_relevance', ic: '📅', cap: 'Оценка релевантности события', t: '12:00:02', tokens: 640,
+        price: 0.0005, model: 'gpt-5.4-nano', indent: 0,
+        body: { kind: 'content', content: '{"event":"напоминание о поливе цветов","score":0.74,"decision":"send_soft"}' } },
+      { kind: 'proactive_message', ic: '🔔', cap: 'Генерация проактивного сообщения', t: '12:00:03', tokens: 1567,
+        price: 0.0012, model: 'gpt-5.4-mini', indent: 0,
+        body: { kind: 'content', content: 'Привет! Утром ты просила напомнить про цветы — они, наверное, уже ждут 🌱' } },
+    ],
+  },
+  err1: {
+    title: 'Цикл llm_1781013299004_x91kk02aa (с ошибкой)',
+    totals: { tokens: 512, price: 0.0004, models: 'gpt-5.4-mini', durMs: 30400 },
+    rows: [
+      { kind: 'user_say', ic: '👤', cap: 'Сообщение пользователя', t: '16:53:02', indent: 0,
+        body: { kind: 'text', text: 'А расскажи анекдот' }, open: true },
+      { kind: 'llm_request', ic: '→', cap: 'Запрос → LLM', t: '16:53:02', tokens: 512, model: 'gpt-5.4-mini',
+        indent: 1, error: 'Request timed out after 30000 ms (ETIMEDOUT)',
+        body: payloadBody({ messages: [REQ_PAYLOAD.messages[0], { role: 'user', content: 'А расскажи анекдот' }] }) },
+    ],
+  },
+};
+
+const CHAT = [
+  { type: 'day', label: '9 июня' },
+  { type: 'svc', log: 'svc1', kind: 'history_compress', label: 'Сжатие истории', t: '03:00', tok: 3412, usd: 0.0021, color: 'var(--c-compress)' },
+  { type: 'svc', log: 'svc2', kind: 'proactive_message', label: 'Проактивность', t: '12:00', tok: 2207, usd: 0.0017, color: 'var(--c-proactive)' },
+  { type: 'msg', role: 'user', log: 'cycle1', t: '16:50',
+    text: 'Напомни завтра в 10:00 позвонить маме. И посмотри, что я говорила про её день рождения' },
+  { type: 'msg', role: 'bot', t: '16:50',
+    text: 'Готово! 👍 Напомню завтра в 10:00 позвонить маме. Кстати, день рождения у неё 14 июня — вы выбирали книгу по садоводству. Напомнить про подарок 12-го?' },
+  { type: 'msg', role: 'user', log: 'err1', t: '16:53', text: 'А расскажи анекдот' },
+  { type: 'msg', role: 'bot', t: '16:53', text: '…что-то я задумалась 😅 Попробуешь ещё раз?' },
+];
+
+const KIND_COLOR = {
+  user_say: 'var(--c-user)', intent_classify: 'var(--c-intent)', stage: 'var(--c-stage)',
+  llm_request: 'var(--c-req)', llm_response: 'var(--c-resp)', tool_call: 'var(--c-toolcall)',
+  tool_result: 'var(--c-toolres)', embedding: 'var(--c-embed)', fact_extract: 'var(--c-post)',
+  topic_extract: 'var(--c-post)', history_compress: 'var(--c-compress)', proactive_message: 'var(--c-proactive)',
+  event_relevance: 'var(--c-proactive)', stt: 'var(--c-voice)', tts: 'var(--c-voice)', answer_user: 'var(--c-answer)',
+};
+
+/* ============================================================ Поиск пользователя */
+const userQ = document.getElementById('userQ');
+const sugBox = document.getElementById('sugBox');
+userQ.addEventListener('input', () => {
+  const q = userQ.value.trim().toLowerCase();
+  if (!q) { sugBox.classList.remove('open'); return; }
+  const hits = USERS.filter((u) => u.name.toLowerCase().includes(q) || u.ext.includes(q) || u.id.includes(q));
+  sugBox.innerHTML = hits.map((u) => `<div class="sg" onclick="pickUser('${u.name}','${u.ext}')">
+      <span class="nm">${esc(u.name)}</span><span class="ext">tg ${u.ext} · ${u.id}</span>
+      <span class="last">${u.last}</span></div>`).join('') ||
+    '<div class="sg" style="color:#999">Никого не найдено</div>';
+  sugBox.classList.add('open');
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('.search')) sugBox.classList.remove('open'); });
+function pickUser(name, ext) {
+  document.getElementById('curUser').textContent = name;
+  document.getElementById('curExt').textContent = `(tg ${ext})`;
+  sugBox.classList.remove('open'); userQ.value = '';
+}
+
+/* ============================================================ Чат */
+function renderChat() {
+  const host = document.getElementById('chat');
+  host.innerHTML = '<div class="lazy-hint">↑ скролл вверх подгружает раннюю историю</div>' + CHAT.map((it, i) => {
+    if (it.type === 'day') return `<div class="day-sep">${it.label}</div>`;
+    if (it.type === 'svc') return `<div class="svc-badge" data-log="${it.log}" style="background:${it.color}"
+        onclick="showLog('${it.log}', this)">⚙ ${esc(it.label)} <span class="t">· ${fmtTok(it.tok)} · ${fmtUsd(it.usd)} · ${it.t}</span></div>`;
+    const btn = it.log ? `<button class="log-btn" title="Показать журнал цикла" onclick="showLog('${it.log}', this.closest('.msg'))">≡</button>` : '';
+    return `<div class="msg ${it.role === 'user' ? 'user' : 'bot'}" data-log="${it.log || ''}">
+        <div class="bubble">${esc(it.text)}<span class="time">${it.t}</span></div>${btn}</div>`;
+  }).join('');
+  host.scrollTop = host.scrollHeight;
+}
+
+/* ============================================================ Журнал */
+let currentLog = null;
+function showLog(logId, el) {
+  currentLog = logId;
+  document.querySelectorAll('.msg.active, .svc-badge.active').forEach((n) => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const log = LOGS[logId];
+  document.getElementById('logHead').style.display = '';
+  document.getElementById('lhTitle').textContent = log.title;
+  document.getElementById('lhTotals').textContent =
+    `${fmtTok(log.totals.tokens)} · ${fmtUsd(log.totals.price)} · ${log.totals.models} · ${(log.totals.durMs / 1000).toFixed(1)} с`;
+  const host = document.getElementById('rows');
+  host.innerHTML = log.rows.map((r, i) => rowHtml(r, i)).join('');
+  cvMount(host);
+}
+
+function rowHtml(r, i) {
+  const color = r.error ? 'var(--c-error)' : (KIND_COLOR[r.kind] || 'var(--c-other)');
+  const open = r.open ? '' : 'collapsed';
+  const meta = [r.tokens != null ? fmtTok(r.tokens) : '', r.price != null ? fmtUsd(r.price) : '',
+    r.model || '', r.dur ? `${r.dur} мс` : ''].filter(Boolean).join(' · ');
+  const errMeta = r.error ? `<span class="meta err-meta">⚠ ${esc(r.error)}</span>` : '';
+  const stage = r.kind === 'stage';
+  const grpAttr = r.group ? `data-group="${r.group}"` : '';
+  const head = `<div class="row-h" style="padding-left:${10 + (r.indent || 0) * 22}px"
+      onclick="${stage ? `toggleGroup('${r.group}', this)` : 'toggleRow(this)'}">
+    <span class="n">${i + 1}</span><span class="ic">${r.ic}</span>
+    <span class="cap">${esc(r.cap)}</span>
+    ${meta ? `<span class="meta">${meta}</span>` : ''}${errMeta}
+    <span class="when">${r.t}</span><span class="chev">${r.open ? '▾' : '▸'}</span></div>`;
+  const body = stage ? '' : `<div class="row-body">${bodyHtml(r)}</div>`;
+  return `<div class="row ${open} ${stage ? 'stage' : ''}" ${grpAttr} ${!stage && r.group ? `data-in-group="${r.group}"` : ''}
+      style="background:${color}">${head}${body}</div>`;
+}
+
+function bodyHtml(r) {
+  const note = r.truncated ? '<div class="truncated-note">payload обрезан по лимиту maxPayloadChars</div>' : '';
+  if (r.error) return `${note}<div class="truncated-note">Ошибка: ${esc(r.error)}</div>` +
+    (r.body ? bodyInner(r.body) : '');
+  return note + bodyInner(r.body);
+}
+function bodyInner(body) {
+  if (!body) return '<i style="color:#999">нет содержимого</i>';
+  if (body.kind === 'text') return esc(body.text);
+  if (body.kind === 'content') return contentViewer(body.content);
+  if (body.kind === 'payload') return payloadHtml(body.payload);
+  return '';
+}
+
+/* Прогрессивное раскрытие payload: параметры → messages → tools. */
+function payloadHtml(p) {
+  const chips = Object.entries(p).filter(([, v]) => typeof v !== 'object')
+    .map(([k, v]) => `<span class="chip"><b>${esc(k)}</b>: ${esc(String(v))}</span>`).join('');
+  const msgs = (p.messages || []).map((m, i) => {
+    const content = String(m.content || '');
+    const prev = content.replace(/\s+/g, ' ').slice(0, 120) || (m.tool_calls ? '⟨вызовы инструментов⟩' : '⟨пусто⟩');
+    const big = content.length > 2000;
+    const tcalls = (m.tool_calls || []).map((tc) => `<span class="tcall-tag">🛠 ${esc(tc.function?.name || '?')}</span>`).join('');
+    const inner = big
+      ? `<button class="mini" onclick="openBig(this.closest('.m-item'))">открыть полностью (${content.length.toLocaleString('ru-RU')} символов)</button>`
+      : (content ? contentViewer(content, { compactH: true }) : '');
+    return `<div class="m-item" data-full="${esc(content)}">
+      <div class="m-head" onclick="this.parentNode.classList.toggle('open'); cvMount(this.parentNode)">
+        <span class="role ${m.role}">${m.role}</span>${tcalls}
+        <span class="m-prev">${esc(prev)}</span><span class="m-len">${content.length.toLocaleString('ru-RU')} симв.</span>
+      </div><div class="m-body">${inner}</div></div>`;
+  }).join('');
+  const tools = (p.tools || []).map((t) => `<div class="tool-item">
+      <div class="tool-h" onclick="this.parentNode.classList.toggle('open')">
+        <span class="tn">${esc(t.name)}</span>
+        <span class="td">${esc(t.description.split(' ').slice(0, 8).join(' '))}…</span></div>
+      <div class="tool-b">${esc(t.description)}
+        <div><button class="mini" onclick="this.closest('.tool-item').classList.toggle('params')">параметры (JSON Schema)</button></div>
+        <div class="tool-params"><pre>${jsonHi(t.parameters)}</pre></div></div></div>`).join('');
+  return `<div class="pp-chips">${chips}</div>
+    ${msgs ? `<div class="sect"><div class="sect-h">messages — ${p.messages.length} сообщений
+      <button class="mini" onclick="allMsgs(this, true)">раскрыть все</button>
+      <button class="mini" onclick="allMsgs(this, false)">свернуть все</button></div>${msgs}</div>` : ''}
+    ${tools ? `<div class="sect"><div class="sect-h">tools — ${p.tools.length} инструментов</div>${tools}</div>` : ''}`;
+}
+function allMsgs(btn, open) {
+  btn.closest('.sect').querySelectorAll('.m-item').forEach((mi) => {
+    mi.classList.toggle('open', open); if (open) cvMount(mi);
+  });
+}
+function openBig(item) {
+  document.getElementById('cvTitle').textContent = 'Содержимое сообщения';
+  const host = document.getElementById('cvHost');
+  host.innerHTML = contentViewer(item.dataset.full);
+  cvMount(host);
+  document.getElementById('cvOverlay').classList.add('open');
+}
+
+function toggleRow(h) {
+  const row = h.parentNode;
+  row.classList.toggle('collapsed');
+  h.querySelector('.chev').textContent = row.classList.contains('collapsed') ? '▸' : '▾';
+}
+function toggleGroup(g, h) {
+  const hide = h.querySelector('.chev').textContent === '▾';
+  h.querySelector('.chev').textContent = hide ? '▸' : '▾';
+  document.querySelectorAll(`[data-in-group="${g}"]`).forEach((n) => n.classList.toggle('grp-collapsed', hide));
+}
+function expandAll(open) {
+  document.querySelectorAll('#rows .row').forEach((row) => {
+    if (row.classList.contains('stage')) {
+      row.querySelector('.chev').textContent = open ? '▾' : '▸';
+      return;
+    }
+    row.classList.toggle('collapsed', !open);
+    const ch = row.querySelector('.chev'); if (ch) ch.textContent = open ? '▾' : '▸';
+  });
+  document.querySelectorAll('[data-in-group]').forEach((n) => n.classList.toggle('grp-collapsed', false));
+}
+
+/* ============================================================ AI-анализ */
+function openAnalyze() {
+  if (!currentLog) return;
+  document.getElementById('aiOut').style.display = 'none';
+  document.getElementById('aiOverlay').classList.add('open');
+}
+function aiEngine() {
+  const cli = document.querySelector('input[name=eng]:checked').value === 'cli';
+  document.getElementById('aiModel').disabled = cli;
+  document.getElementById('aiCli').disabled = !cli;
+}
+function runAnalyze() {
+  const out = document.getElementById('aiOut');
+  out.style.display = 'block'; out.textContent = '';
+  const cli = document.querySelector('input[name=eng]:checked').value === 'cli';
+  const demo = cli
+    ? `[CLI: claude -p, cwd = корень проекта]\n\nАнализирую цикл ${LOGS[currentLog].title}…\n\nМодель дважды сходила в инструменты и ответила корректно. Замечания по контексту:\n1. Блок памяти передан вторым system-сообщением как сырой JSON — лучше оформить как размеченный текст, модель надёжнее цитирует факты.\n2. В системном промпте нет правила про подтверждение времени напоминания, хотя код полагается на него (src/agent.js).\n3. tool memory_save не использовался, но занимает ~400 токенов схемы — кандидат на ленивую подгрузку.`
+    : `[Штатная LLM: ${document.getElementById('aiModel').value}]\n\nКоротко: ответ корректный, но стоимость итерации 2 завышена.\n\n• Повторная отправка полного system-промпта и памяти на итерации 2 — основная часть из 8 120 токенов; включите кэширование промпта.\n• Результат memory_search содержит score — модель его не использовала; можно убрать из tool-ответа.\n• temperature 0.6 для задачи с инструментами высоковата, рекомендую 0.3.`;
+  let i = 0;
+  const timer = setInterval(() => { // имитация стрима SSE
+    out.textContent = demo.slice(0, i += 17);
+    if (i >= demo.length) clearInterval(timer);
+  }, 25);
+}
+function closeOverlay(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.overlay').forEach((ov) =>
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('open'); }));
+
+/* ============================================================ Старт */
+renderChat();
+showLog('cycle1', document.querySelector('.msg[data-log="cycle1"]'));
+</script>
+</body>
+</html>

@@ -33,11 +33,11 @@ const MEMORY_GROUPS = [
 // Возможные колонки метаданных записи. Поле filter: 'multi' помечает столбцы, для которых выводится фильтр-мультиселект
 // (по «Виду» и «Домену»). Для каждой группы реально показываются только те столбцы, по которым есть хоть одно значение.
 const META_COLUMNS = [
-  { field: 'kind', header: 'Вид', filter: 'multi' },
-  { field: 'domain', header: 'Домен', filter: 'multi' },
-  { field: 'importance', header: 'Важность' },
-  { field: 'due', header: 'Срок' },
-  { field: 'consent', header: 'Согласие' },
+  { field: 'kind', header: 'Вид', filter: 'multi', width: '11rem' },
+  { field: 'domain', header: 'Домен', filter: 'multi', width: '11rem' },
+  { field: 'importance', header: 'Важность', width: '7rem' },
+  { field: 'due', header: 'Срок', width: '11rem' },
+  { field: 'consent', header: 'Согласие', width: '11rem' },
 ];
 
 // Короткая подпись для одного элемента памяти: основной текст плюс заголовок напоминания/защищённой записи.
@@ -180,7 +180,6 @@ onMounted(loadUsers);
             filter-display="row"
             striped-rows
           >
-            <Column field="factText" header="Факт" sortable />
             <template v-for="c in columnsFor(grp.key)" :key="c.field">
               <Column
                 v-if="c.filter === 'multi'"
@@ -188,6 +187,7 @@ onMounted(loadUsers);
                 :header="c.header"
                 sortable
                 :show-filter-menu="false"
+                :style="{ width: c.width }"
               >
                 <template #filter="{ filterModel, filterCallback }">
                   <MultiSelect
@@ -201,8 +201,9 @@ onMounted(loadUsers);
                   />
                 </template>
               </Column>
-              <Column v-else :field="c.field" :header="c.header" sortable />
+              <Column v-else :field="c.field" :header="c.header" sortable :style="{ width: c.width }" />
             </template>
+            <Column field="factText" header="Факт" sortable :style="{ minWidth: '14rem' }" />
             <Column header="" class="col-actions">
               <template #body="{ data }">
                 <Button
