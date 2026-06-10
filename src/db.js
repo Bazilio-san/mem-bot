@@ -43,21 +43,21 @@ const REQUIRED_CONNECTIONS = [
 
 function getDbHintByCode(code, dbConfig) {
   if (code === '3D000') {
-    return `База "${dbConfig.database}" не существует. Создайте её в PostgreSQL или исправьте db.postgres.dbs.${dbConfig.id}.database.`;
+    return `Database "${dbConfig.database}" does not exist. Create it in PostgreSQL or fix db.postgres.dbs.${dbConfig.id}.database.`;
   }
   if (code === '28P01') {
-    return `Неверный пароль для пользователя "${dbConfig.user}".`;
+    return `Wrong password for user "${dbConfig.user}".`;
   }
   if (code === '3D01' || code === '28000') {
-    return `Неверная роль/метод аутентификации для пользователя "${dbConfig.user}".`;
+    return `Wrong role/authentication method for user "${dbConfig.user}".`;
   }
   if (code === 'ECONNREFUSED') {
-    return `PostgreSQL недоступен по ${dbConfig.host}:${dbConfig.port}.`;
+    return `PostgreSQL is unreachable at ${dbConfig.host}:${dbConfig.port}.`;
   }
   if (code === 'ENOTFOUND') {
-    return `Host "${dbConfig.host}" неразрешим.`;
+    return `Host "${dbConfig.host}" cannot be resolved.`;
   }
-  return 'Проверьте host/port/database/user/password и доступность PostgreSQL.';
+  return 'Check host/port/database/user/password and that PostgreSQL is reachable.';
 }
 
 function normalizePgError(connectionId, err) {
@@ -78,7 +78,7 @@ function normalizePgError(connectionId, err) {
 async function probeConnection(connectionId) {
   const cfg = getDbConfigPg(connectionId, false, true);
   if (!cfg?.host || !cfg?.database || !cfg?.user) {
-    throw new Error(`Неполная конфигурация PostgreSQL для ${connectionId}: host/database/user должны быть заданы.`);
+    throw new Error(`Incomplete PostgreSQL configuration for ${connectionId}: host/database/user must be set.`);
   }
   const client = new pg.Client(cfg);
   try {
@@ -104,11 +104,11 @@ export async function assertDatabasesAvailable() {
   }
 
   const lines = [
-    'Не удалось пройти стартовую проверку доступа к базам: PostgreSQL недоступна.',
-    'Исправьте указанные проблемы и перезапустите сервис:',
+    'Startup database access check failed: PostgreSQL is unavailable.',
+    'Fix the problems listed below and restart the service:',
     ...failures.map((f) => `- ${f}`),
   ];
-  throw new Error(lines.join('\\n'));
+  throw new Error(lines.join('\n'));
 }
 
 // Get the (cached) pg pool of the working memory DB. Asynchronous: on first access af-db-ts creates the pool

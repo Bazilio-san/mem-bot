@@ -33,7 +33,7 @@ with references to real code and to numbered specification requirements.
 - **External notification delivery** — partial: Telegram channel added (`src/telegram/bot.js`); email and push
   notification channels are not implemented.
 - **Per-domain schema layer** (`DOMAIN-1`…`DOMAIN-3`) — implemented: a domain schema is required for domain-specific
-  facts, the `mem.domain_schemas` registry (migration `006`), the `src/schema/` module, validation and
+  facts, the `mem.domain_schemas` registry, the `src/schema/` module, validation and
   canonicalization on write, and a strict two-pass contract on retrieval. The separate `npm run test:schema` run
   passes fully (32 of 32 checks).
 
@@ -104,14 +104,14 @@ with references to real code and to numbered specification requirements.
 |----------------|-------------------|--------|------------------------|
 | `DATA-1` | Extensions, `mem` schema, ENUM types | done | `migrations/001_init.sql` |
 | `DATA-2` | Users and domains | done | `migrations/001_init.sql` (`users`, `agent_domains`) |
-| `DATA-3` | Conversations, messages, summaries | done | `migrations/001_init.sql`, summary columns — `003_history_summaries.sql` |
+| `DATA-3` | Conversations, messages, summaries | done | `migrations/001_init.sql` |
 | `DATA-4` | Main memory table `memory_items` | done | `migrations/001_init.sql` |
 | `DATA-5` | Secure memory (`secure_records`, `memory_secure_links`) | partial | tables created; `memory_secure_links` not yet populated with explicit links |
 | `DATA-6` | Scheduler: tasks, runs, outgoing notifications | done | tables present; `cron_expr` and `rrule` are evaluated with timezone support |
 | `DATA-7` | Tool call log and memory write queue | partial | `tool_calls` works; `memory_jobs` created but writes happen as a promise during the response |
-| `DATA-8` | Three proactivity tables | done | `migrations/002_proactive.sql` |
-| `DATA-9` | Two global memory tables and `is_admin` column | done | `migrations/005_global_memory.sql` (`global_facts`, `global_knowledge`) |
-| `DATA-10` | Per-domain `data` schema registry | done | `migrations/006_domain_schemas.sql` (`mem.domain_schemas`, one active version per domain) |
+| `DATA-8` | Three proactivity tables | done | `migrations/001_init.sql` |
+| `DATA-9` | Two global memory tables and `is_admin` column | done | `migrations/001_init.sql` (`global_facts`, `global_knowledge`) |
+| `DATA-10` | Per-domain `data` schema registry | done | `migrations/001_init.sql` (`mem.domain_schemas`, one active version per domain) |
 
 ### Memory: Kinds, Retrieval, Write — `MEM`
 
@@ -183,7 +183,7 @@ Full runtime prompt coordinates, tool definitions, and test and historical templ
 | Requirement ID | Short description | Status | Code reference / note |
 |----------------|-------------------|--------|------------------------|
 | `DOMAIN-1` | End-to-end per-domain schema mechanism | done | `validateAndCanonicalize` in `src/schema/validate.js`, step in `processCandidate` (`src/pipeline/merge.js`) |
-| `DOMAIN-2` | Schema registry, `src/schema/` module, migration `006` | done | `migrations/006_domain_schemas.sql`, `src/schema/` (meta/registry/validate/generate/cli), `ajv` dependency |
+| `DOMAIN-2` | Schema registry, `src/schema/` module | done | `migrations/001_init.sql`, `src/schema/` (meta/registry/validate/generate/cli), `ajv` dependency |
 | `DOMAIN-3` | Layer benefits and risks; strict two-pass contract | done | second extraction pass in `src/pipeline/extract.js`; schema is mandatory, no compatibility mode |
 
 ### History Compression — `HIST`
@@ -195,7 +195,7 @@ Full runtime prompt coordinates, tool definitions, and test and historical templ
 | `HIST-3` | Gradient compression by zones | done | `summarizeColdHistory` in `src/pipeline/history-compress.js` |
 | `HIST-4` | Memory vs history: separation of concerns | done | passing `active_memory` to the summarizer in `src/pipeline/history-compress.js` |
 | `HIST-5` | Source priority on conflict | done | service header in `formatHistoryContext`, `src/pipeline/history-context.js` |
-| `HIST-6` | Storage schema and migration `003` | done | `migrations/003_history_summaries.sql` |
+| `HIST-6` | Storage schema | done | `migrations/001_init.sql` |
 | `HIST-7` | Configuration and hysteresis invariant | done | `src/config.js` (check `shrinkTokens < maxTokens`) |
 | `HIST-8` | Context assembly algorithm | done | `buildHistoryContext` in `src/pipeline/history-context.js` |
 | `HIST-9` | New pipeline modules | done | `history-context.js`, `history-compress.js`, `token-counter.js` |
@@ -213,7 +213,7 @@ Full runtime prompt coordinates, tool definitions, and test and historical templ
 |----------------|-------------------|--------|------------------------|
 | `GLOB-1` | Boundary with always-on date/time block | done | `CURRENT_DATETIME` stays in the dynamic zone in `src/agent.js` |
 | `GLOB-2` | Layer quality criterion | done | confirmed by `layerGlobalMemory` layer |
-| `GLOB-3` | Two tables and `is_admin` flag (migration `005`) | done | `migrations/005_global_memory.sql`, seed of base facts |
+| `GLOB-3` | Two tables and `is_admin` flag | done | `migrations/001_init.sql`, seed of base facts |
 | `GLOB-4` | `src/pipeline/global-memory.js` module | done | facts and knowledge base: retrieval, search, write, delete |
 | `GLOB-5` | Admin permission check | done | `isAdmin` in `src/pipeline/admin.js`, `ctx.isAdmin` in `src/agent.js` |
 | `GLOB-6` | Injecting `GLOBAL_FACTS` and `GLOBAL_KNOWLEDGE` blocks | done | `messages` assembly in `src/agent.js` |
