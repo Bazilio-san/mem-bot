@@ -4,8 +4,8 @@
 // The user's external identifier (external_id) is the Telegram chat id —
 // thanks to this, proactive messages from the delivery queue find the right chat.
 // Run: npm run telegram
-import { pathToFileURL } from 'node:url';
 import { config, requireConfig } from '../config.js';
+import { pathToFileURL } from 'node:url';
 import { handleMessage, recordReactionTurn, recordUserReaction } from '../agent.js';
 import { tick, msUntilDueTask } from '../pipeline/scheduler.js';
 import { checkProactiveTriggers } from '../pipeline/proactive.js';

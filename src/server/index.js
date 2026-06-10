@@ -5,11 +5,11 @@
 // Startup order: first the HTTP server is brought up (so the admin panel and health check are available as
 // early as possible), then the Telegram bot is started. Shutdown on a signal stops both services and closes
 // the shared DB connection pool once — this process is the one that owns the pool.
+import { config } from '../config.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { startupInfo } from '../bootstrap/startup-info.js';
-import { config } from '../config.js';
 import { assertDatabasesAvailable, closePool } from '../db.js';
 import { createAdminApi } from './admin-api.js';
 import { createAuthApi, requireAdminSession, isAdminAuthRequired } from './admin-auth.js';
