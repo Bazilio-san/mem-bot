@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.32",
+  "version": "1.0.33",
   "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
@@ -54,7 +54,11 @@
     "skills:validate": "node src/pipeline/skills/cli.js validate",
     "skills:list": "node src/pipeline/skills/cli.js list",
     "skills:sync": "node src/pipeline/skills/cli.js sync",
-    "test:llm-log-db": "cross-env NODE_ENV=test node tests/llm-log-integration.test.mjs && cross-env NODE_ENV=test node tests/llm-log-api.test.mjs"
+    "test:llm-log-db": "cross-env NODE_ENV=test node tests/llm-log-integration.test.mjs && cross-env NODE_ENV=test node tests/llm-log-api.test.mjs",
+    "test:notes-store": "cross-env NODE_ENV=test node tests/notes-store.test.mjs",
+    "test:notes-api": "cross-env NODE_ENV=test node tests/notes-api.test.mjs",
+    "test:notes-mcp": "cross-env NODE_ENV=test node tests/notes-mcp.test.mjs",
+    "test:notes": "cross-env NODE_ENV=test node tests/notes-store.test.mjs && cross-env NODE_ENV=test node tests/notes-api.test.mjs && cross-env NODE_ENV=test node tests/notes-mcp.test.mjs"
   },
   "keywords": [
     "ai-agent",
