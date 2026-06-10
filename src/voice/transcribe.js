@@ -410,6 +410,7 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
     }
     throw err;
   }
+  const clean = (text || '').trim();
   try {
     logLlmRequest({
       endpoint: 'audio.transcriptions',
@@ -418,6 +419,8 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
       provider: logProvider,
       isBinary: true,
       payload: logPayload,
+      // The recognized text is the response of this call — the log viewer shows it in the "← LLM" row.
+      response: { text: clean },
       binaryMeta,
       durationMs: Date.now() - startedAt,
     });
@@ -425,7 +428,6 @@ export async function transcribeTelegramAttachment({ attachment, telegramApiBase
     // logging must not affect recognition
   }
 
-  const clean = (text || '').trim();
   return {
     text: clean,
     empty: clean.length === 0,

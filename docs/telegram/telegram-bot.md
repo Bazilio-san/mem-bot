@@ -35,8 +35,9 @@ can be matched to the corresponding internal history entry.
 
 On a stop signal (`SIGINT` or `SIGTERM`) the process shuts down gracefully. The adapter's own stop routine
 `stopTelegram()` halts the polling and background-worker loops, wakes the sleeping worker so it observes the stop
-flag at once, releases the delivery-queue listener connection, and force-flushes the remaining model-call log
-buffer (`flushLlmLog`, see `docs/ai-bot-with-memory/10-operations.md`, section [OPS-5]). Closing the database
+flag at once, releases the delivery-queue listener connection, and force-flushes the remaining journal buffers —
+the model-call log and the agent-event log (`flushLlmLog`, `flushAgentEventLog`, see
+`docs/ai-bot-with-memory/10-operations.md`, section [OPS-5]). Closing the database
 connection pool belongs to whichever component owns the process: in standalone mode the adapter closes the pool
 itself after stopping; in co-hosted mode the web server first stops accepting HTTP requests, then calls
 `stopTelegram()`, and only then closes the shared pool, so the pool is closed exactly once.

@@ -10,6 +10,24 @@ import { queryPg, getPoolPg, getDbConfigPg, closeAllDb } from 'af-db-ts';
 
 // Logical name of the working connection to the memory DB.
 const CONNECTION_ID = 'main';
+// Logical name of the connection to the separate logs DB (LLM request journal + agent events).
+const LOG_CONNECTION_ID = 'logs';
+
+// Credential inheritance for the logs DB: in a typical install both databases live on the same PostgreSQL
+// server, so empty host/port/user/password of the 'logs' connection are filled from 'main'. The mutation
+// targets af-db-ts's own config store (getDbConfigPg returns a live reference) and runs at module load —
+// before any pool is created. Explicit values in local.yaml or the environment stay untouched.
+{
+  const logsCfg = getDbConfigPg(LOG_CONNECTION_ID, false, false);
+  const mainCfg = getDbConfigPg(CONNECTION_ID, false, false);
+  if (logsCfg && mainCfg) {
+    for (const key of ['host', 'port', 'user', 'password']) {
+      if (logsCfg[key] === '' || logsCfg[key] == null) {
+        logsCfg[key] = mainCfg[key];
+      }
+    }
+  }
+}
 
 // pgvector is registered manually: af-db-ts does not enable it automatically. We pass the vector-type
 // registration function only if the extension is declared in the working connection's usedExtensions. Then
@@ -33,6 +51,22 @@ export async function query(text, params) {
     sqlValues: params,
     throwError: true,
     registerTypesFunctions,
+  });
+}
+
+// Get the (cached) pg pool of the logs DB. Lives separately from the memory DB so that fast-growing journals
+// (log.llm_request, log.agent_event) do not bloat user data and can have their own backup/retention policy.
+export function getLogPool() {
+  return getPoolPg({ connectionId: LOG_CONNECTION_ID });
+}
+
+// Run a query against the logs DB. The journals have no pgvector columns, so no type registration is needed.
+export async function queryLog(text, params) {
+  return queryPg({
+    connectionId: LOG_CONNECTION_ID,
+    sqlText: text,
+    sqlValues: params,
+    throwError: true,
   });
 }
 

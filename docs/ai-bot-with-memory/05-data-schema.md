@@ -91,7 +91,9 @@ is built into the data layer: all memory tables reference `user_id uuid`. The `h
 ## [DATA-3] Conversations, Messages, and Summaries
 
 `mem.conversations` holds individual conversations; `current_state` stores the active task state.
-`mem.conversation_messages` holds raw messages; only the most recent ones are included in the prompt.
+`mem.conversation_messages` holds raw messages; only the most recent ones are included in the prompt. The
+`metadata` of the user and assistant messages of a turn carries the turn's correlation `request_id`, which links
+the dialog to the call and event journals in the logs database (see [DATA-12]).
 `mem.conversation_summaries` stores compressed short-term memory: a conversation summary plus structured state.
 
 ```sql
@@ -546,18 +548,34 @@ With global memory and message external references, the total is nineteen tables
 
 ---
 
-## [DATA-12] LLM Call Log (the `log` schema)
+## [DATA-12] LLM Call Log (the separate logs database)
 
 Every call to a language model (LLM — large language model) and to related services (embedding generation,
-speech-to-text transcription, and text-to-speech synthesis) is recorded in a dedicated `log` schema. The log
-consists of two tables: the full `log.llm_request` and the narrow `log.llm_usage`. The full table stores the entire
-context of a call — the request type `request_kind`, the endpoint, provider and model, the text `payload` of the
-request and response (for binary data such as audio — only file metadata in `binary_meta`, without the content),
-the number of input and output tokens, the calculated cost in US dollars, duration, and correlation identifiers.
-The narrow table contains only what is needed for fast cost aggregation, and it is populated automatically by the
-`log.llm_request_to_usage` trigger after each insert into the full table — but only when there is something to
-count (tokens or price are known), so that failed calls do not pollute the aggregates. For log behavior, batch
-export, and cost calculation, see [10-operations.md](10-operations.md), section [OPS-5].
+speech-to-text transcription, and text-to-speech synthesis) is recorded in the `log` schema of a **separate
+logs database** (a second PostgreSQL database alongside the working memory database; connection
+`config.db.postgres.dbs.logs`, default name `mem_bot_logs`). Keeping the journals apart from user data gives them
+independent backups and an age-based retention policy, and their fast growth does not bloat the memory database.
+The journal tables reference users and conversations only by textual identifiers — there are no foreign keys
+into the `mem` schema and no cascades, so the log survives user deletion. Because the two databases cannot be
+joined in SQL, consumers merge their data in application code.
+
+The log consists of three tables. The full `log.llm_request` stores the entire context of a call — the request
+type `request_kind`, the endpoint, provider and model, the request body in `payload` and the model's reply in
+`response` (for binary data such as audio — only file metadata in `binary_meta`, without the content; for
+embeddings — only the vector shape, never the vectors themselves), the number of input and output tokens, the
+calculated cost in US dollars, duration, and correlation identifiers. The narrow `log.llm_usage` contains only
+what is needed for fast cost aggregation, and it is populated automatically by the `log.llm_request_to_usage`
+trigger after each insert into the full table — but only when there is something to count (tokens or price are
+known), so that failed calls do not pollute the aggregates. The third table, `log.agent_event`, journals agent
+events of a conversation turn — pipeline stages, tool calls with their arguments and results, connections to
+external tool servers, and failures — so that together with `log.llm_request` it reconstructs the exhaustive
+timeline of one "user phrase → answer" cycle. For log behavior, batch export, retention, and cost calculation,
+see [10-operations.md](10-operations.md), section [OPS-5].
+
+The correlation identifier `request_id` groups all journal rows of one conversation turn and is also written
+into the `metadata` of the turn's saved dialog messages (`mem.conversation_messages`), so a log viewer can open
+the full journal of the cycle behind any message. Journal rows whose `request_id` is not referenced by any user
+message represent background and post-processing calls (history compression, proactivity, detached embeddings).
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS log;
@@ -577,9 +595,11 @@ CREATE TABLE IF NOT EXISTS log.llm_request (
   domain_key        text,
   channel           text,
   is_binary         boolean NOT NULL DEFAULT false,    -- call with a binary body (audio)
-  payload           jsonb,                             -- request and response; truncated to config.llmLog.maxPayloadChars
+  payload           jsonb,                             -- request body; truncated to config.llmLog.maxPayloadChars
+  response          jsonb,                             -- model reply; same truncation limit as payload
   binary_meta       jsonb,                             -- for audio: file metadata only, no content
   payload_truncated boolean NOT NULL DEFAULT false,    -- payload was truncated at the length limit
+  response_truncated boolean NOT NULL DEFAULT false,   -- response was truncated at the length limit
   prompt_tokens     integer,
   completion_tokens integer,
   total_tokens      integer,
@@ -621,17 +641,45 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER llm_request_to_usage_trg AFTER INSERT ON log.llm_request
   FOR EACH ROW EXECUTE FUNCTION log.llm_request_to_usage();
+
+-- Agent event journal: pipeline stages, tool calls with arguments and results, external-server connections.
+CREATE TABLE IF NOT EXISTS log.agent_event (
+  agent_event_id  bigserial PRIMARY KEY,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  request_id      text,                                -- same correlation identifier as in log.llm_request
+  user_id         text,
+  conversation_id text,
+  event_type      text NOT NULL,                       -- taxonomy below
+  title           text,                                -- ready-made human-readable row title
+  data            jsonb,                               -- arguments/result/details; same truncation limit as payload
+  duration_ms     integer,                             -- for *.completed events — duration since the paired start
+  status          text NOT NULL DEFAULT 'ok',          -- ok | error
+  error           text,
+  is_test         boolean NOT NULL DEFAULT false
+);
 ```
 
 The `request_kind` field distinguishes the purposes of calls: `main_agent_answer` (the agent's main response),
 `delivery_intent` (choosing the delivery format — text or reaction), `intent_classify`, `fact_extract`,
 `topic_extract`, `event_relevance`, `proactive_message`, `history_compress`, `skill_authoring`, `voice_summary`,
-`embedding`, `stt`, `tts`. For endpoints with a strictly single purpose (embeddings, speech recognition, and
-synthesis), the kind is derived from the endpoint itself. The `chat.completions` endpoint has many purposes, so the
-calling code must pass the kind explicitly; an omission is marked with the special kind `untyped` and serves as a
-signal of a call-site error.
+`embedding`, `stt`, `tts`, `log_analysis` (an operator-initiated analysis of a logged request). For endpoints with
+a strictly single purpose (embeddings, speech recognition, and synthesis), the kind is derived from the endpoint
+itself. The `chat.completions` endpoint has many purposes, so the calling code must pass the kind explicitly; an
+omission is marked with the special kind `untyped` and serves as a signal of a call-site error.
 
-Unlike the `mem` schema, the log tables are not dropped and recreated on re-initialization (`CREATE TABLE IF NOT
-EXISTS`); otherwise the log would be wiped on every startup.
+The `event_type` taxonomy of `log.agent_event` mirrors the turn's event contract: `agent.started`,
+`stage.started`, `tool.started`, `tool.completed`, `mcp.connected`, `mcp.failed`, `assistant.completed`,
+`agent.completed`, `agent.failed`. Unlike the display-channel events delivered through `onEvent`, which
+deliberately omit tool arguments, the journal does store the full arguments and results of tool calls — it is
+read only by the operator tooling. Streaming text deltas are not journaled; the final text arrives with
+`assistant.completed`.
+
+In both journal tables `created_at` is set by the writing code at the moment the record is built, not by the
+database default at insert time: records are flushed in batches, and a whole batch would otherwise share one
+insertion timestamp, destroying the ordering of a cycle's timeline.
+
+The logs database has its own initialization (a dedicated migrations directory applied by the same migration
+runner as the memory database). Its tables are never dropped on re-initialization (`CREATE TABLE IF NOT EXISTS`);
+otherwise the log would be wiped on every startup.
 
 ---

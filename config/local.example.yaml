@@ -9,6 +9,13 @@ db:
         host: 'localhost'
         password: 'ПАРОЛЬ_БД'
         user: 'ПОЛЬЗОВАТЕЛЬ_БД'
+      # Подключение logs (БД журналов mem_bot_logs) задавать не обязательно: пустые host/port/user/password
+      # наследуются от main. Раскомментируйте и заполните только если журналы живут на другом сервере.
+      # logs:
+      #   database: 'mem_bot_logs'
+      #   host: 'другой-сервер'
+      #   password: 'ПАРОЛЬ_БД_ЛОГОВ'
+      #   user: 'ПОЛЬЗОВАТЕЛЬ_БД_ЛОГОВ'
       main:
         database: 'mem_bot'
         host: 'localhost'

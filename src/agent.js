@@ -27,6 +27,13 @@ import { recordUserInboundForContactPolicy } from './pipeline/proactiveContactPo
 import { getSkill, getSkillByDomain } from './pipeline/skills/registry.js';
 import { runWithLlmContext } from './pipeline/llm-context.js';
 import { REQUEST_KINDS } from './pipeline/llm-log.js';
+import { logAgentEvent, AGENT_EVENTS } from './pipeline/agent-event-log.js';
+
+// Correlation id of one dialog turn. Groups all LLM calls and agent events of the turn in the logs DB and is
+// stored in the metadata of the saved messages, so the admin log viewer can find the turn's full journal.
+function newRequestId() {
+  return `llm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
 const MAIN_SYSTEM = `Ты агентское приложение с инструментами и долговременной памятью.
 Правила:
@@ -339,7 +346,7 @@ export async function handleMessage({
   // future interface: "Request ID: llm_…". The object is mutable — userId/conversationId/domainKey are filled
   // in as data appears and are visible inside src/llm.js via AsyncLocalStorage.
   const llmMeta = {
-    requestId: `llm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    requestId: newRequestId(),
     channel,
     domainKey,
   };
@@ -364,7 +371,21 @@ export async function handleMessage({
     await initTools();
     // The whole dialog turn runs inside the correlation context, so LLM calls from any nested
     // stages land in the log with a shared requestId and user/conversation/domain attribution.
-    return await runWithLlmContext(llmMeta, runAgent);
+    // The agent.failed journal entry is written INSIDE the context (unlike the emit below) so the
+    // failure stays correlated with the turn's request_id.
+    return await runWithLlmContext(llmMeta, async () => {
+      try {
+        return await runAgent();
+      } catch (err) {
+        logAgentEvent({
+          eventType: AGENT_EVENTS.AGENT_FAILED,
+          title: 'Ход агента завершился ошибкой',
+          status: 'error',
+          error: String(err.message || err),
+        });
+        throw err;
+      }
+    });
   } catch (err) {
     await emit({ type: 'agent.failed', error: String(err.message || err) });
     throw err;
@@ -385,6 +406,12 @@ export async function handleMessage({
     // Enrich the log correlation context with identifiers as soon as they become known.
     llmMeta.userId = user.id;
     llmMeta.conversationId = conversation.id;
+    // The journal entry is written after the identifiers are known, so the event carries full attribution.
+    logAgentEvent({
+      eventType: AGENT_EVENTS.AGENT_STARTED,
+      title: 'Ход агента начат',
+      data: { channel, domainKey },
+    });
     const ctx = {
       userId: user.id,
       conversationId: conversation.id,
@@ -409,6 +436,11 @@ export async function handleMessage({
 
     // Stage 1: classification.
     await emit({ type: 'stage.started', stage: 'classify', title: 'Определяю намерение' });
+    logAgentEvent({
+      eventType: AGENT_EVENTS.STAGE_STARTED,
+      title: 'Стадия: классификация интента',
+      data: { stage: 'classify' },
+    });
     let intent;
     try {
       intent = await classifyIntent(userMessage, domainKey);
@@ -432,6 +464,11 @@ export async function handleMessage({
     let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
     if (intent.needs_memory !== false) {
       await emit({ type: 'stage.started', stage: 'memory', title: 'Ищу релевантную память' });
+      logAgentEvent({
+        eventType: AGENT_EVENTS.STAGE_STARTED,
+        title: 'Стадия: поиск релевантной памяти',
+        data: { stage: 'memory', scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'] },
+      });
       memory = await retrieveMemory({
         userId: user.id,
         domainKey: effectiveDomain,
@@ -574,6 +611,11 @@ ${activeSkill.skillPrompt}`,
     let degraded = false;
     for (let step = 0; step < 5; step++) {
       await emit({ type: 'stage.started', stage: 'llm', title: 'Готовлю ответ' });
+      logAgentEvent({
+        eventType: AGENT_EVENTS.STAGE_STARTED,
+        title: `Стадия: ответ модели (итерация ${step + 1})`,
+        data: { stage: 'llm', step: step + 1 },
+      });
       const msg = await runModelTurn({
         streamingOn,
         model: mainModel,
@@ -594,7 +636,15 @@ ${activeSkill.skillPrompt}`,
           const title = toolTitle(toolName);
           // The event is emitted after the model has fully decided to call the tool and the name is known,
           // but BEFORE executeTool. We do not put tool arguments in the event: they sometimes contain private data.
+          // The journal (logAgentEvent), unlike emit, DOES store arguments and the result: the admin log
+          // viewer is local-only and needs the full picture of the call.
           await emit({ type: 'tool.started', toolName, toolTitle: title });
+          logAgentEvent({
+            eventType: AGENT_EVENTS.TOOL_STARTED,
+            title: `Вызов инструмента: ${toolName}`,
+            data: { toolName, args },
+          });
+          const toolStartedAt = Date.now();
           const result = await executeTool(ctx, toolName, args);
           const ok = !result?.error;
           await emit({
@@ -602,6 +652,14 @@ ${activeSkill.skillPrompt}`,
             toolName,
             toolTitle: title,
             ok,
+            ...(ok ? {} : { error: String(result.error) }),
+          });
+          logAgentEvent({
+            eventType: AGENT_EVENTS.TOOL_COMPLETED,
+            title: `Результат инструмента: ${toolName}`,
+            data: { toolName, result },
+            durationMs: Date.now() - toolStartedAt,
+            status: ok ? 'ok' : 'error',
             ...(ok ? {} : { error: String(result.error) }),
           });
           toolsUsed.push({ name: toolName, args, result });
@@ -621,10 +679,21 @@ ${activeSkill.skillPrompt}`,
       degraded = true;
     }
     await emit({ type: 'assistant.completed', text: answer });
+    logAgentEvent({
+      eventType: AGENT_EVENTS.ASSISTANT_COMPLETED,
+      title: 'Ответ пользователю',
+      data: { text: answer, ...(degraded ? { degraded: true } : {}) },
+    });
 
-    // Stage 4: save the dialog messages.
-    const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
-    const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer);
+    // Stage 4: save the dialog messages. The turn's request_id goes into the metadata of both rows: by it
+    // the admin log viewer finds the full journal of the cycle behind a chat message.
+    const turnMetadata = { request_id: llmMeta.requestId };
+    const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage, {
+      metadata: turnMetadata,
+    });
+    const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer, {
+      metadata: turnMetadata,
+    });
 
     // Stage 5: extracting and writing facts. Asynchronous by default (does not slow down the response).
     const recentText = [...history, { role: 'user', content: userMessage }, { role: 'assistant', content: answer }]
@@ -660,6 +729,11 @@ ${activeSkill.skillPrompt}`,
     }
 
     await emit({ type: 'agent.completed', ...(degraded ? { degraded: true } : {}) });
+    logAgentEvent({
+      eventType: AGENT_EVENTS.AGENT_COMPLETED,
+      title: 'Ход агента завершён',
+      ...(degraded ? { data: { degraded: true } } : {}),
+    });
 
     return {
       answer,
@@ -679,18 +753,25 @@ ${activeSkill.skillPrompt}`,
       domainKey: effectiveDomain,
       userMessageId: userMessageRow.id,
       assistantMessageId: assistantMessageRow.id,
+      // The turn's correlation id: the admin chat uses it to open the freshly created cycle in the log viewer.
+      requestId: llmMeta.requestId,
     };
   }
 }
 
 export async function recordReactionTurn({ externalId, userMessage, domainKey = 'general', delivery }) {
+  // A reaction turn has its own request_id: it makes no LLM calls itself, but the id in the message metadata
+  // lets the admin log viewer treat the turn uniformly with regular dialog cycles.
+  const requestId = newRequestId();
   const user = await ensureUser(externalId);
   const previousLastUserAt = await getLastUserMessageTime(user.id);
   await recordUserInboundForContactPolicy({ userId: user.id, previousUserMessageAt: previousLastUserAt });
   const conversation = await ensureConversation(user.id, domainKey);
-  const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage);
+  const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage, {
+    metadata: { request_id: requestId },
+  });
   const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', delivery?.fallbackText || '', {
-    metadata: { event_type: 'bot_reaction', reaction_key: delivery?.reactionKey || null },
+    metadata: { event_type: 'bot_reaction', reaction_key: delivery?.reactionKey || null, request_id: requestId },
   });
   return {
     answer: delivery?.fallbackText || '',
@@ -718,50 +799,56 @@ export async function recordUserReaction({
   const conversation = targetMessage?.conversation_id
     ? { id: targetMessage.conversation_id }
     : await ensureConversation(user.id, domainKey);
-  const targetText = targetMessage?.content || '';
-  const token = formatReactionToken(reactionKey);
-  const oldToken = formatReactionToken(oldReactionKey);
-  const removed = !reactionKey && Boolean(oldReactionKey);
-  const content = removed
-    ? `Пользователь убрал реакцию ${oldToken} с сообщения ассистента: «${targetText}»`
-    : `Пользователь отреагировал ${token} на сообщение ассистента: «${targetText}»`;
-  const metadata = {
-    event_type: 'user_reaction',
-    reaction_key: reactionKey || null,
-    old_reaction_key: oldReactionKey || null,
-    target_role: targetMessage?.role || null,
-    target_message_id: targetMessage?.id || null,
-    raw_reaction: rawReaction,
-  };
-  const reactionMessage = await saveMessage(conversation.id, user.id, 'user', content, { metadata });
+  // The fact-extraction LLM call below runs inside this correlation context, so it lands in the journal
+  // under the reaction turn's request_id, and the saved reaction message references the same id.
+  const llmMeta = { requestId: newRequestId(), userId: user.id, conversationId: conversation.id, domainKey };
+  return runWithLlmContext(llmMeta, async () => {
+    const targetText = targetMessage?.content || '';
+    const token = formatReactionToken(reactionKey);
+    const oldToken = formatReactionToken(oldReactionKey);
+    const removed = !reactionKey && Boolean(oldReactionKey);
+    const content = removed
+      ? `Пользователь убрал реакцию ${oldToken} с сообщения ассистента: «${targetText}»`
+      : `Пользователь отреагировал ${token} на сообщение ассистента: «${targetText}»`;
+    const metadata = {
+      event_type: 'user_reaction',
+      reaction_key: reactionKey || null,
+      old_reaction_key: oldReactionKey || null,
+      target_role: targetMessage?.role || null,
+      target_message_id: targetMessage?.id || null,
+      raw_reaction: rawReaction,
+      request_id: llmMeta.requestId,
+    };
+    const reactionMessage = await saveMessage(conversation.id, user.id, 'user', content, { metadata });
 
-  let memoryWrites = null;
-  if (reactionKey && targetMessage?.role === 'assistant') {
-    const recentMessages = `assistant: ${targetText}\nuser: ${content}`;
-    const writeJob = (async () => {
-      try {
-        const candidates = await extractCandidates({
-          domainKey,
-          recentMessages,
-          assistantResponse: targetText,
-        });
-        return persistCandidates(user.id, domainKey, candidates, conversation.id);
-      } catch (err) {
-        return { error: String(err.message || err) };
+    let memoryWrites = null;
+    if (reactionKey && targetMessage?.role === 'assistant') {
+      const recentMessages = `assistant: ${targetText}\nuser: ${content}`;
+      const writeJob = (async () => {
+        try {
+          const candidates = await extractCandidates({
+            domainKey,
+            recentMessages,
+            assistantResponse: targetText,
+          });
+          return persistCandidates(user.id, domainKey, candidates, conversation.id);
+        } catch (err) {
+          return { error: String(err.message || err) };
+        }
+      })();
+      if (extractSync) {
+        memoryWrites = await writeJob;
+      } else {
+        writeJob.catch(() => {});
       }
-    })();
-    if (extractSync) {
-      memoryWrites = await writeJob;
-    } else {
-      writeJob.catch(() => {});
     }
-  }
 
-  return {
-    userId: user.id,
-    conversationId: conversation.id,
-    domainKey,
-    reactionMessageId: reactionMessage.id,
-    memoryWrites,
-  };
+    return {
+      userId: user.id,
+      conversationId: conversation.id,
+      domainKey,
+      reactionMessageId: reactionMessage.id,
+      memoryWrites,
+    };
+  });
 }

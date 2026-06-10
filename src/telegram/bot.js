@@ -20,6 +20,7 @@ import {
 } from '../repo.js';
 import { query, getPool, closePool } from '../db.js';
 import { flushLlmLog } from '../pipeline/llm-log.js';
+import { flushAgentEventLog } from '../pipeline/agent-event-log.js';
 import { decideDeliveryIntent, shouldConsiderReaction } from '../pipeline/reactions.js';
 import { normalizeTelegramReaction, reactionKeyToEmoji, TELEGRAM_REACTION_KEYS } from './reactions.js';
 import {
@@ -1023,8 +1024,10 @@ export async function stopTelegram() {
     }
     outboxListener = null;
   }
-  // We flush the LLM-request log buffer before closing the pools, so as not to lose the tail of the log.
+  // We flush the journal buffers (LLM requests and agent events) before closing the pools, so as not to
+  // lose the tail of the logs.
   await flushLlmLog();
+  await flushAgentEventLog();
 }
 
 // Direct run (npm run telegram): the module manages its own lifecycle — it starts the bot, stops it on a

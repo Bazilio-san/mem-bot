@@ -227,24 +227,45 @@ the general debug-category mechanism is described in section [OPS-5].
 - **Tool audit.** Every call is recorded in `mem.tool_calls` with arguments, result, status, latency, and error. A
   tool that mutates state without a log entry is considered a defect.
 - **Model request log.** Every call to the language model and to related services (embeddings, speech recognition
-  and synthesis) is recorded in the `log` schema (tables `log.llm_request` and `log.llm_usage`, see
-  [05-data-schema.md](05-data-schema.md), section [DATA-12]). Recording is designed to not delay the user response
-  and to never crash the main flow: a single emitter (`src/pipeline/llm-log.js`) accumulates records in a buffer,
-  and a background timer every `config.llmLog.flushIntervalMs` picks up a batch of up to `config.llmLog.batchSize`
-  entries and writes them to `log.llm_request` with a single multi-row `INSERT`; a database trigger then populates
-  the narrow `log.llm_usage` table. Any preparation or insertion error is suppressed inside the emitter. The full
-  request and response text is stored in `payload`, but truncated to `config.llmLog.maxPayloadChars` (in which case
-  `payload_truncated` is set); for binary data (audio), only file metadata is stored. The type of each call is set
-  by the `request_kind` field: for embeddings, speech recognition, and synthesis it is derived from the endpoint,
-  while for `chat.completions` it must be passed explicitly by the calling code — an omission is marked with the
-  type `untyped` and emits a warning to the log. On graceful process shutdown, the remaining buffer is flushed
-  (`flushLlmLog`) so that no tail of the log is lost. Call cost is computed from a model price list
-  (`src/pipeline/llm-pricing.js`): the model name is normalised to a price-list key, input and output tokens are
-  billed at their respective per-million rates, and cached input tokens are billed at half price; if a model is not
-  found in the price list the cost is left empty and a one-time warning is emitted. Fast cost aggregates (total for
-  a period, breakdown by request type and by user) are computed on top of the narrow table by
-  `src/pipeline/llm-usage-stats.js`. Logging is enabled by the `config.llmLog.enabled` flag; when set to `false`,
-  the emitter becomes a no-op and writes nothing.
+  and synthesis) is recorded in the `log` schema of the separate logs database (tables `log.llm_request` and
+  `log.llm_usage`, see [05-data-schema.md](05-data-schema.md), section [DATA-12]; the connection is
+  `config.db.postgres.dbs.logs`, with empty host/port/user/password inherited from the memory-database
+  connection, so a single-server install needs no extra credentials). Recording is designed to not delay the user
+  response and to never crash the main flow: a single emitter (`src/pipeline/llm-log.js`) accumulates records in
+  a buffer, and a background timer every `config.llmLog.flushIntervalMs` picks up a batch of up to
+  `config.llmLog.batchSize` entries and writes them to `log.llm_request` with a single multi-row `INSERT`; a
+  database trigger then populates the narrow `log.llm_usage` table. Any preparation or insertion error is
+  suppressed inside the emitter. The request body is stored in `payload` and the model's reply in `response`,
+  each truncated to `config.llmLog.maxPayloadChars` (in which case `payload_truncated` or `response_truncated`
+  is set); when a streaming call fails midway, the part of the reply assembled so far is still stored with
+  `status='error'`. For binary data (audio), only file metadata is stored; for embeddings, only the vector
+  shape. The type of each call is set by the `request_kind` field: for embeddings, speech recognition, and
+  synthesis it is derived from the endpoint, while for `chat.completions` it must be passed explicitly by the
+  calling code — an omission is marked with the type `untyped` and emits a warning to the log. On graceful
+  process shutdown, the remaining buffers are flushed (`flushLlmLog`, `flushAgentEventLog`) so that no tail of
+  the journals is lost. Call cost is computed from a model price list (`src/pipeline/llm-pricing.js`): the model
+  name is normalised to a price-list key, input and output tokens are billed at their respective per-million
+  rates, and cached input tokens are billed at half price; if a model is not found in the price list the cost is
+  left empty and a one-time warning is emitted. Fast cost aggregates (total for a period, breakdown by request
+  type and by user) are computed on top of the narrow table by `src/pipeline/llm-usage-stats.js`. Logging is
+  enabled by the `config.llmLog.enabled` flag; when set to `false`, both journal emitters become no-ops and
+  write nothing.
+- **Agent event journal.** Alongside the model calls, the agent journals the events of every conversation turn
+  into `log.agent_event` (see [DATA-12]): the turn start, pipeline stages, tool calls with full arguments and
+  results and their durations, connections to external MCP tool servers, the final answer, and failures. The
+  writer (`src/pipeline/agent-event-log.js`) is a separate emitter built on the same buffered batch machinery
+  (`src/pipeline/log-writer.js`) and the same correlation context as the model-call log, so all events of a turn
+  share its `request_id`. It is deliberately independent of the display-channel event callback: journaling works
+  with no delivery adapter attached, and — unlike display events — it stores tool arguments and results, because
+  the journal is read only by operator tooling. The turn's `request_id` is also written into the `metadata` of
+  the saved dialog messages, which lets operator tooling open the full journal of the cycle behind any message.
+- **Log retention.** Journal tables are cleaned by age: a background pass right after startup and then once a
+  day deletes rows older than the configured thresholds (`config.llmLog.retention`: `llmRequestDays` and
+  `agentEventDays` default to 90, `llmUsageDays` defaults to 0 — the narrow cost table is kept forever, as it
+  is small and feeds all-time cost statistics; 0 disables cleanup for a table). Deletion runs in primary-key
+  batches so the pass never holds long locks (`src/pipeline/log-retention.js`); a cleanup failure is logged and
+  never affects the application. Because the journals live in their own database, backup policy is independent
+  of user data.
 - **Scheduler runs.** Every execution is recorded in `mem.scheduled_task_runs`. Task errors are never lost.
 - **Debug tracing.** Enabled by the `DEBUG` environment variable with a comma-separated list of categories: the
   `llm` category prints the model request, its response, and tool calls to `stderr`; the `mcp:tool` category prints
@@ -296,6 +317,18 @@ set, a proactivity check layer is added.
     file parsing, selection by domain key, and tool filtering; `tests/skill-authoring.test.mjs` verifies building
     `SKILL.md` from parts and reverse parsing, skill validation rules before writing, and the restriction of writes
     and deletions to the skills directory.
+12. **Call and event journals.** Three tiers. Unit tests without a database (`npm run test:llm-log`) verify the
+    shared buffered writer (batching, early flush, returning a failed batch, buffer overflow, JSON truncation
+    edge cases), the record builders of both journals (including storing and truncating the model reply, and the
+    correlation context), the assembly of a cycle's display timeline from journal records merged with agent
+    events (with graceful degradation to synthesis from payloads when no events exist), age-based retention
+    batching, and the analysis-engine plumbing (model allow-list, prompt composition, CLI subprocess streaming,
+    timeout, and output cap). Integration tests against the real databases (`npm run test:llm-log-db`) verify
+    the user timeline (messages merged with service-call groups, keyset pagination), the cycle journal, retention
+    on live tables, the idempotency of the historical-transfer script, and the HTTP layer of the operator API
+    including the analysis stream. The end-to-end layer inside the main run (`tests/run.js`, layer 10) verifies
+    that after a real `handleMessage` the logs database contains the turn's records with the stored reply, the
+    agent events, and the `request_id` in the metadata of both saved dialog messages.
 
 ### [OPS-8] Twelve Mandatory Tests
 

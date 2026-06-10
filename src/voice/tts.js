@@ -144,6 +144,9 @@ export async function synthesizeSpeech(text, opts = {}) {
           model,
           isBinary: true,
           payload: logPayload,
+          // The audio bytes are not logged; the response mirrors binary_meta so the log viewer has a
+          // uniform "← LLM" row for every request kind.
+          response: { format, byteLength: buf.length },
           binaryMeta: { format, byteLength: buf.length },
           durationMs: Date.now() - startedAt,
         });

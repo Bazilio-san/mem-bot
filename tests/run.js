@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../src/config.js';
-import { query, closePool, vectorToSql } from '../src/db.js';
+import { query, queryLog, closePool, vectorToSql } from '../src/db.js';
 import { embed } from '../src/llm.js';
 import { ensureUser, getDomainId, ensureDefaultTriggers, ensureConversation, getRecentMessages } from '../src/repo.js';
 import { handleMessage } from '../src/agent.js';
@@ -50,6 +50,7 @@ import {
 } from '../src/pipeline/proactiveContactPolicy.js';
 import { runMemoryDedupe } from '../src/pipeline/memory-dedupe.js';
 import { flushLlmLog } from '../src/pipeline/llm-log.js';
+import { flushAgentEventLog } from '../src/pipeline/agent-event-log.js';
 
 const TRIGGER_DEFAULTS = [
   { trigger_type: 'inactivity', config: { minutes_inactive: 1440 } },
@@ -2133,6 +2134,73 @@ async function layerVoiceOutput() {
   }
 }
 
+// ============ Слой 10. Журналирование цикла для просмотрщика логов ==========
+// Сквозная проверка новой подсистемы логов: после реального handleMessage в отдельной БД логов должен
+// появиться полный журнал цикла — записи LLM-запросов с сохранённым ответом модели, агентные события и
+// привязка request_id к обоим сообщениям диалога.
+async function layerLogJournal() {
+  section('Слой 10. Журнал LLM-запросов и агентных событий');
+
+  const u = await freshUser('tlog_user');
+  const res = await handleMessage({
+    externalId: 'tlog_user',
+    userMessage: 'Привет! Просто поздоровайся в ответ.',
+    domainKey: 'general',
+  });
+
+  check(
+    '10.1. handleMessage возвращает requestId цикла',
+    typeof res.requestId === 'string' && res.requestId.startsWith('llm_'),
+    `requestId=${res.requestId}`,
+  );
+
+  // Буферы журналов асинхронные — сливаем перед проверками.
+  await flushLlmLog();
+  await flushAgentEventLog();
+
+  const { rows: reqRows } = await queryLog(
+    `SELECT request_kind, response, user_id, is_test FROM log.llm_request WHERE request_id = $1`,
+    [res.requestId],
+  );
+  check(
+    '10.2. Записи журнала цикла есть и включают классификацию и основной ответ',
+    reqRows.length >= 2 &&
+      reqRows.some((r) => r.request_kind === 'intent_classify') &&
+      reqRows.some((r) => r.request_kind === 'main_agent_answer'),
+    `записей=${reqRows.length}, виды=${reqRows.map((r) => r.request_kind).join(',')}`,
+  );
+  const mainRecord = reqRows.find((r) => r.request_kind === 'main_agent_answer');
+  check(
+    '10.3. Ответ модели сохранён в response основного запроса',
+    mainRecord?.response != null,
+    `response=${mainRecord?.response ? 'есть' : 'нет'}`,
+  );
+  check(
+    '10.4. Записи цикла атрибутированы пользователю и помечены is_test',
+    reqRows.every((r) => r.user_id === String(u.id) && r.is_test === true),
+  );
+
+  const { rows: evRows } = await queryLog(`SELECT event_type FROM log.agent_event WHERE request_id = $1`, [
+    res.requestId,
+  ]);
+  const evTypes = new Set(evRows.map((r) => r.event_type));
+  check(
+    '10.5. Агентные события цикла записаны (старт, ответ, завершение)',
+    evTypes.has('agent.started') && evTypes.has('assistant.completed') && evTypes.has('agent.completed'),
+    `события=${[...evTypes].join(',')}`,
+  );
+
+  const { rows: msgRows } = await query(
+    `SELECT role, metadata->>'request_id' AS request_id FROM mem.conversation_messages WHERE id = ANY($1)`,
+    [[res.userMessageId, res.assistantMessageId]],
+  );
+  check(
+    '10.6. request_id записан в metadata обоих сообщений диалога',
+    msgRows.length === 2 && msgRows.every((m) => m.request_id === res.requestId),
+    msgRows.map((m) => `${m.role}:${m.request_id}`).join('; '),
+  );
+}
+
 // ========================= Запуск ===========================================
 async function main() {
   console.log('Запуск комплексной проверки чат-бота с памятью.\n');
@@ -2170,6 +2238,12 @@ async function main() {
     } else {
       console.log('(Слой 9 пропущен: VOICE_OUTPUT_ENABLED выключен — базовый прогон не меняется.)');
     }
+    // Слой 10 выполняется только при включённом журналировании LLM-запросов.
+    if (config.llmLog?.enabled !== false) {
+      await layerLogJournal();
+    } else {
+      console.log('(Слой 10 пропущен: LLM_LOG_ENABLED выключен — журналы не пишутся.)');
+    }
   } catch (err) {
     console.error('\nКритическая ошибка прогона:', err);
     failed++;
@@ -2183,6 +2257,7 @@ async function main() {
   // только сливаем остаток буфера в БД, чтобы тестовые записи журнала сохранились (как и тестовые
   // пользователи). Отличать и при необходимости вычищать их можно по флагу is_test.
   await flushLlmLog();
+  await flushAgentEventLog();
   await closePool();
   process.exit(failed > 0 ? 1 : 0);
 }

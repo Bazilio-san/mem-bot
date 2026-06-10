@@ -39,6 +39,45 @@ body {
   opacity: 0.85;
 }
 
+/* Вкладки разделов админки в шапке («Память» / «Логи LLM»). */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.tab {
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #dce7fb;
+  border-radius: 6px;
+  padding: 4px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.tab.active {
+  background: #fff;
+  color: #1f6feb;
+  font-weight: 600;
+}
+
+/* Полноширинный раздел (страница логов сама делит пространство сплиттером). */
+.layout-full {
+  grid-template-columns: 1fr;
+  grid-template-areas: 'header' 'page';
+}
+
+.page-full {
+  grid-area: page;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .sidebar {
   grid-area: sidebar;
   overflow-y: auto;

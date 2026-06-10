@@ -11,6 +11,7 @@ import express from 'express';
 import { config } from '../config.js';
 import { closePool } from '../db.js';
 import { createAdminApi } from './admin-api.js';
+import { startLogRetention, stopLogRetention } from '../pipeline/log-retention.js';
 // Importing bot.js registers the Telegram channel profile and checks that the token is present. The bot
 // itself is not started yet: the auto-start inside bot.js only fires on a direct call (npm run telegram),
 // while here we manage its lifecycle explicitly via startTelegram/stopTelegram.
@@ -75,6 +76,9 @@ async function main() {
   const { username } = await startTelegram();
   console.log(`Telegram channel is up in the same process (bot @${username}).`);
 
+  // Age-based cleanup of the journals in the logs DB: a pass now and then once a day (config llmLog.retention).
+  startLogRetention();
+
   // Graceful shutdown on a signal: stop accepting new HTTP requests, shut down the Telegram part, and only
   // then close the shared DB connection pool. process.exit is called after releasing resources.
   let shuttingDown = false;
@@ -84,6 +88,7 @@ async function main() {
     } // ignore a repeated signal during shutdown
     shuttingDown = true;
     console.log(`\nReceived signal ${signal}. Shutting down the combined server…`);
+    stopLogRetention();
     await new Promise((resolve) => server.close(resolve)); // wait for the HTTP server to close
     await stopTelegram();
     try {

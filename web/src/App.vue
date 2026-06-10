@@ -9,6 +9,14 @@ import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
 import { FilterMatchMode } from '@primevue/core/api';
 import { fetchUsers, fetchUserMemory, deleteMemoryItem } from './api.js';
+import LlmLogPage from './components/llm-log/LlmLogPage.vue';
+
+// Активный раздел админки: «Память» (исходная страница) или «Логи LLM» (просмотрщик журналов).
+const activeTab = ref('memory');
+const TABS = [
+  { key: 'memory', title: 'Память' },
+  { key: 'llm-log', title: 'Логи LLM' },
+];
 
 const users = ref([]);
 const selectedUser = ref(null);
@@ -137,13 +145,29 @@ onMounted(loadUsers);
 </script>
 
 <template>
-  <div class="layout">
+  <div class="layout" :class="{ 'layout-full': activeTab !== 'memory' }">
     <header class="app-header">
       <h1>mem-bot — админка</h1>
-      <span class="status">пользователей: {{ users.length }}</span>
+      <nav class="tabs">
+        <button
+          v-for="t in TABS"
+          :key="t.key"
+          type="button"
+          class="tab"
+          :class="{ active: activeTab === t.key }"
+          @click="activeTab = t.key"
+        >
+          {{ t.title }}
+        </button>
+      </nav>
+      <span v-if="activeTab === 'memory'" class="status">пользователей: {{ users.length }}</span>
     </header>
 
-    <aside class="sidebar">
+    <div v-if="activeTab === 'llm-log'" class="page-full">
+      <LlmLogPage />
+    </div>
+
+    <aside v-if="activeTab === 'memory'" class="sidebar">
       <div v-if="loadingUsers" class="empty">Загрузка списка пользователей…</div>
       <div v-else-if="!users.length" class="empty">Пользователей пока нет.</div>
       <div
@@ -161,7 +185,7 @@ onMounted(loadUsers);
       </div>
     </aside>
 
-    <main class="main">
+    <main v-if="activeTab === 'memory'" class="main">
       <div v-if="error" class="error">Ошибка: {{ error }}</div>
 
       <div v-if="!selectedUser" class="empty">Выберите пользователя слева, чтобы увидеть его память.</div>

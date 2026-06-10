@@ -90,6 +90,33 @@ function mapRow(values, rowIndex = 0) {
   assert.ok(record.payload.length < huge.length, 'сериализованный payload должен стать короче исходной строки');
 }
 
+// 3а. Ответ модели сохраняется в response; длинный ответ усекается с поднятием response_truncated.
+{
+  const record = buildRecord({
+    endpoint: 'chat.completions',
+    kind: 'main_agent_answer',
+    model: 'gpt-4o',
+    payload: { messages: [{ role: 'user', content: 'привет' }] },
+    response: { message: { role: 'assistant', content: 'здравствуйте' }, finish_reason: 'stop' },
+    promptTokens: 5,
+    completionTokens: 3,
+  });
+  assert.ok(record.response.includes('здравствуйте'), 'ответ модели должен сохраняться в response');
+  assert.equal(record.response_truncated, false);
+
+  const long = buildRecord({
+    endpoint: 'chat.completions',
+    kind: 'main_agent_answer',
+    model: 'gpt-4o',
+    payload: { a: 1 },
+    response: { message: { role: 'assistant', content: 'ё'.repeat(200000) } },
+    promptTokens: 1,
+    completionTokens: 1,
+  });
+  assert.equal(long.response_truncated, true, 'длинный ответ должен помечаться усечённым');
+  assert.ok(long.response.length < 200000, 'сериализованный ответ должен стать короче исходного');
+}
+
 // 4. Запись со status: 'error' и без токенов сохраняется (для разбора неудач), цена и токены — null.
 {
   const record = buildRecord({

@@ -24,13 +24,16 @@ started with `npm run server`.
 The combined server starts with `npm run server`. It binds to `config.admin.host` and `config.admin.port`
 (defaults `localhost` and `3001`), prints the listening address, then starts the Telegram channel and reports the
 bot username. Because the channel is started, the process requires `config.telegram.apiKey`; without the token the
-startup aborts, exactly as in standalone Telegram mode.
+startup aborts, exactly as in standalone Telegram mode. After the channel is up, the server starts the background
+age-based cleanup of the journals in the logs database (`startLogRetention` from
+`src/pipeline/log-retention.js`): one pass immediately and then once a day, with thresholds from
+`config.llmLog.retention`.
 
 On a stop signal (`SIGINT` or `SIGTERM`) the server shuts down gracefully and in a fixed order so that the shared
-database connection pool is closed exactly once. It first stops accepting HTTP requests (`server.close`), then
-calls `stopTelegram()` to halt the polling and background-worker loops and release the delivery-queue listener,
-and only then closes the database connection pool. A second stop signal received while shutdown is already in
-progress is ignored.
+database connection pool is closed exactly once. It first stops the retention timer, then stops accepting HTTP
+requests (`server.close`), then calls `stopTelegram()` to halt the polling and background-worker loops and
+release the delivery-queue listener, and only then closes the database connection pool. A second stop signal
+received while shutdown is already in progress is ignored.
 
 ## Backend: Express Server
 
@@ -49,10 +52,11 @@ The HTTP layer is built on Express in `src/server/index.js`:
 
 ### Admin JSON API
 
-The API router is a thin layer over the existing data-access functions in `src/sandbox/data.js`, so the admin
-interface reuses the same code that backs the memory sandbox and carries no separate business logic of its own.
-Every handler is wrapped so that a thrown error becomes a JSON response with HTTP status 500 and an `error` field
-carrying a human-readable message, and the failure is logged on the server.
+The API router is a thin layer over data-access functions: the memory pages reuse `src/sandbox/data.js` (the same
+code that backs the memory sandbox), and the log-viewer pages are served by `src/server/llm-log-data.js` and
+`src/server/log-analysis.js`. The router itself carries no business logic. Every handler is wrapped so that a
+thrown error becomes a JSON response with HTTP status 500 and an `error` field carrying a human-readable message,
+and the failure is logged on the server.
 
 | Method and path | Purpose | Backing function |
 |-----------------|---------|------------------|
@@ -60,6 +64,13 @@ carrying a human-readable message, and the failure is logged on the server.
 | `GET /api/users` | list all users for the sidebar | `listUsers()` |
 | `GET /api/users/:id/memory` | all active memory of a user, grouped by category | `getUserMemory(id)` |
 | `GET /api/users/:id/proactivity` | a user's proactivity state (master flag and triggers) | `getProactivity(id)` |
+| `GET /api/users/search?q=` | user suggestions for the log page (name, external id, exact UUID) | `searchUsers(q)` |
+| `GET /api/users/:id/timeline` | chat timeline: messages merged with service-call badges (`?before`, `?limit`) | `getTimeline()` |
+| `GET /api/llm-log/cycle/:requestId` | journal of one dialog cycle: header with totals plus display rows | `getCycle()` |
+| `GET /api/llm-log/request/:llmRequestId` | journal of a single service record (a badge without `request_id`) | `getSingleRequest()` |
+| `POST /api/users/:id/chat-message` | send a message on behalf of the user through the full agent pipeline | `handleMessage()` |
+| `GET /api/llm-log/analysis-config` | allowed analysis models and CLI preset names (commands are not exposed) | `analysisConfigPublic()` |
+| `POST /api/llm-log/analyze` | AI analysis of a logged request, streamed as Server-Sent Events | `runAnalysis()` |
 
 The `:id` parameter is the user's internal database identifier (the `id` field returned by `GET /api/users`), not
 the external chat identifier. The memory response is grouped into the categories `profile`, `domain`, `dialog`,
@@ -71,17 +82,22 @@ The operator UI lives in `web/` and is a Vue 3 single-page application built and
 enough that the development server starts almost instantly with hot module replacement, while the production build
 emits static assets in well under a second, so functionality can be developed quickly.
 
+The component library is PrimeVue 4 with the Aura theme in styled mode (dark mode is disabled); icons come from
+`primeicons`. Markdown rendering uses `marked`, and every piece of untrusted content rendered as HTML or Markdown
+passes through `DOMPurify` first.
+
 Project layout:
 
 | File | Role |
 |------|------|
 | `web/index.html` | HTML entry point that mounts the app into `#app` |
-| `web/src/main.js` | creates the root Vue application and mounts it |
-| `web/src/App.vue` | root component: "user list on the left, selected user's memory on the right" |
-| `web/src/api.js` | thin `fetch` wrapper over the `/api` endpoints with a readable error contract |
-| `web/src/styles.css` | base layout styles |
+| `web/src/main.js` | creates the root Vue application, installs PrimeVue with the Aura preset, and mounts it |
+| `web/src/App.vue` | root component with the section tabs: "Memory" (user list plus selected user's memory) and "LLM Logs" |
+| `web/src/api.js` | thin `fetch` wrapper over the `/api` endpoints with a readable error contract and the SSE client of the analysis stream |
+| `web/src/styles.css` | base layout styles and the section tabs |
+| `web/src/components/llm-log/` | the LLM log viewer page (components listed in the section below) |
 | `web/vite.config.js` | Vite configuration: the Vue plugin, the dev proxy, and the build output |
-| `web/package.json` | front-end dependencies (`vue`) and dev tooling (`vite`, `@vitejs/plugin-vue`) |
+| `web/package.json` | front-end dependencies (`vue`, `primevue`, `@primeuix/themes`, `primeicons`, `marked`, `dompurify`) and dev tooling (`vite`, `@vitejs/plugin-vue`) |
 
 The front-end talks to the backend through the relative path `/api`, which works in both run modes. In development
 the Vite dev server (port 5173) proxies `/api` to the backend so the browser sees one origin without CORS setup;
@@ -89,12 +105,84 @@ the proxy target is `config.admin.port` (default `http://localhost:3001`) and is
 `VITE_API_TARGET` environment variable. In production the same Express server serves both the built front-end and
 the API from one origin, so the relative path needs no change.
 
+## LLM Log Viewer
+
+The "LLM Logs" tab is the operator's window into the journals of the separate logs database (the data model is
+specified in `docs/ai-bot-with-memory/05-data-schema.md`, section [DATA-12]; journaling behaviour and retention
+in `10-operations.md`, section [OPS-5]). The page is split by a draggable splitter into a Telegram-style chat
+pane on the left and the journal pane on the right, with a user search box on top. The guiding principle of the
+whole page is **progressive disclosure**: every level shows a compact summary first and reveals detail on demand.
+
+Components (`web/src/components/llm-log/`):
+
+| Component | Role |
+|-----------|------|
+| `LlmLogPage.vue` | page frame: search on top, splitter with the two panes, the analysis dialog |
+| `UserSearch.vue` | autocomplete over `GET /api/users/search` (by name, external id, or exact internal UUID) |
+| `ChatPane.vue` | chat timeline with lazy upward loading and the send box |
+| `LogPane.vue` | journal header (totals, expand/collapse all, "Ask AI") and the row list |
+| `LogRow.vue` | one journal row: pastel colour by kind, icon with indent hierarchy, metrics, expansion |
+| `PayloadView.vue` | progressive disclosure of a request body: parameter chips, `messages`, `tools` |
+| `ContentViewer.vue` | content block with the JSON/MD/HTML/RAW format switch and auto-detection |
+| `AnalyzeDialog.vue` | the AI-analysis dialog: engine choice, model or CLI preset, streamed result |
+
+**Chat pane.** The timeline (`GET /api/users/:id/timeline`) merges two sources by time: dialog messages from the
+memory database (bubbles with timestamps, user on the right, assistant on the left, day separators) and
+**service badges** — compact pills between the bubbles for journal call groups whose `request_id` is not
+referenced by any user message (history compression, proactivity, detached embeddings, and historical cycles
+recorded before message metadata carried a `request_id`). Scrolling up lazily loads older pages (keyset
+pagination by `?before`). Every user message whose metadata carries a `request_id` has a journal button; clicking
+it — or a badge — loads the corresponding journal into the right pane. The input box at the bottom sends a
+message on behalf of the user through the full agent pipeline (`POST /api/users/:id/chat-message`, channel
+`admin`, plain-text replies); after the reply arrives, the timeline reloads and the fresh cycle's journal opens
+automatically.
+
+**Journal pane.** The header shows the cycle title, total tokens and cost, the models used, the overall
+duration, an error marker, expand-all/collapse-all buttons, and the "Ask AI" button. The rows are assembled on
+the server (`buildCycleRows` in `src/server/llm-log-data.js`) by merging `log.llm_request` records with
+`log.agent_event` events by time: stage events become collapsible group headers ("intent classification", "model
+answer — iteration N", a synthetic "post-processing" group for fact and topic extraction), each journal record
+becomes a request/response row pair (the request row is placed at the call's start time — record time minus
+duration), and tool calls appear with their arguments, results, and durations from the events. For historical
+cycles recorded without agent events, the tool chain degrades gracefully to synthesis from the stored payloads
+and replies. Each row carries a pastel background by its kind, an indent expressing hierarchy, per-row tokens,
+cost, model, and duration; error rows are pink and show the error text. A truncation notice appears when the
+stored payload or reply was clipped at `config.llmLog.maxPayloadChars`.
+
+**Progressive disclosure of a request body.** An expanded request row shows three zones: scalar parameters as
+chips (model, temperature, and the like); the `messages` array as one line per message (role chip, first
+characters of the content, length), where a click expands short content inline and opens a full-screen dialog
+for content over two thousand characters; and the `tools` array as one line per tool (name plus the first words
+of the description), where the first click reveals the full description and a separate button shows the JSON
+Schema of the parameters. Every content block is a `ContentViewer`: a floating format switch in its corner
+offers JSON (pretty-printed with highlighting), MD, HTML, and RAW, with the initial format auto-detected from
+the content; RAW is always available, and a copy button sits beside the switch.
+
+**AI analysis.** The "Ask AI" button opens a dialog whose context is the cycle's last main-answer request (its
+stored body and reply). Two engines are available. The *project LLM* engine calls the bot's own model through
+the standard client with a model chosen from the allow-list `config.admin.logAnalysis.llm.models`; the analysis
+call is itself journaled under its own `request_id` with the kind `log_analysis`, so it never mixes into the
+cycle being analysed. The *CLI tool* engine spawns a preset command from `config.admin.logAnalysis.cli.presets`
+(for example, `claude -p`) in the project root, feeding the prompt through stdin — this gives the analyser
+visibility of the project code. The command comes exclusively from the configuration; the client only names a
+preset. Because this engine executes a command on the server, it is accepted **only when
+`config.admin.host` is `localhost`** — otherwise the server answers 403 and the front-end shows the engine as
+unavailable. In both engines the result streams into the dialog as Server-Sent Events and renders as Markdown.
+
 ## Configuration
 
 | Path | Environment variable | Default | Meaning |
 |------|----------------------|---------|---------|
 | `config.admin.host` | `ADMIN_HOST` | `localhost` | address the web server binds to (`0.0.0.0` to expose on all interfaces) |
 | `config.admin.port` | `ADMIN_PORT` | `3001` | TCP port of the web server |
+| `config.admin.logAnalysis.llm.models` | — | `['gpt-5.4-mini', 'gpt-5.4']` | allow-list of models offered by the analysis dialog |
+| `config.admin.logAnalysis.llm.defaultModel` | — | `gpt-5.4-mini` | model preselected in the analysis dialog |
+| `config.admin.logAnalysis.cli.presets` | — | `claude -p` preset | CLI presets: `name`, `command`, `args`, `timeoutSec` |
+| `config.admin.logAnalysis.cli.maxOutputChars` | — | `200000` | CLI output cap; the stream is cut with a notice beyond it |
+
+The journals themselves (the logs database connection, buffer sizes, payload truncation, and retention
+thresholds) are configured under `config.db.postgres.dbs.logs` and `config.llmLog`, which belong to the bot core
+and are described in the specification ([OPS-5]).
 
 ## Run Workflows
 
@@ -128,4 +216,7 @@ The operator opens `http://localhost:3001`.
 
 The interface has no authentication layer of its own. Access is limited by the bind address: with the default
 `config.admin.host` of `localhost`, the server is reachable only from the local machine. Exposing it on a network
-(`config.admin.host = 0.0.0.0`) places it behind whatever external access control the deployment provides.
+(`config.admin.host = 0.0.0.0`) places it behind whatever external access control the deployment provides. The
+CLI engine of the log analysis is the one feature that does not follow the bind address: it executes a command
+on the server, so the endpoint rejects it with 403 whenever `config.admin.host` is anything other than
+`localhost`, regardless of where the request came from.

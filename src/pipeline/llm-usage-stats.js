@@ -1,7 +1,8 @@
 // Fast LLM cost accounting on top of the narrow log.llm_usage table. These functions lay the groundwork for a
 // future interface (not implemented within the current task): total cost over a period, a breakdown by request
-// kind, and the cost of a single dialog turn. All queries go through the shared query() wrapper from src/db.js.
-import { query } from '../db.js';
+// kind, and the cost of a single dialog turn. The journal tables live in the separate logs DB, so all queries
+// go through the queryLog() wrapper from src/db.js.
+import { queryLog as query } from '../db.js';
 
 // Build the WHERE clause and parameters from a set of filters. Returns { clause, params } to splice into a query.
 function buildFilters({ from, to, userId, kind, model }, startIndex = 1) {

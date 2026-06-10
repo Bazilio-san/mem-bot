@@ -5,6 +5,9 @@
 // than a "white screen".
 import express from 'express';
 import { listUsers, getUserMemory, getProactivity, deleteItem } from '../sandbox/data.js';
+import { searchUsers, getTimeline, getCycle, getSingleRequest, getUserById } from './llm-log-data.js';
+import { analysisConfigPublic, runAnalysis } from './log-analysis.js';
+import { handleMessage } from '../agent.js';
 
 // A small wrapper: catches an async handler's exception and returns it as a JSON 500 error.
 // Without it, a rejected promise in an express handler would not turn into a response and the request would hang.
@@ -67,6 +70,85 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const state = await getProactivity(req.params.id);
       res.json(state);
+    }),
+  );
+
+  // --- LLM log viewer ------------------------------------------------------
+
+  // User suggestions for the log page search box (by name, Telegram id, or exact internal UUID).
+  router.get(
+    '/users/search',
+    wrap(async (req, res) => {
+      res.json(await searchUsers(req.query.q));
+    }),
+  );
+
+  // Chat timeline of a user: dialog messages merged with service LLM call badges, paginated upwards
+  // (?before=<ISO> returns strictly older items, ?limit= messages per page).
+  router.get(
+    '/users/:id/timeline',
+    wrap(async (req, res) => {
+      res.json(await getTimeline({ userId: req.params.id, before: req.query.before, limit: req.query.limit }));
+    }),
+  );
+
+  // Journal of one dialog cycle (header with totals + display rows) by its correlation request_id.
+  router.get(
+    '/llm-log/cycle/:requestId',
+    wrap(async (req, res) => {
+      const cycle = await getCycle(req.params.requestId);
+      if (!cycle) {
+        return res.status(404).json({ error: 'Записей журнала с таким request_id не найдено.' });
+      }
+      res.json(cycle);
+    }),
+  );
+
+  // Journal of a single service record (a badge without request_id) by its journal primary key.
+  router.get(
+    '/llm-log/request/:llmRequestId',
+    wrap(async (req, res) => {
+      const result = await getSingleRequest(req.params.llmRequestId);
+      if (!result) {
+        return res.status(404).json({ error: 'Запись журнала не найдена.' });
+      }
+      res.json(result);
+    }),
+  );
+
+  // Send a message on behalf of the user from the admin chat pane. Runs the full agent pipeline with the
+  // 'admin' channel (no markup profile is registered for it, so the reply comes as plain text) and returns
+  // the answer together with the turn's request_id, so the frontend can open the fresh cycle's journal.
+  router.post(
+    '/users/:id/chat-message',
+    wrap(async (req, res) => {
+      const text = String(req.body?.text || '').trim();
+      if (!text) {
+        return res.status(400).json({ error: 'Пустое сообщение.' });
+      }
+      const user = await getUserById(req.params.id);
+      if (!user) {
+        return res.status(404).json({ error: 'Пользователь не найден.' });
+      }
+      const result = await handleMessage({ externalId: user.external_id, userMessage: text, channel: 'admin' });
+      res.json({ answer: result.answer, requestId: result.requestId });
+    }),
+  );
+
+  // Public settings of the AI analysis dialog: allowed models and CLI preset names (no commands).
+  router.get(
+    '/llm-log/analysis-config',
+    wrap(async (_req, res) => {
+      res.json(analysisConfigPublic());
+    }),
+  );
+
+  // AI analysis of a logged request. Streams the result as Server-Sent Events; the CLI engine is rejected
+  // with 403 unless the admin server listens on localhost (the check lives in runAnalysis).
+  router.post(
+    '/llm-log/analyze',
+    wrap(async (req, res) => {
+      await runAnalysis(req.body || {}, res);
     }),
   );
 

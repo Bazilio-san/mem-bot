@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { loadMcpServers } from './config.js';
 import { debugEnabled } from '../config.js';
+import { logAgentEvent, AGENT_EVENTS } from '../pipeline/agent-event-log.js';
 
 const CALL_TIMEOUT_MS = 90_000; // wait limit for an MCP tool response; a hung server doesn't block the agent
 
@@ -202,12 +203,28 @@ export async function loadMcpTools() {
         `MCP "${server.title}" (${server.url}): connected successfully in ${Date.now() - startedAt} ms, ` +
           `tools received — ${tools.length}.`,
       );
+      // The journal entry lets the admin log viewer show MCP connections in the event timeline. Connection
+      // happens lazily on the first message, so the event usually lands inside that turn's request_id.
+      logAgentEvent({
+        eventType: AGENT_EVENTS.MCP_CONNECTED,
+        title: `Подключён MCP-сервер: ${server.title}`,
+        data: { alias: server.alias, url: server.url, toolCount: tools.length },
+        durationMs: Date.now() - startedAt,
+      });
     } catch (err) {
       failedCount += 1;
       console.error(
         `MCP "${server.title}" (${server.url}): connection failed in ${Date.now() - startedAt} ms — ` +
           `${err.message}. Server skipped, the remaining tools stay available.`,
       );
+      logAgentEvent({
+        eventType: AGENT_EVENTS.MCP_FAILED,
+        title: `Не удалось подключить MCP-сервер: ${server.title}`,
+        data: { alias: server.alias, url: server.url },
+        durationMs: Date.now() - startedAt,
+        status: 'error',
+        error: String(err.message || err),
+      });
     }
   }
 

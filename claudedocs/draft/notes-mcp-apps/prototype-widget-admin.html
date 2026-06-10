@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Прототип: виджет заметок в чате админки (без iframe)</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --surface: #ffffff; --border: #e2e5ea; --text: #1f2937;
+    --muted: #6b7280; --primary: #3b82f6; --primary-dark: #2563eb;
+    --danger: #ef4444; --pin: #f59e0b; --tag-bg: #eef2ff; --tag-fg: #4338ca;
+    --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 'Segoe UI', system-ui, sans-serif; }
+
+  /* Имитация ленты чата админки */
+  .chat { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  .msg { margin: 14px 0; display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .bubble { max-width: 78%; padding: 10px 14px; border-radius: 14px; box-shadow: var(--shadow); }
+  .msg.user .bubble { background: #dbeafe; border-bottom-right-radius: 4px; }
+  .msg.bot .bubble { background: var(--surface); border-bottom-left-radius: 4px; }
+  .meta-line { font-size: 11.5px; color: var(--muted); margin: 4px 6px 0; }
+
+  /* ===== Виджет заметок (NotesWidget.vue) ===== */
+  .notes-widget { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius); box-shadow: var(--shadow);
+                  margin-top: 8px; width: 100%; max-width: 640px; overflow: hidden; }
+  .nw-header { display: flex; gap: 8px; align-items: center; padding: 12px;
+               border-bottom: 1px solid var(--border); background: #fafbfc; }
+  .nw-header .title { font-weight: 600; white-space: nowrap; }
+  .nw-header .count { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .nw-search { flex: 1; display: flex; align-items: center; gap: 6px;
+               background: var(--surface); border: 1px solid var(--border);
+               border-radius: 8px; padding: 5px 10px; }
+  .nw-search input { border: 0; outline: 0; flex: 1; font-size: 13.5px; background: transparent; }
+  .nw-search .hint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .btn { border: 0; border-radius: 8px; padding: 7px 12px; font-size: 13px;
+         cursor: pointer; background: var(--primary); color: #fff; white-space: nowrap; }
+  .btn:hover { background: var(--primary-dark); }
+  .btn.ghost { background: transparent; color: var(--muted); padding: 4px 6px; font-size: 15px; }
+  .btn.ghost:hover { color: var(--text); background: #f1f3f5; }
+  .btn.danger-ghost:hover { color: var(--danger); background: #fef2f2; }
+
+  .nw-list { max-height: 420px; overflow-y: auto; }
+  .note-card { padding: 11px 14px; border-bottom: 1px solid var(--border); position: relative; }
+  .note-card:hover { background: #f8fafc; }
+  .note-card.pinned { background: #fffbeb; }
+  .note-top { display: flex; align-items: baseline; gap: 8px; }
+  .note-title { font-weight: 600; flex: 1; }
+  .note-title .pin-ico { color: var(--pin); font-size: 12px; margin-right: 4px; }
+  .note-date { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .note-body { color: #374151; font-size: 13px; margin-top: 3px;
+               display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+               overflow: hidden; }
+  .note-tags { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
+  .tag { background: var(--tag-bg); color: var(--tag-fg); font-size: 11px;
+         padding: 1.5px 8px; border-radius: 99px; }
+  .note-actions { position: absolute; right: 10px; bottom: 8px; display: none; gap: 2px;
+                  background: var(--surface); border: 1px solid var(--border);
+                  border-radius: 8px; padding: 2px; box-shadow: var(--shadow); }
+  .note-card:hover .note-actions { display: flex; }
+  .relevance { font-size: 10.5px; color: #059669; background: #ecfdf5;
+               padding: 1px 6px; border-radius: 99px; }
+
+  .nw-sentinel { padding: 12px; text-align: center; color: var(--muted); font-size: 12.5px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
+             border-top-color: var(--primary); border-radius: 50%;
+             animation: spin .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Инлайн-редактор */
+  .editor { padding: 12px 14px; border-bottom: 1px solid var(--border); background: #f0f7ff; }
+  .editor input, .editor textarea { width: 100%; border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; font: inherit; margin-bottom: 8px; outline: none; }
+  .editor input:focus, .editor textarea:focus { border-color: var(--primary); }
+  .editor textarea { resize: vertical; min-height: 70px; }
+  .editor .row { display: flex; gap: 8px; justify-content: flex-end; }
+  .btn.secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn.secondary:hover { background: #f1f3f5; color: var(--text); }
+
+  .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+           background: #111827; color: #fff; padding: 9px 18px; border-radius: 8px;
+           font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: .94; }
+</style>
+</head>
+<body>
+
+<div class="chat">
+  <div class="msg user"><div class="bubble">Покажи мои заметки</div></div>
+
+  <div class="msg bot">
+    <div class="bubble" style="max-width:92%; width:660px;">
+      Вот ваши заметки — можно искать, редактировать и создавать новые прямо здесь:
+
+      <!-- ===== NotesWidget (рендерится нативно в ленте, БЕЗ iframe) ===== -->
+      <div class="notes-widget">
+        <div class="nw-header">
+          <span class="title">📝 Заметки</span>
+          <span class="count" id="count"></span>
+          <div class="nw-search">
+            <span>🔍</span>
+            <input id="search" placeholder="Семантический поиск: «что я писал про отпуск»…">
+            <span class="hint">smart</span>
+          </div>
+          <button class="btn" onclick="openEditor()">+ Новая</button>
+        </div>
+        <div id="editorSlot"></div>
+        <div class="nw-list" id="list"></div>
+        <div class="nw-sentinel" id="sentinel"></div>
+      </div>
+      <!-- ===== /NotesWidget ===== -->
+    </div>
+  </div>
+  <div class="meta-line">в историю LLM: «Пользователю показан виджет списка заметок. Всего заметок: 47»</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== Мок данных: имитация GET /api/notes?cursor=&limit=&q= =====
+const ALL = [];
+const TAGS = [['работа'],['личное'],['идеи','проект'],['покупки'],['здоровье'],[],['книги'],['работа','срочно']];
+const TITLES = ['План на квартал','Идея для бота','Список покупок','Рецепт пасты','Книги к прочтению',
+  'Заметки со встречи','Пароль от роутера — намёк','Тренировки','Подарки на НГ','Конспект статьи про RAG',
+  'Места для отпуска','Цитата дня'];
+for (let i = 0; i < 47; i++) {
+  ALL.push({
+    id: 100 + i,
+    title: TITLES[i % TITLES.length] + (i >= TITLES.length ? ` (${Math.floor(i/TITLES.length)+1})` : ''),
+    body: 'Текст заметки №' + (100+i) + '. Здесь может быть длинное содержимое: мысли, список дел, ' +
+          'конспект или ссылка. В карточке показываются первые три строки, полностью — при редактировании. ' +
+          'Семантический поиск находит заметки по смыслу, а не только по точному совпадению слов.',
+    tags: TAGS[i % TAGS.length],
+    pinned: i === 1 || i === 4,
+    updatedAt: new Date(Date.now() - i * 36e5 * 7),
+  });
+}
+const PAGE = 12;
+let shown = [], nextCursor = 0, query = '', loading = false, editingId = null;
+
+function fetchPage(cursor, q) { // имитация API с задержкой сети
+  return new Promise(res => setTimeout(() => {
+    let src = ALL.filter(n => !n.deleted);
+    if (q) {
+      src = src.filter(n => (n.title + ' ' + n.body + ' ' + n.tags.join(' ')).toLowerCase()
+        .includes(q.toLowerCase()));
+      src = src.map(n => ({ ...n, relevance: (0.95 - Math.random() * 0.3).toFixed(2) }));
+    } else {
+      src = [...src].sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+    }
+    res({ items: src.slice(cursor, cursor + PAGE), nextCursor: cursor + PAGE < src.length ? cursor + PAGE : null,
+          total: src.length });
+  }, 350));
+}
+
+// ===== Рендеринг =====
+const list = document.getElementById('list');
+const sentinel = document.getElementById('sentinel');
+const fmt = d => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ', ' +
+                 d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+function cardHtml(n) {
+  return `<div class="note-card ${n.pinned ? 'pinned' : ''}" data-id="${n.id}">
+    <div class="note-top">
+      <span class="note-title">${n.pinned ? '<span class="pin-ico">📌</span>' : ''}${esc(n.title)}</span>
+      ${n.relevance ? `<span class="relevance">релевантность ${n.relevance}</span>` : ''}
+      <span class="note-date">${fmt(n.updatedAt)}</span>
+    </div>
+    <div class="note-body">${esc(n.body)}</div>
+    ${n.tags.length ? `<div class="note-tags">${n.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+    <div class="note-actions">
+      <button class="btn ghost" title="Закрепить" onclick="togglePin(${n.id})">${n.pinned ? '📌' : '📍'}</button>
+      <button class="btn ghost" title="Редактировать" onclick="openEditor(${n.id})">✏️</button>
+      <button class="btn ghost danger-ghost" title="Удалить" onclick="del(${n.id})">🗑️</button>
+    </div>
+  </div>`;
+}
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function load(reset) {
+  if (loading) return;
+  loading = true;
+  if (reset) { shown = []; nextCursor = 0; list.innerHTML = ''; }
+  sentinel.innerHTML = '<span class="spinner"></span>загрузка…';
+  const { items, nextCursor: nc, total } = await fetchPage(nextCursor, query);
+  shown.push(...items); nextCursor = nc;
+  list.insertAdjacentHTML('beforeend', items.map(cardHtml).join(''));
+  document.getElementById('count').textContent = query ? `найдено: ${total}` : `всего: ${total}`;
+  sentinel.textContent = nc === null
+    ? (shown.length ? 'это все заметки' : '') : 'прокрутите вниз для подгрузки…';
+  if (!shown.length) list.innerHTML = `<div class="empty">Ничего не найдено${query ? ` по запросу «${esc(query)}»` : ''}.<br>Создайте первую заметку!</div>`;
+  loading = false;
+}
+
+// ===== Ленивая подгрузка: IntersectionObserver на сторожевом элементе =====
+new IntersectionObserver(es => {
+  if (es[0].isIntersecting && nextCursor !== null && !loading) load(false);
+}, { root: list.parentElement.querySelector('.nw-list'), rootMargin: '60px' }).observe(sentinel);
+
+// ===== Поиск с debounce (в реале — GET /api/notes?q=, семантика на сервере) =====
+let t;
+document.getElementById('search').addEventListener('input', e => {
+  clearTimeout(t);
+  t = setTimeout(() => { query = e.target.value.trim(); load(true); }, 400);
+});
+
+// ===== CRUD (в реале — POST/PATCH/DELETE /api/notes + мета-событие в историю LLM) =====
+function openEditor(id) {
+  editingId = id ?? null;
+  const n = id ? ALL.find(x => x.id === id) : { title: '', body: '', tags: [] };
+  document.getElementById('editorSlot').innerHTML = `
+    <div class="editor">
+      <input id="eTitle" placeholder="Заголовок" value="${esc(n.title)}">
+      <textarea id="eBody" placeholder="Текст заметки…">${esc(n.body)}</textarea>
+      <input id="eTags" placeholder="Теги через запятую" value="${esc(n.tags.join(', '))}">
+      <div class="row">
+        <button class="btn secondary" onclick="closeEditor()">Отмена</button>
+        <button class="btn" onclick="save()">${id ? 'Сохранить' : 'Создать'}</button>
+      </div>
+    </div>`;
+  document.getElementById('eTitle').focus();
+}
+function closeEditor() { document.getElementById('editorSlot').innerHTML = ''; editingId = null; }
+function save() {
+  const title = document.getElementById('eTitle').value.trim() || 'Без названия';
+  const body = document.getElementById('eBody').value.trim();
+  const tags = document.getElementById('eTags').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (editingId) {
+    Object.assign(ALL.find(x => x.id === editingId), { title, body, tags, updatedAt: new Date() });
+    toast(`PATCH /api/notes/${editingId} → в историю LLM: «отредактировал заметку #${editingId}»`);
+  } else {
+    const id = Math.max(...ALL.map(n => n.id)) + 1;
+    ALL.unshift({ id, title, body, tags, pinned: false, updatedAt: new Date() });
+    toast(`POST /api/notes → в историю LLM: «создал заметку #${id} „${title}“»`);
+  }
+  closeEditor(); load(true);
+}
+function del(id) {
+  if (!confirm('Удалить заметку #' + id + '?')) return;
+  ALL.find(x => x.id === id).deleted = true;
+  toast(`DELETE /api/notes/${id} → в историю LLM: «удалил заметку #${id}»`);
+  load(true);
+}
+function togglePin(id) {
+  const n = ALL.find(x => x.id === id); n.pinned = !n.pinned;
+  toast(`PATCH /api/notes/${id} {pinned: ${n.pinned}}`);
+  load(true);
+}
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+load(true);
+</script>
+</body>
+</html>

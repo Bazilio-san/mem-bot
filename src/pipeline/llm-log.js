@@ -1,13 +1,14 @@
-// LLM request log emitter: a single write point with asynchronous batched flushing to the database.
+// LLM request log emitter: a single write point with asynchronous batched flushing to the logs DB.
 // Logging doesn't block the user's response and never crashes the main flow: any preparation or insertion
 // error is swallowed inside. Records accumulate in a buffer; a background timer, once per
-// config.llmLog.flushIntervalMs, takes a batch and writes it to log.llm_request with a single multi-row
-// INSERT; a database trigger fills the narrow log.llm_usage table itself. On a graceful shutdown
-// flushLlmLog() drains the rest of the buffer.
+// config.llmLog.flushIntervalMs, takes a batch and writes it to log.llm_request (in the SEPARATE logs
+// database, see src/db.js queryLog) with a single multi-row INSERT; a database trigger fills the narrow
+// log.llm_usage table itself. On a graceful shutdown flushLlmLog() drains the rest of the buffer.
+// The buffering machinery is shared with the agent event journal — see src/pipeline/log-writer.js.
 import { config } from '../config.js';
-import { query } from '../db.js';
 import { getLlmContext } from './llm-context.js';
 import { priceUsd } from './llm-pricing.js';
+import { createBatchWriter, truncateJson } from './log-writer.js';
 
 // Dictionary of request kinds (request_kind). The single place where a new kind is added. For endpoints
 // with a strictly single purpose (embeddings, speech recognition and synthesis) the kind is inferred from
@@ -27,6 +28,8 @@ export const REQUEST_KINDS = Object.freeze({
   EMBEDDING: 'embedding',
   STT: 'stt',
   TTS: 'tts',
+  // AI analysis of a logged request from the admin log viewer (POST /api/llm-log/analyze).
+  LOG_ANALYSIS: 'log_analysis',
   // Fallback marker: the request kind wasn't passed. This signals a bug in the calling code — every
   // chat.completions call must specify kind. Records with this kind in the log expose "illegal" calls.
   UNTYPED: 'untyped',
@@ -40,19 +43,12 @@ const DEFAULT_KIND_BY_ENDPOINT = {
   'audio.speech': REQUEST_KINDS.TTS,
 };
 
-// The database write function. By default it's the shared query() wrapper from src/db.js; in unit tests it's
-// swapped via __setDbQueryForTests to verify buffering and flushing without a real database.
-let dbQuery = query;
-
-// Swap the database write function (tests only). Returns the previous implementation so it can be restored.
-export function __setDbQueryForTests(fn) {
-  const prev = dbQuery;
-  dbQuery = fn || query;
-  return prev;
-}
-
-// Columns of the full log in insertion order. The payload and binary_meta indexes are marked as jsonb.
+// Columns of the full log in insertion order. payload, response and binary_meta are jsonb.
+// created_at is set explicitly at record-build time (not by the DB default): records are flushed in batches
+// up to a second later, and the whole batch would otherwise share one insertion timestamp — the admin log
+// viewer needs real call times to order the cycle timeline.
 export const COLUMNS = [
+  'created_at',
   'request_id',
   'request_kind',
   'endpoint',
@@ -65,8 +61,10 @@ export const COLUMNS = [
   'channel',
   'is_binary',
   'payload',
+  'response',
   'binary_meta',
   'payload_truncated',
+  'response_truncated',
   'prompt_tokens',
   'completion_tokens',
   'total_tokens',
@@ -76,17 +74,6 @@ export const COLUMNS = [
   'error',
   'is_test',
 ];
-const JSONB_INDEXES = new Set([COLUMNS.indexOf('payload'), COLUMNS.indexOf('binary_meta')]);
-
-// Internal buffer of prepared records and the background flush state.
-const buffer = [];
-let flushTimer = null;
-let flushing = false;
-// Hard cap on the buffer size: with the database unavailable it must not grow without bound. Above the cap
-// we drop the oldest records with a warning (explicit truncation, no silent loss).
-const MAX_BUFFER = 5000;
-// Early flush threshold: as soon as this many records have accumulated in the buffer, we flush without waiting for the timer.
-const EARLY_FLUSH_AT = 50;
 
 // Current logging settings (with sensible defaults if the llmLog section is absent).
 function llmLogConfig() {
@@ -97,6 +84,18 @@ function llmLogConfig() {
     flushIntervalMs: Number(c.flushIntervalMs) > 0 ? Number(c.flushIntervalMs) : 1000,
     maxPayloadChars: Number(c.maxPayloadChars) > 0 ? Number(c.maxPayloadChars) : 100000,
   };
+}
+
+const writer = createBatchWriter({
+  table: 'log.llm_request',
+  columns: COLUMNS,
+  jsonbColumns: ['payload', 'response', 'binary_meta'],
+  getSettings: llmLogConfig,
+});
+
+// Swap the database write function (tests only). Returns the previous implementation so it can be restored.
+export function __setDbQueryForTests(fn) {
+  return writer.setDbQueryForTests(fn);
 }
 
 // Test-run flag: records are marked is_test so they can be cleaned up after the run.
@@ -116,49 +115,9 @@ function providerFromBaseURL(baseURL) {
   return 'proxy';
 }
 
-// Truncate the payload to the size limit: long string values inside are clipped and the truncated flag is
-// raised. Returns a JSON string ready for insertion into the jsonb column, and a truncation flag.
-function buildPayloadJson(payload, maxChars) {
-  if (payload === null || payload === undefined) {
-    return { json: null, truncated: false };
-  }
-  let serialized;
-  try {
-    serialized = JSON.stringify(payload);
-  } catch {
-    return { json: JSON.stringify({ error: 'payload is not serializable' }), truncated: true };
-  }
-  if (serialized.length <= maxChars) {
-    return { json: serialized, truncated: false };
-  }
-  // Recursively clip long strings (message texts, embedding input) to a reasonable length.
-  const perString = 2000;
-  const trunc = (v) => {
-    if (typeof v === 'string') {
-      return v.length > perString ? `${v.slice(0, perString)}…[+${v.length - perString} chars]` : v;
-    }
-    if (Array.isArray(v)) {
-      return v.map(trunc);
-    }
-    if (v && typeof v === 'object') {
-      const out = {};
-      for (const k of Object.keys(v)) {
-        out[k] = trunc(v[k]);
-      }
-      return out;
-    }
-    return v;
-  };
-  let reduced = JSON.stringify(trunc(payload));
-  if (reduced.length > maxChars) {
-    // Edge case: even after clipping strings the object is large — store a truncated snapshot as a string.
-    reduced = JSON.stringify({ _truncated: reduced.slice(0, maxChars) });
-  }
-  return { json: reduced, truncated: true };
-}
-
 // Build a single log record from the input data and the correlation context. Returns a flat object matching
-// the log.llm_request columns (payload/binary_meta are already JSON strings). Never throws: on failure returns null.
+// the log.llm_request columns (payload/response/binary_meta are already JSON strings). Never throws: on
+// failure returns null.
 export function buildRecord(input) {
   try {
     const cfg = llmLogConfig();
@@ -197,11 +156,13 @@ export function buildRecord(input) {
       }
     }
 
-    const { json: payloadJson, truncated } = buildPayloadJson(input.payload, cfg.maxPayloadChars);
+    const { json: payloadJson, truncated: payloadTruncated } = truncateJson(input.payload, cfg.maxPayloadChars);
+    const { json: responseJson, truncated: responseTruncated } = truncateJson(input.response, cfg.maxPayloadChars);
     const binaryMetaJson = input.binaryMeta ? JSON.stringify(input.binaryMeta) : null;
     const provider = input.provider || providerFromBaseURL(input.baseURL ?? config.llm.baseURL);
 
     return {
+      created_at: new Date().toISOString(),
       request_id: ctx.requestId ?? null,
       request_kind: kind,
       endpoint,
@@ -214,8 +175,10 @@ export function buildRecord(input) {
       channel: ctx.channel ?? null,
       is_binary: input.isBinary === true,
       payload: payloadJson,
+      response: responseJson,
       binary_meta: binaryMetaJson,
-      payload_truncated: truncated,
+      payload_truncated: payloadTruncated,
+      response_truncated: responseTruncated,
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
       total_tokens: totalTokens,
@@ -238,78 +201,13 @@ export function logLlmRequest(input) {
       return;
     }
     const record = input.__isRecord ? input : buildRecord(input);
-    if (!record) {
-      return;
-    }
-    buffer.push(record);
-    if (buffer.length > MAX_BUFFER) {
-      const dropped = buffer.length - MAX_BUFFER;
-      buffer.splice(0, dropped);
-      console.warn(`[llm-log] Buffer overflow: dropped ${dropped} oldest log records.`);
-    }
-    ensureTimer();
-    if (buffer.length >= EARLY_FLUSH_AT) {
-      flushLlmLog().catch(() => {});
-    }
+    writer.push(record);
   } catch {
     // Logging must not affect the main response — we swallow any failures.
   }
 }
 
-// Start the background flush timer if it isn't running yet. unref() so the timer doesn't keep the process alive.
-function ensureTimer() {
-  if (flushTimer) {
-    return;
-  }
-  const { flushIntervalMs } = llmLogConfig();
-  flushTimer = setInterval(() => {
-    flushLlmLog().catch(() => {});
-  }, flushIntervalMs);
-  if (typeof flushTimer.unref === 'function') {
-    flushTimer.unref();
-  }
-}
-
-// Perform a single multi-row INSERT for a batch of records.
-async function insertBatch(records) {
-  const values = [];
-  const tuples = records.map((r) => {
-    const placeholders = COLUMNS.map((col, i) => {
-      values.push(r[col] ?? null);
-      const pos = values.length;
-      return JSONB_INDEXES.has(i) ? `$${pos}::jsonb` : `$${pos}`;
-    });
-    return `(${placeholders.join(',')})`;
-  });
-  const sql = `INSERT INTO log.llm_request (${COLUMNS.join(',')}) VALUES ${tuples.join(',')}`;
-  await dbQuery(sql, values);
-}
-
-// Force-flush the accumulated records. Takes batches of up to batchSize from the buffer and writes them one by
-// one. On an insertion error it returns the batch's records back to the front of the buffer (respecting the cap)
-// and stops the current pass — the next attempt happens on the timer or on the next call.
+// Force-flush the accumulated records (graceful shutdown, tests).
 export async function flushLlmLog() {
-  if (flushing || buffer.length === 0) {
-    return;
-  }
-  flushing = true;
-  const { batchSize } = llmLogConfig();
-  try {
-    while (buffer.length > 0) {
-      const batch = buffer.splice(0, batchSize);
-      try {
-        await insertBatch(batch);
-      } catch (err) {
-        // Return the failed batch to the front of the buffer so records aren't lost during a temporary DB outage.
-        buffer.unshift(...batch);
-        if (buffer.length > MAX_BUFFER) {
-          buffer.splice(MAX_BUFFER);
-        }
-        console.warn(`[llm-log] Failed to write log (${batch.length} records): ${String(err.message || err)}`);
-        break;
-      }
-    }
-  } finally {
-    flushing = false;
-  }
+  await writer.flush();
 }

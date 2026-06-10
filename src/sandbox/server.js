@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { closePool } from '../db.js';
 import { flushLlmLog } from '../pipeline/llm-log.js';
+import { flushAgentEventLog } from '../pipeline/agent-event-log.js';
 import { listUsers, getUserMemory, runFilter, chat, getProactivity, deleteItem } from './data.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +138,7 @@ server.listen(PORT, () => {
 async function shutdown() {
   server.close();
   await flushLlmLog();
+  await flushAgentEventLog();
   await closePool();
   process.exit(0);
 }

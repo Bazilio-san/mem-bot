@@ -68,8 +68,16 @@ export async function chat({ model = config.llm.mainModel, messages, tools, tool
     throw err;
   }
   const usage = extractUsage(res.usage);
-  safeLog({ endpoint: 'chat.completions', kind, model, payload: body, durationMs: Date.now() - startedAt, ...usage });
   const msg = res.choices[0].message;
+  safeLog({
+    endpoint: 'chat.completions',
+    kind,
+    model,
+    payload: body,
+    response: { message: msg, finish_reason: res.choices[0].finish_reason ?? null },
+    durationMs: Date.now() - startedAt,
+    ...usage,
+  });
   dbg('chat <-', JSON.stringify(msg).slice(0, 400));
   return msg;
 }
@@ -188,6 +196,7 @@ export async function chatStream({
     kind,
     model,
     payload: body,
+    response: { message, finish_reason: finishReason },
     durationMs: Date.now() - startedAt,
     ...extractUsage(usageRaw),
   });
@@ -238,6 +247,7 @@ ${schemaText}
     kind,
     model,
     payload: body,
+    response: { message: res.choices[0].message, finish_reason: res.choices[0].finish_reason ?? null },
     durationMs: Date.now() - startedAt,
     ...extractUsage(res.usage),
   });
@@ -268,6 +278,8 @@ export async function embed(text, { kind } = {}) {
       kind,
       model,
       payload: { model, input: text },
+      // Vectors are heavy and useless in the journal — only their shape is recorded.
+      response: { dims: res.data[0]?.embedding?.length ?? null, count: res.data.length },
       durationMs: Date.now() - startedAt,
       ...usage,
     });

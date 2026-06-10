@@ -5,6 +5,7 @@ import { handleMessage } from './agent.js';
 import { tick } from './pipeline/scheduler.js';
 import { closePool } from './db.js';
 import { flushLlmLog } from './pipeline/llm-log.js';
+import { flushAgentEventLog } from './pipeline/agent-event-log.js';
 import { ensureUser } from './repo.js';
 import { isAdmin } from './pipeline/admin.js';
 import {
@@ -167,6 +168,7 @@ async function main() {
   clearInterval(schedulerTimer);
   rl.close();
   await flushLlmLog();
+  await flushAgentEventLog();
   await closePool();
 }
 

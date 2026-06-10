@@ -7,7 +7,10 @@
   hashing).
 - A populated `config/local.yaml`: database connection parameters (`config.db.postgres.dbs.main.*`), the model access
   key `config.llm.apiKey`, and the encryption secret `config.authSecret`. `config.llm.baseURL` is set only when an
-  OpenAI-compatible proxy is needed; without it the direct OpenAI API is used. Optionally, you can override models and
+  OpenAI-compatible proxy is needed; without it the direct OpenAI API is used. The separate logs database
+  (`config.db.postgres.dbs.logs`, default name `mem_bot_logs`) normally needs no credentials of its own: empty
+  host/port/user/password are inherited from the `main` connection, and explicit values are required only when the
+  journals live on a different server. Optionally, you can override models and
   database parameters. Configuration is built by the `node-config` package from the `config/` directory:
   `config/default.yaml` sets defaults, the environment file (selected by `NODE_ENV`) overrides them, and local secrets
   live in `config/local.yaml`; any value can also be overridden by an environment variable of the same name.
@@ -18,7 +21,7 @@
 
 ```bash
 npm install            # install dependencies: openai, pg, config, af-db-ts, dotenv
-npm run migrate        # creates the database, pgcrypto and vector extensions, mem and log schemas, all tables and indexes (idempotent)
+npm run migrate        # creates both databases (memory and logs), pgcrypto and vector extensions, all tables and indexes (idempotent)
 npm run chat           # interactive terminal chat
 npm run scheduler      # reminders and proactivity scheduler worker
 npm test               # full test suite
@@ -116,10 +119,13 @@ Writing to the global memory is described in [14-global-memory.md](14-global-mem
 
 | `config` path | Purpose | Default |
 |---------------|---------|---------|
-| `llmLog.enabled` | write model requests to the `log` schema; when `false` the emitter becomes a no-op and writes nothing | `true` |
+| `llmLog.enabled` | write the journals (model requests and agent events) to the logs database; when `false` both emitters become no-ops | `true` |
 | `llmLog.batchSize` | background buffer-flush batch size (number of records per `INSERT`) | `200` |
 | `llmLog.flushIntervalMs` | background buffer-flush interval (milliseconds) | `1000` |
-| `llmLog.maxPayloadChars` | maximum length of the serialized `payload`; beyond this the payload is truncated and `payload_truncated = true` is set | `100000` |
+| `llmLog.maxPayloadChars` | maximum serialized length of `payload`, `response`, and event `data`; beyond it the value is truncated and the matching flag is set | `100000` |
+| `llmLog.retention.llmRequestDays` | age threshold (days) of the daily cleanup of `log.llm_request`; `0` keeps rows forever | `90` |
+| `llmLog.retention.agentEventDays` | age threshold (days) of the daily cleanup of `log.agent_event`; `0` keeps rows forever | `90` |
+| `llmLog.retention.llmUsageDays` | age threshold (days) of the daily cleanup of `log.llm_usage`; `0` keeps rows forever | `0` |
 
 The log is structured and operates as described in [10-operations.md](10-operations.md), section [OPS-5]; the
 table schema is in [05-data-schema.md](05-data-schema.md), section [DATA-12].
@@ -129,11 +135,12 @@ table schema is in [05-data-schema.md](05-data-schema.md), section [DATA-12].
 ## [QS-5] Directory Structure
 
 ```text
-migrations/001_init.sql      single initialization: mem and log schemas, all tables, types, indexes, triggers, base domains
+migrations/001_init.sql      single initialization of the memory database: mem schema, all tables, types, indexes, triggers, base domains
+migrations-log/001_log_init.sql  single initialization of the logs database: log schema, journal tables, billing trigger
 skills/                      skills registry: one directory per domain (SKILL.md, domain-schema.json, references/)
 config/                      node-config configuration tree: default.yaml, environment files, local.yaml, env-var map
 src/config.js                snapshot of the config tree (node-config): model selection, flags, and DB connection parameters
-src/db.js                    PostgreSQL access via af-db-ts plus the vectorToSql helper
+src/db.js                    PostgreSQL access via af-db-ts: the memory connection (query) and the logs connection (queryLog)
 src/llm.js                   LLM client: chat, strict JSON (chatJSON), embeddings
 src/migrate.js               database bootstrap and migration runner
 src/repo.js                  users, domains, conversations, messages, tool log, proactivity helpers
@@ -169,9 +176,13 @@ src/pipeline/events.js       external events and relevance filter (criterion 17)
 src/pipeline/history-context.js   HISTORY_CONTEXT reference block assembly (criterion 18)
 src/pipeline/history-compress.js  compression decision and cold-zone summarizer invocation
 src/pipeline/token-counter.js     conservative token count estimation (estimateTokens)
-src/pipeline/llm-log.js      model request log: buffer, batch flush to log schema, request types
+src/pipeline/log-writer.js   shared buffered batch writer for the journal tables in the logs database
+src/pipeline/llm-log.js      model request log: record builder (payload, response, cost), request types
+src/pipeline/agent-event-log.js   agent event journal: stages, tool calls with arguments/results, MCP connections
+src/pipeline/log-retention.js     daily age-based cleanup of the journals (config.llmLog.retention)
 src/pipeline/llm-pricing.js  request cost calculation from the model price list
 src/pipeline/llm-usage-stats.js   cost aggregates over the narrow log.llm_usage log
+scripts/migrate-llm-log-db.js     one-time transfer of historical journals into the logs database
 src/schema/meta.js           domain definition meta-schema and shared ajv validator
 src/schema/registry.js       domain schema and entity spec access via the skills registry (getEntitySpec)
 src/schema/validate.js       validateAndCanonicalize: validate data and canonicalize entity_key
@@ -180,6 +191,7 @@ tests/memory_cases.json      fact-extraction test cases
 tests/schema.test.js         domain data schema layer tests (npm run test:schema)
 tests/skills.test.mjs        skills registry and tool-filtering tests (npm run test:skills)
 tests/skill-authoring.test.mjs  skill-authoring toolset tests (npm run test:skill-authoring)
+tests/llm-log-*.test.mjs, tests/log-*.test.mjs, tests/agent-event-log.test.mjs  journal unit and integration suites (npm run test:llm-log, test:llm-log-db)
 tests/check-llm.js           model availability and capability check via the selected endpoint
 scripts/memory-dedupe.js     CLI dry-run/apply for retroactive memory deduplication
 ```

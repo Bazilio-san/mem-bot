@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
@@ -48,12 +48,13 @@
     "test:skills": "cross-env NODE_ENV=test node tests/skills.test.mjs",
     "test:skill-authoring": "cross-env NODE_ENV=test node tests/skill-authoring.test.mjs",
     "test:llm-pricing": "cross-env NODE_ENV=test node tests/llm-pricing.test.mjs",
-    "test:llm-log": "cross-env NODE_ENV=test node tests/llm-log-buffer.test.mjs && cross-env NODE_ENV=test node tests/llm-log-stream-usage.test.mjs",
+    "test:llm-log": "cross-env NODE_ENV=test node tests/llm-log-buffer.test.mjs && cross-env NODE_ENV=test node tests/llm-log-stream-usage.test.mjs && cross-env NODE_ENV=test node tests/agent-event-log.test.mjs && cross-env NODE_ENV=test node tests/llm-log-cycle.test.mjs && cross-env NODE_ENV=test node tests/log-writer.test.mjs && cross-env NODE_ENV=test node tests/log-retention.test.mjs && cross-env NODE_ENV=test node tests/log-analysis.test.mjs && cross-env NODE_ENV=test node tests/llm-log-sse-client.test.mjs",
     "check:llm": "node tests/check-llm.js",
     "check:streaming": "node tests/check-streaming.js",
     "skills:validate": "node src/pipeline/skills/cli.js validate",
     "skills:list": "node src/pipeline/skills/cli.js list",
-    "skills:sync": "node src/pipeline/skills/cli.js sync"
+    "skills:sync": "node src/pipeline/skills/cli.js sync",
+    "test:llm-log-db": "cross-env NODE_ENV=test node tests/llm-log-integration.test.mjs && cross-env NODE_ENV=test node tests/llm-log-api.test.mjs"
   },
   "keywords": [
     "ai-agent",
