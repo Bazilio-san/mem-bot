@@ -4,6 +4,10 @@
 # Числа помечаются __format: number, флаги — __format: boolean ("true"/"false"), массивы/объекты — __format: json.
 # Ключи каждого уровня отсортированы по алфавиту (соглашение проекта).
 admin:
+  auth:
+    enabled:
+      __name: ADMIN_AUTH_ENABLED
+      __format: boolean
   host: ADMIN_HOST
   port:
     __name: ADMIN_PORT
@@ -132,6 +136,7 @@ notes:
   enabled:
     __name: NOTES_ENABLED
     __format: boolean
+  mcpSecret: NOTES_MCP_SECRET
   publicUrl: NOTES_PUBLIC_URL
   widgetSecret: NOTES_WIDGET_SECRET
 
