@@ -36,6 +36,7 @@ import { createTelegramProgress } from './progress.js';
 import { initTools } from '../pipeline/tools.js';
 import { registerChannelProfile } from '../pipeline/channels.js';
 import { telegramPostProcess, telegramSplit } from './format.js';
+import { startupInfo } from '../bootstrap/startup-info.js';
 
 requireConfig(['telegram.apiKey']); // the bot token is required specifically for the Telegram channel
 const TOKEN = config.telegram.apiKey;
@@ -1064,6 +1065,14 @@ export async function stopTelegram() {
 // (src/server/index.js) this block does not run, and shutdown is managed by the server.
 const isDirectRun = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
+  (async () => {
+    await startupInfo({ customStartupInfo: [['Startup mode', 'telegram']] });
+    await startTelegram();
+  })().catch((err) => {
+    console.error('Critical error starting the Telegram bot:', err.message);
+    process.exit(1);
+  });
+
   const shutdown = async () => {
     console.log('\nShutting down the Telegram bot…');
     await stopTelegram();
@@ -1076,9 +1085,4 @@ if (isDirectRun) {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-
-  startTelegram().catch((err) => {
-    console.error('Critical error starting the Telegram bot:', err.message);
-    process.exit(1);
-  });
 }

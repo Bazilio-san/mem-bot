@@ -359,6 +359,36 @@ id onto `mem.users.external_id` (which stores the Telegram chat id). Only users 
 edits made in the Mini App land in the dialogue history as `[notes]` system meta-events, so the agent is aware of
 them on the next turn.
 
+## Admin Panel Sign-In through Telegram
+
+The admin web panel authenticates its operators through the official **Telegram Login Widget** — admins are
+the bot's own users with `mem.users.is_admin = true`, so no separate password store exists. The flow
+(`src/server/admin-auth.js`, routes under `/api/auth`):
+
+1. The login screen embeds `telegram-widget.js` with `data-telegram-login` set to the bot username
+   (`config.telegram.botUsername`); Telegram requires the panel's domain to be linked to the bot via
+   BotFather (`/setdomain`).
+2. The widget's `onauth` payload (`id`, `auth_date`, `hash`, …) goes to `POST /api/auth/telegram`. The server
+   verifies the signature with the Login Widget algorithm (`secret_key = SHA256(bot_token)`, HMAC-SHA256 over
+   the sorted data-check-string), checks `auth_date` freshness, maps `id` onto `mem.users.external_id`, and
+   requires `is_admin = true` (403 otherwise). Sign-in attempts are rate-limited per client address.
+3. On success the server sets a self-contained HMAC session cookie (`HttpOnly`, `SameSite=Lax`, `Secure`
+   behind https; payload `{userId, displayName, aud: 'admin', exp}` signed with `config.authSecret`, TTL
+   `config.admin.auth.sessionTtlHours`). The `aud` field keeps the cookie distinct from the notes widget
+   token, which is signed with the same fallback secret. No session table exists.
+4. Every `/api` route except `/api/auth/*` and `/api/notes/*` (the notes API has its own authorization)
+   passes through the `requireAdminSession` middleware. `GET /api/auth/me` reports the session state to the
+   frontend gate; `POST /api/auth/logout` clears the cookie.
+
+Whether sign-in is required is governed by `config.admin.auth.enabled` (env `ADMIN_AUTH_ENABLED`):
+`true` — always, `false` — never, `null` (default) — automatically required whenever `config.admin.host`
+is not a loopback address, so local development needs no login while a publicly bound panel demands it.
+
+The notes MCP endpoint (`config.notes.mcpPath`) is likewise shielded from the outside: a request carrying
+`X-Forwarded-For` (i.e. arriving through a reverse proxy) or originating from a non-loopback address is
+rejected with 403 unless it presents `config.notes.mcpSecret` in the `X-Notes-Mcp-Secret` header. The local
+agent connects to `localhost` directly and needs no configuration.
+
 ## Command-to-API Function Mapping
 
 The adapter contains no proactivity business logic of its own — it merely maps user actions to the AI bot's

@@ -118,7 +118,7 @@ const logTryUpdate = (updateReason = '') => {
 /**
  * Execute shell command.
  */
-function execCommand (command, options = {}) {
+function execCommand(command, options = {}) {
   return execSync(command, {
     encoding: 'utf8',
     stdio: options.silent ? 'inherit' : 'pipe',
@@ -130,7 +130,7 @@ function execCommand (command, options = {}) {
 /**
  * Parse command line arguments.
  */
-function parseArgs () {
+function parseArgs() {
   const args = process.argv.slice(2);
   const out = {
     expectedBranch: null,
@@ -155,7 +155,7 @@ function parseArgs () {
   return out;
 }
 
-function showHelp () {
+function showHelp() {
   console.log(`
 ================================================================================
     MEM-BOT server deployment
@@ -180,7 +180,7 @@ function showHelp () {
 `);
 }
 
-function readDotEnv () {
+function readDotEnv() {
   const envPath = path.join(CWD, '.env');
   if (!fs.existsSync(envPath)) {
     return {};
@@ -208,7 +208,7 @@ function readDotEnv () {
   return values;
 }
 
-function getPackageName () {
+function getPackageName() {
   try {
     const packageJson = JSON.parse(fs.readFileSync(path.join(CWD, 'package.json'), 'utf8'));
     return packageJson.name || DEFAULT_CONFIG.serviceName;
@@ -217,11 +217,11 @@ function getPackageName () {
   }
 }
 
-function toBool (value) {
+function toBool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
-function loadConfig () {
+function loadConfig() {
   const envFromFile = readDotEnv();
   const env = { ...process.env, ...envFromFile };
   const packageName = getPackageName();
@@ -241,7 +241,7 @@ function loadConfig () {
   return cfg;
 }
 
-function getDeploymentConfig (config) {
+function getDeploymentConfig(config) {
   const serviceName = config.serviceName || DEFAULT_CONFIG.serviceName;
   const instance = (config.SERVICE_INSTANCE || '').trim();
   const serviceWithInstance = instance ? `${serviceName}--${instance}` : serviceName;
@@ -265,7 +265,7 @@ function getDeploymentConfig (config) {
   };
 }
 
-function systemctlServiceExists (name) {
+function systemctlServiceExists(name) {
   try {
     const serviceName = `${name}.service`;
     const output = execCommand(`systemctl list-unit-files --type=service "${serviceName}" --no-legend --no-pager`);
@@ -275,7 +275,7 @@ function systemctlServiceExists (name) {
   }
 }
 
-function getPm2Apps () {
+function getPm2Apps() {
   try {
     const output = execCommand('pm2 jlist');
     return Array.isArray(JSON.parse(output)) ? JSON.parse(output) : [];
@@ -284,11 +284,11 @@ function getPm2Apps () {
   }
 }
 
-function pm2ServiceExists (name) {
+function pm2ServiceExists(name) {
   return getPm2Apps().some((app) => app && app.name === name);
 }
 
-function getRepoInfo () {
+function getRepoInfo() {
   const branch = execCommand('git rev-parse --abbrev-ref HEAD').trim();
   const headHash = execCommand('git rev-parse HEAD').trim();
   const headCommitMessage = execCommand(`git log -n 1 --pretty=format:%s ${headHash}`).trim();
@@ -301,7 +301,7 @@ function getRepoInfo () {
   };
 }
 
-function printCurrentBranch () {
+function printCurrentBranch() {
   const info = getRepoInfo();
   logIt(
     `Current branch: ${colorG.lg(info.branch)}
@@ -311,11 +311,11 @@ Commit message: ${colorG.lg(info.headCommitMessage)}`,
   return info;
 }
 
-function getRemoteHash (branch) {
+function getRemoteHash(branch) {
   return execCommand(`git rev-parse --verify origin/${branch}`).trim();
 }
 
-function installWithFallback (label, primaryCommand, fallbackCommand) {
+function installWithFallback(label, primaryCommand, fallbackCommand) {
   try {
     logIt(`${label}: trying ${primaryCommand}`);
     execCommand(primaryCommand, { silent: true });
@@ -327,19 +327,22 @@ function installWithFallback (label, primaryCommand, fallbackCommand) {
   }
 }
 
-function getRemoteBranches () {
+function getRemoteBranches() {
   const output = execCommand('git ls-remote --heads origin').trim();
   if (!output) {
     return [];
   }
 
-  return output.split('\n').map((line) => {
-    const match = line.match(/\srefs\/heads\/(.+)$/);
-    return match ? match[1] : '';
-  }).filter(Boolean);
+  return output
+    .split('\n')
+    .map((line) => {
+      const match = line.match(/\srefs\/heads\/(.+)$/);
+      return match ? match[1] : '';
+    })
+    .filter(Boolean);
 }
 
-function resolveDeployBranch (requestedBranch) {
+function resolveDeployBranch(requestedBranch) {
   const remoteBranches = getRemoteBranches();
   if (remoteBranches.includes(requestedBranch)) {
     return requestedBranch;
@@ -376,7 +379,7 @@ function resolveDeployBranch (requestedBranch) {
   throw new Error(`Remote branch "${requestedBranch}" not found in origin`);
 }
 
-function reinstallDependencies () {
+function reinstallDependencies() {
   logIt('INSTALL ROOT DEPENDENCIES', true);
   installWithFallback('root', 'npm ci', 'npm install');
 
@@ -385,7 +388,7 @@ function reinstallDependencies () {
   const hasWebLock = fs.existsSync(webLock);
   if (fs.existsSync(path.join(webDir, 'package.json'))) {
     if (hasWebLock) {
-    installWithFallback('web', 'npm --prefix web ci', 'npm --prefix web install');
+      installWithFallback('web', 'npm --prefix web ci', 'npm --prefix web install');
     } else {
       logIt('web: root workspace lockfile not found, running npm install');
       installWithFallback('web', 'npm --prefix web install', 'npm --prefix web install');
@@ -393,7 +396,7 @@ function reinstallDependencies () {
   }
 }
 
-function buildProject () {
+function buildProject() {
   if (!fs.existsSync(path.join(CWD, 'web', 'package.json'))) {
     logIt('Web package not found. Skipping web build.');
     return;
@@ -404,23 +407,23 @@ function buildProject () {
   logIt('Web build completed');
 }
 
-function runMigrations () {
+function runMigrations() {
   logIt('RUN DATABASE MIGRATIONS', true);
   execCommand('npm run migrate', { silent: true });
   logIt('Migrations completed');
 }
 
-function restartViaSystemctl (serviceName) {
+function restartViaSystemctl(serviceName) {
   logIt(`Restarting service "${serviceName}" via systemctl`);
   execCommand(`systemctl restart "${serviceName}"`);
 }
 
-function restartViaPM2 (serviceName) {
+function restartViaPM2(serviceName) {
   logIt(`Restarting process "${serviceName}" via pm2`);
   execCommand(`pm2 restart "${serviceName}" --update-env`);
 }
 
-function startFallbackProcess (deploymentConfig) {
+function startFallbackProcess(deploymentConfig) {
   logIt('No managed service found. Starting app as detached process.');
   try {
     if (fs.existsSync(path.join(CWD, 'scripts', 'stop-telegram.js'))) {
@@ -445,7 +448,7 @@ function startFallbackProcess (deploymentConfig) {
   logIt(`Started fallback process with PID ${child.pid}`);
 }
 
-function restartService (deploymentConfig) {
+function restartService(deploymentConfig) {
   for (const serviceName of deploymentConfig.serviceCandidates) {
     if (systemctlServiceExists(serviceName)) {
       restartViaSystemctl(serviceName);
@@ -463,7 +466,7 @@ function restartService (deploymentConfig) {
   startFallbackProcess(deploymentConfig);
 }
 
-async function main () {
+async function main() {
   truncateCumulativeLogIfNeeded();
   fs.writeFileSync(runTimeLogFile, '');
   logTryUpdate();
@@ -541,7 +544,9 @@ async function main () {
       logIt('No changes detected. Update skipped.');
     }
   } catch (error) {
-    const message = String(error.message).includes(error.stderr) ? error.message : [error.stderr, error.message].join('\n');
+    const message = String(error.message).includes(error.stderr)
+      ? error.message
+      : [error.stderr, error.message].join('\n');
     logError(message);
     throw error;
   } finally {
@@ -563,9 +568,11 @@ process.on('SIGTERM', () => {
   process.exit(1);
 });
 
-main().then(() => {
-  process.exit(0);
-}).catch((error) => {
-  logError(error.message);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    logError(error.message);
+    process.exit(1);
+  });

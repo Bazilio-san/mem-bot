@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.42",
+  "version": "1.0.43",
   "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
@@ -59,7 +59,8 @@
     "test:notes-store": "cross-env NODE_ENV=test node tests/notes-store.test.mjs",
     "test:notes-api": "cross-env NODE_ENV=test node tests/notes-api.test.mjs",
     "test:notes-mcp": "cross-env NODE_ENV=test node tests/notes-mcp.test.mjs",
-    "test:notes": "cross-env NODE_ENV=test node tests/notes-store.test.mjs && cross-env NODE_ENV=test node tests/notes-api.test.mjs && cross-env NODE_ENV=test node tests/notes-mcp.test.mjs"
+    "test:notes": "cross-env NODE_ENV=test node tests/notes-store.test.mjs && cross-env NODE_ENV=test node tests/notes-api.test.mjs && cross-env NODE_ENV=test node tests/notes-mcp.test.mjs",
+    "test:admin-auth": "cross-env NODE_ENV=test node tests/admin-auth.test.mjs"
   },
   "keywords": [
     "ai-agent",
@@ -81,7 +82,9 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "af-color": "^0.0.8",
     "af-db-ts": "^3.0.34",
+    "af-tools-ts": "^1.1.11",
     "ajv": "^8.20.0",
     "config": "^4.4.1",
     "cron-parser": "^5.5.0",

@@ -245,6 +245,35 @@ export function buildNotesMcpServer() {
   return server;
 }
 
+// The MCP endpoint is meant for the local agent only. A request is considered external when it carries
+// X-Forwarded-For (it came through a reverse proxy such as nginx) or its socket address is not loopback.
+// External callers must present config.notes.mcpSecret in the X-Notes-Mcp-Secret header; without a
+// configured secret every external request is rejected. The local agent connects to localhost directly
+// (no proxy, no header), so it passes with zero configuration.
+function isExternalRequest(req) {
+  if (req.headers['x-forwarded-for']) {
+    return true;
+  }
+  const addr = req.socket?.remoteAddress || '';
+  return !(addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1');
+}
+
+function rejectUnauthorizedExternal(req, res) {
+  if (!isExternalRequest(req)) {
+    return false;
+  }
+  const secret = config.notes.mcpSecret;
+  if (secret && req.headers['x-notes-mcp-secret'] === secret) {
+    return false;
+  }
+  res.status(403).json({
+    jsonrpc: '2.0',
+    error: { code: -32000, message: 'MCP-сервер заметок доступен только локальному агенту.' },
+    id: null,
+  });
+  return true;
+}
+
 // Mount the Streamable HTTP endpoint on an express app. Stateless: every POST gets its own
 // Server+Transport pair, closed when the response ends. GET/DELETE (SSE sessions) are not supported.
 export function mountNotesMcp(app) {
@@ -254,6 +283,9 @@ export function mountNotesMcp(app) {
   const { mcpPath } = config.notes;
 
   app.post(mcpPath, async (req, res) => {
+    if (rejectUnauthorizedExternal(req, res)) {
+      return;
+    }
     try {
       const server = buildNotesMcpServer();
       const transport = new StreamableHTTPServerTransport({

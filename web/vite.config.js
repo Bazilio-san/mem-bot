@@ -55,15 +55,13 @@ export default defineConfig({
           if (moduleId.includes('src/components/notes/')) {
             return 'miniapp-content';
           }
-          if (moduleId.includes('node_modules/primevue')
-              || moduleId.includes('node_modules/@primeuix')) {
+          if (moduleId.includes('node_modules/primevue') || moduleId.includes('node_modules/@primeuix')) {
             return 'vendor-primevue';
           }
           if (moduleId.includes('node_modules/vue/') || moduleId.includes('node_modules/vuex')) {
             return 'vendor-vue';
           }
-          if (moduleId.includes('node_modules/marked')
-              || moduleId.includes('node_modules/dompurify')) {
+          if (moduleId.includes('node_modules/marked') || moduleId.includes('node_modules/dompurify')) {
             return 'vendor-content';
           }
           if (

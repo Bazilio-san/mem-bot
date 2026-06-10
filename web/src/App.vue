@@ -2,14 +2,51 @@
 // Корневой компонент админки. Раскладка «список пользователей слева — память выбранного пользователя справа».
 // Таблицы памяти построены на компоненте DataTable из библиотеки PrimeVue (тема Aura): сортировка, фильтрация
 // по столбцам и пагинация берутся из коробки, поэтому здесь остаётся только подготовка данных и описание колонок.
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
 import { FilterMatchMode } from '@primevue/core/api';
-import { fetchUsers, fetchUserMemory, deleteMemoryItem } from './api.js';
+import { fetchUsers, fetchUserMemory, deleteMemoryItem, fetchAuthMe, logoutAdmin } from './api.js';
 import LlmLogPage from './components/llm-log/LlmLogPage.vue';
+import LoginScreen from './components/auth/LoginScreen.vue';
+
+// Гейт авторизации: пока статус не получен — пустой экран, без сессии — экран входа через Telegram.
+// authState: 'loading' | 'login' | 'ready'.
+const authState = ref('loading');
+const authInfo = ref({ authRequired: false, displayName: null, botUsername: null });
+
+async function checkAuth() {
+  try {
+    const me = await fetchAuthMe();
+    authInfo.value = me;
+    authState.value = me.authenticated ? 'ready' : 'login';
+    if (me.authenticated) {
+      loadUsers();
+    }
+  } catch (err) {
+    error.value = err.message;
+    authState.value = 'login';
+  }
+}
+
+async function onLoggedIn() {
+  await checkAuth();
+}
+
+async function logout() {
+  try {
+    await logoutAdmin();
+  } finally {
+    authState.value = 'login';
+  }
+}
+
+// Любой запрос, вернувший 401 (сессия истекла), переключает приложение на экран входа.
+const onAuthRequired = () => {
+  authState.value = 'login';
+};
 
 // Активный раздел админки: «Память» (исходная страница) или «Логи LLM» (просмотрщик журналов).
 const activeTab = ref('memory');
@@ -141,11 +178,19 @@ async function removeItem(groupKey, item) {
   }
 }
 
-onMounted(loadUsers);
+onMounted(() => {
+  window.addEventListener('admin-auth-required', onAuthRequired);
+  checkAuth();
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('admin-auth-required', onAuthRequired);
+});
 </script>
 
 <template>
-  <div class="layout" :class="{ 'layout-full': activeTab !== 'memory' }">
+  <div v-if="authState === 'loading'" />
+  <LoginScreen v-else-if="authState === 'login'" :bot-username="authInfo.botUsername" @logged-in="onLoggedIn" />
+  <div v-else class="layout" :class="{ 'layout-full': activeTab !== 'memory' }">
     <header class="app-header">
       <h1>mem-bot — админка</h1>
       <nav class="tabs">
@@ -161,6 +206,10 @@ onMounted(loadUsers);
         </button>
       </nav>
       <span v-if="activeTab === 'memory'" class="status">пользователей: {{ users.length }}</span>
+      <span v-if="authInfo.authRequired" class="auth-box">
+        {{ authInfo.displayName }}
+        <button type="button" class="logout" title="Выйти" @click="logout">Выйти</button>
+      </span>
     </header>
 
     <div v-if="activeTab === 'llm-log'" class="page-full">

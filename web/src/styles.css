@@ -39,6 +39,30 @@ body {
   opacity: 0.85;
 }
 
+/* Имя администратора и кнопка выхода (показываются, когда включена авторизация админки). */
+.app-header .auth-box {
+  margin-left: auto;
+  font-size: 13px;
+  opacity: 0.9;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-header .logout {
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: transparent;
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-header .logout:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 /* Вкладки разделов админки в шапке («Память» / «Логи LLM»). */
 .tabs {
   display: flex;

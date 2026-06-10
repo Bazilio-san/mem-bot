@@ -8,9 +8,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { startupInfo } from '../bootstrap/startup-info.js';
 import { config } from '../config.js';
 import { closePool } from '../db.js';
 import { createAdminApi } from './admin-api.js';
+import { createAuthApi, requireAdminSession, isAdminAuthRequired } from './admin-auth.js';
 import { createNotesApi } from './notes-api.js';
 import { mountNotesMcp } from '../notes-mcp/server.js';
 import { startLogRetention, stopLogRetention } from '../pipeline/log-retention.js';
@@ -35,7 +37,10 @@ function buildApp() {
   // The notes widget API lives before the admin API: it has its own authorization (widget token or
   // Telegram initData) and serves both the admin chat widget and the Telegram Mini App.
   app.use('/api/notes', createNotesApi());
-  app.use('/api', createAdminApi());
+  // Sign-in routes are public; everything else under /api requires an admin session when authorization
+  // is on (admin.auth.enabled, or automatically when admin.host is not loopback).
+  app.use('/api/auth', createAuthApi());
+  app.use('/api', requireAdminSession, createAdminApi());
 
   // The notes MCP server (tools for the LLM + the MCP Apps UI resource) lives on the same express app;
   // the agent connects to it through .mcp.json (alias "notes").
@@ -89,9 +94,15 @@ function listen(app) {
 }
 
 async function main() {
+  await startupInfo({ customStartupInfo: [['Startup mode', 'server']] });
   const app = buildApp();
   const server = await listen(app);
   console.log(`Admin web server is listening on http://${HOST}:${PORT}/# (API available at /api).`);
+  console.log(
+    isAdminAuthRequired()
+      ? 'Admin authorization is ON: the panel requires sign-in through the Telegram Login Widget.'
+      : 'Admin authorization is OFF (admin.host is loopback and admin.auth.enabled is not forced).',
+  );
 
   // Telegram is started after the web server. The bot itself logs that long polling is active.
   const { username } = await startTelegram();

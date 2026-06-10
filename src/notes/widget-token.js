@@ -15,9 +15,11 @@ function sign(body) {
 
 // Issue a token for the given user. conversationId binds widget CRUD meta-events to the dialog the
 // widget was shown in; it may be null (Mini App resolves the active conversation itself).
+// The audience field (aud) makes token kinds non-interchangeable: the admin session cookie is signed
+// with the same fallback secret (authSecret), and without aud one token kind would validate as the other.
 export function issueWidgetToken({ userId, conversationId = null, ttlHours = null }) {
   const ttl = ttlHours ?? config.notes.widgetTokenTtlHours ?? 24;
-  const payload = { u: userId, c: conversationId, exp: Date.now() + ttl * 3_600_000 };
+  const payload = { u: userId, c: conversationId, aud: 'notes-widget', exp: Date.now() + ttl * 3_600_000 };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${body}.${sign(body)}`;
 }
@@ -41,7 +43,7 @@ export function verifyWidgetToken(token) {
   } catch {
     return null;
   }
-  if (!payload?.u || typeof payload.exp !== 'number' || payload.exp < Date.now()) {
+  if (payload?.aud !== 'notes-widget' || !payload.u || typeof payload.exp !== 'number' || payload.exp < Date.now()) {
     return null;
   }
   return { userId: payload.u, conversationId: payload.c || null };

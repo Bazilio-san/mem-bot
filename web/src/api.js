@@ -5,6 +5,11 @@
 async function request(path, options) {
   const res = await fetch(`/api${path}`, options);
   if (!res.ok) {
+    // 401 означает, что админ-сессия отсутствует или истекла: корневой компонент слушает это событие
+    // и показывает экран входа вместо приложения.
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new CustomEvent('admin-auth-required'));
+    }
     let detail = '';
     try {
       const body = await res.json();
@@ -15,6 +20,26 @@ async function request(path, options) {
     throw new Error(`Запрос ${path} вернул статус ${res.status}${detail}`);
   }
   return res.json();
+}
+
+// --- Авторизация админки -------------------------------------------------------
+
+// Статус сессии: требуется ли вход, авторизован ли пользователь, username бота для Login Widget.
+export function fetchAuthMe() {
+  return request('/auth/me');
+}
+
+// Вход: data — объект, который Telegram Login Widget передал в onauth-колбэк (id, auth_date, hash и т.д.).
+export function loginTelegram(data) {
+  return request('/auth/telegram', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function logoutAdmin() {
+  return request('/auth/logout', { method: 'POST' });
 }
 
 // Список всех пользователей.

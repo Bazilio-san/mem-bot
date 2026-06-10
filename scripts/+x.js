@@ -8,12 +8,7 @@ import { spawnSync } from 'node:child_process';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const gitDir = path.resolve(scriptDir, '..');
 
-const files = [
-  '../update.js',
-  'fcp.js',
-  'claude-2-agents-symlink.js',
-  '../deploy/srv.js',
-];
+const files = ['../update.js', 'fcp.js', 'claude-2-agents-symlink.js', '../deploy/srv.js'];
 
 function runGit(args) {
   return spawnSync('git', ['-C', gitDir, ...args], {
