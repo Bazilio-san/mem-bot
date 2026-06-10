@@ -42,9 +42,9 @@ const KIND_COLORS = {
 
 const ICONS = {
   user_say: '👤',
-  stage: '▶',
-  agent_start: '▶',
-  agent_end: '■',
+  stage: '▷',
+  agent_start: '▷',
+  agent_end: '◻',
   agent_error: '⚠',
   llm_request: '→',
   llm_response: '←',
@@ -78,9 +78,6 @@ const meta = computed(() => {
   if (r.model) {
     parts.push(r.model);
   }
-  if (r.durationMs != null) {
-    parts.push(`${Number(r.durationMs).toLocaleString('ru-RU')} мс`);
-  }
   return parts.join(' · ');
 });
 
@@ -89,21 +86,26 @@ const time = computed(() => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ru-RU');
 });
 
+// Длительность в секундах с двумя знаками — выводится рядом со временем начала строки.
+const durSec = computed(() => (props.row.durationMs != null ? (Number(props.row.durationMs) / 1000).toFixed(2) : null));
+
 const hasBody = computed(() => props.row.body != null);
 </script>
 
 <template>
   <div class="lr" :style="{ background: color }" :class="{ stage: row.isGroupHeader }">
-    <div class="lr-h" :style="{ paddingLeft: `${10 + (row.indent || 0) * 22}px` }" @click="emit('toggle')">
-      <span class="lr-n">{{ row.n }}</span>
-      <span class="lr-ic">{{ icon }}</span>
-      <span class="lr-cap">{{ row.title }}</span>
-      <span v-if="meta" class="lr-meta">{{ meta }}</span>
-      <span v-if="row.error" class="lr-err" :title="row.error">⚠ {{ row.error }}</span>
-      <span class="lr-when">{{ time }}</span>
+    <div class="lr-h" @click="emit('toggle')">
       <span class="lr-chev">{{
         row.isGroupHeader ? (expanded ? '▾' : '▸') : hasBody ? (expanded ? '▾' : '▸') : ''
       }}</span>
+      <span class="lr-n">{{ row.n }}</span>
+      <span class="lr-ic" :style="{ marginLeft: `${(row.indent || 0) * 22}px` }">{{ icon }}</span>
+      <span class="lr-cap">{{ row.title }}</span>
+      <span v-if="meta" class="lr-meta">{{ meta }}</span>
+      <span v-if="row.error" class="lr-err" :title="row.error">⚠ {{ row.error }}</span>
+      <span class="lr-when"
+        ><template v-if="durSec">{{ durSec }} с · </template>{{ time }}</span
+      >
     </div>
     <div v-if="expanded && hasBody && !row.isGroupHeader" class="lr-b">
       <div v-if="row.payloadTruncated || row.responseTruncated" class="lr-trunc">
@@ -174,8 +176,10 @@ const hasBody = computed(() => props.row.body != null);
   white-space: nowrap;
 }
 .lr-chev {
-  color: #8d939c;
-  width: 14px;
+  color: #6b7280;
+  width: 20px;
+  font-size: 16px;
+  line-height: 1;
   flex: none;
   text-align: center;
 }

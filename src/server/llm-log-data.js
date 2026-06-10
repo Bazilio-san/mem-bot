@@ -157,6 +157,8 @@ export async function getTimeline({ userId, before = null, limit = 50 }) {
       requestId: m.metadata?.request_id || null,
       eventType: m.metadata?.event_type || null,
       hasLog: Boolean(m.metadata?.request_id),
+      // Widget descriptors (MCP Apps) of this turn: the chat pane renders them inline under the bubble.
+      widgets: Array.isArray(m.metadata?.widgets) && m.metadata.widgets.length ? m.metadata.widgets : null,
     });
   }
   // The most representative kind of a group for the badge label: the first non-embedding kind.
@@ -479,6 +481,34 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
       row.groupId = row.rowType === 'user_say' || row.rowType === 'answer_user' ? null : activeGroup;
     }
   }
+
+  // Суммарная длительность шага для заголовков групп: охват по строкам группы — от самого раннего
+  // старта до самого позднего конца (createdAt + durationMs). Заголовок с собственной длительностью
+  // (если журнал её записал) не перезаписывается.
+  const groupSpans = new Map();
+  for (const row of rows) {
+    if (row.isGroupHeader || !row.groupId) {
+      continue;
+    }
+    const start = new Date(row.createdAt).getTime();
+    if (!Number.isFinite(start)) {
+      continue;
+    }
+    const end = start + (Number(row.durationMs) || 0);
+    const span = groupSpans.get(row.groupId) || { min: Infinity, max: -Infinity };
+    span.min = Math.min(span.min, start);
+    span.max = Math.max(span.max, end);
+    groupSpans.set(row.groupId, span);
+  }
+  for (const row of rows) {
+    if (row.isGroupHeader && row.durationMs == null) {
+      const span = groupSpans.get(row.groupId);
+      if (span && span.max > span.min) {
+        row.durationMs = span.max - span.min;
+      }
+    }
+  }
+
   rows.forEach((row, i) => {
     row.n = i + 1;
   });

@@ -4,7 +4,9 @@
 // Скролл вверх лениво подгружает более раннюю историю (keyset-пагинация ?before=). У пользовательских
 // сообщений — кнопка журнала цикла; клик по бэйджу открывает журнал сервисной группы.
 import { ref, watch, nextTick } from 'vue';
+import DOMPurify from 'dompurify';
 import { fetchTimeline, sendChatMessage } from '../../api.js';
+import NotesWidget from '../notes/NotesWidget.vue';
 
 const props = defineProps({
   userId: { type: String, default: null },
@@ -126,6 +128,17 @@ function keyOf(item) {
   return item.type === 'message' ? `m:${item.id}` : `s:${item.requestId || item.llmRequestIds?.[0]}`;
 }
 
+// Содержимое пузыря рендерится как HTML (бот отвечает с Telegram-разметкой <b>/<i>/<a>…).
+// Содержимое недоверенное, поэтому всегда проходит через DOMPurify.
+function bubbleHtml(content) {
+  return DOMPurify.sanitize(String(content ?? ''));
+}
+
+// Подстановка текста сообщения в строку ввода для повторной отправки/правки.
+function quoteToInput(item) {
+  draft.value = item.content || '';
+}
+
 function pickLog(item) {
   activeKey.value = keyOf(item);
   if (item.requestId) {
@@ -175,8 +188,20 @@ defineExpose({ reload: loadInitial });
             :class="[item.role === 'user' ? 'user' : 'bot', { active: activeKey === keyOf(item) }]"
           >
             <div class="cp-bubble">
-              {{ item.content }}
+              <!-- eslint-disable-next-line vue/no-v-html — содержимое прошло DOMPurify -->
+              <span v-html="bubbleHtml(item.content)" />
               <span class="cp-time">{{ fmtTime(item.createdAt) }}</span>
+              <!-- Виджеты этого хода (MCP Apps): рендерятся нативными Vue-компонентами без iframe. -->
+              <template v-if="item.widgets">
+                <NotesWidget
+                  v-for="(w, wi) in item.widgets.filter((x) => x.type === 'notes')"
+                  :key="`w${wi}`"
+                  class="cp-widget"
+                  :token="w.token"
+                  :initial-query="w.query || ''"
+                  :data-url="w.dataUrl || '/api/notes'"
+                />
+              </template>
             </div>
             <button
               v-if="item.role === 'user' && item.hasLog"
@@ -186,6 +211,15 @@ defineExpose({ reload: loadInitial });
               @click="pickLog(item)"
             >
               ≡
+            </button>
+            <button
+              v-if="item.role === 'user'"
+              type="button"
+              class="cp-logbtn"
+              title="Подставить в строку ввода"
+              @click="quoteToInput(item)"
+            >
+              ↴
             </button>
           </div>
         </template>
@@ -243,6 +277,10 @@ defineExpose({ reload: loadInitial });
   align-items: flex-end;
   gap: 6px;
   max-width: 92%;
+}
+.cp-widget {
+  margin-top: 8px;
+  min-width: 360px;
 }
 .cp-msg.user {
   align-self: flex-end;

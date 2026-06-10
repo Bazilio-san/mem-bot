@@ -16,6 +16,23 @@ const emit = defineEmits(['analyze']);
 const expandedRows = ref(new Set());
 const collapsedGroups = ref(new Set());
 
+// Бэйдж «id»: тултип показывает request_id, клик копирует его в буфер обмена.
+const idCopied = ref(false);
+async function copyRequestId() {
+  if (!props.log?.requestId) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(String(props.log.requestId));
+    idCopied.value = true;
+    setTimeout(() => {
+      idCopied.value = false;
+    }, 1200);
+  } catch {
+    /* буфер обмена недоступен (http без localhost) — молча пропускаем */
+  }
+}
+
 // При загрузке нового журнала раскрываем «смысловые» строки, как в прототипе: сообщение пользователя и
 // финальный ответ. Остальное свёрнуто.
 watch(
@@ -92,7 +109,16 @@ const headerSummary = computed(() => {
 <template>
   <section class="lp">
     <div v-if="log" class="lp-head">
-      <span class="lp-title" :title="log.requestId || ''">{{ title || `Цикл ${log.requestId || ''}` }}</span>
+      <span class="lp-title">{{ title || 'Цикл' }}</span>
+      <button
+        v-if="log.requestId"
+        type="button"
+        class="lp-id"
+        :title="idCopied ? 'Скопировано' : `${log.requestId} — клик копирует`"
+        @click="copyRequestId"
+      >
+        {{ idCopied ? '✓' : 'id' }}
+      </button>
       <span class="lp-totals">{{ headerSummary }}</span>
       <span v-if="log.header?.hasError" class="lp-err">есть ошибки</span>
       <span class="lp-sp" />
@@ -139,6 +165,21 @@ const headerSummary = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40%;
+}
+.lp-id {
+  flex: none;
+  border: 1px solid #ddd;
+  background: #fff;
+  color: #8d939c;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.lp-id:hover {
+  color: #e8a33d;
+  border-color: #e8a33d;
 }
 .lp-totals {
   color: #8d939c;

@@ -33,7 +33,9 @@ export function toolTitle(name) {
 // for MCP tools we also check the "bare" name (tool.mcpName): otherwise the permission in the skill would never match
 // the prefixed name and the tool would be invisible to the model.
 function allowedForActiveSkill(tool, ctx) {
-  if (BASE_TOOL_NAMES.has(tool.name)) {
+  // Built-in base tools and MCP tools of trusted servers marked baseTools in .mcp.json (e.g. the notes
+  // server) are available under any active skill.
+  if (BASE_TOOL_NAMES.has(tool.name) || tool.isBase === true) {
     return true;
   }
   const skill = ctx.activeSkill;

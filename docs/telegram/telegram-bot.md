@@ -16,7 +16,7 @@ administrative web interface and its JSON API under `/api`; the server brings th
 interfering, because long polling and the background worker are asynchronous network operations rather than CPU
 work. In both modes the token is taken from `config.telegram.apiKey`; without it the startup aborts. The web
 server's own address and port come from `config.admin.host` and `config.admin.port` (defaults `localhost` and
-`3001`). The adapter receives incoming updates via long polling (`getUpdates` with a 30-second timeout); replies and
+`9019`). The adapter receives incoming updates via long polling (`getUpdates` with a 30-second timeout); replies and
 proactive messages are sent via `sendMessage` with Telegram markup (`parse_mode=HTML`), splitting long text into
 chunks of up to 4000 characters at tag boundaries to stay within Telegram's limit (see the "Response Markup"
 section). For targeted reactions the bot uses `setMessageReaction`; if Telegram rejects a reaction in a particular
@@ -332,6 +332,32 @@ confirms the tap via `answerCallbackQuery` (a brief pop-up notification with the
   new indicators;
 - `pa:off` calls `setUserProactivity(externalId, false)`, updates the chat menu, and replaces the message text
   via `editMessageText` with a hint that proactivity has been disabled.
+
+## Notes Widget as a Telegram Mini App
+
+The notes subsystem of the bot core (specification: `docs/ai-bot-with-memory/15-notes.md`) surfaces in Telegram
+as a Mini App. When a tool result of the turn carries a widget descriptor (`structuredContent.widget` with
+`type: 'notes'` — produced by the `notes_show_widget` tool when the user asks to see their notes), the adapter
+sends a follow-up message with an inline `web_app` button:
+
+```js
+{ text: '📝 Открыть заметки', web_app: { url: `${config.notes.publicUrl}/miniapp/notes?q=<filter>` } }
+```
+
+The helper `sendWidgetButtons` runs after the answer is delivered in both delivery paths (streaming and plain).
+Telegram accepts only public **https** URLs for `web_app`, so the button appears only when `config.notes.publicUrl`
+is configured (env `NOTES_PUBLIC_URL`); for local development use an https tunnel (cloudflared, ngrok). Without a
+public URL the button is silently skipped and the agent's text answer still works — the widget remains available
+in the admin chat.
+
+The Mini App page itself (`/miniapp/notes`, built from `web/miniapp/notes.html` as a separate Vite entry) loads
+the official `telegram-web-app.js` bridge, expands the WebView, maps `themeParams` onto page CSS variables, and
+renders the same `NotesWidget` Vue component as the admin chat. Authorization: the page sends
+`window.Telegram.WebApp.initData` in the `X-Tg-Init-Data` header on every request to `/api/notes`; the server
+validates the HMAC signature against the bot token (`src/notes/telegram-init-data.js`) and maps the Telegram user
+id onto `mem.users.external_id` (which stores the Telegram chat id). Only users already known to the bot pass;
+edits made in the Mini App land in the dialogue history as `[notes]` system meta-events, so the agent is aware of
+them on the next turn.
 
 ## Command-to-API Function Mapping
 

@@ -341,6 +341,10 @@ export async function handleMessage({
   stream = false,
 }) {
   const streamingOn = stream && config.streaming.enabled;
+  // Время получения фразы пользователя. Сама строка сообщения пишется в БД только в конце конвейера
+  // (стадия 4), поэтому без явного created_at она получила бы время ПОСЛЕ всех событий цикла и ломала бы
+  // хронологию ленты чата и просмотрщика логов.
+  const receivedAt = new Date();
   // Correlation metadata for the LLM request log. requestId groups all calls of one dialog turn
   // (classification, the main answer, fact extraction, etc.). The format matches what is shown in the
   // future interface: "Request ID: llm_…". The object is mutable — userId/conversationId/domainKey are filled
@@ -690,9 +694,14 @@ ${activeSkill.skillPrompt}`,
     const turnMetadata = { request_id: llmMeta.requestId };
     const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage, {
       metadata: turnMetadata,
+      // Реальное время получения фразы — а не момент INSERT в конце конвейера.
+      createdAt: receivedAt,
     });
+    // Widget descriptors from tool results (MCP Apps: structuredContent.widget) go into the assistant
+    // message metadata — the admin chat timeline renders the widget inline from there.
+    const widgets = toolsUsed.map((t) => t.result?.structuredContent?.widget).filter(Boolean);
     const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer, {
-      metadata: turnMetadata,
+      metadata: { ...turnMetadata, ...(widgets.length ? { widgets } : {}) },
     });
 
     // Stage 5: extracting and writing facts. Asynchronous by default (does not slow down the response).

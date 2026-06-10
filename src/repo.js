@@ -59,12 +59,15 @@ export async function ensureConversation(userId, domainKey = 'general') {
 // Save a single conversation message. Additionally sets token_count (an estimate of the message size),
 // which is needed to compute the cold-zone size when compressing history. The tool_name and tool_call_id
 // fields (the tool-call log) and updating the conversation's updated_at are preserved unchanged.
+// extra.createdAt lets the caller pass the real event time (e.g. when the user's message was received):
+// the row is inserted at the END of the pipeline, so now() would put it after all the cycle's events
+// and break the chronology of the timeline and the log viewer.
 export async function saveMessage(conversationId, userId, role, content, extra = {}) {
   const tokenCount = estimateTokens(content);
   const { rows } = await query(
     `INSERT INTO mem.conversation_messages
-       (conversation_id, user_id, role, content, tool_name, tool_call_id, token_count, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (conversation_id, user_id, role, content, tool_name, tool_call_id, token_count, metadata, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, now()))
      RETURNING *`,
     [
       conversationId,
@@ -75,6 +78,7 @@ export async function saveMessage(conversationId, userId, role, content, extra =
       extra.toolCallId ?? null,
       tokenCount,
       extra.metadata ?? {},
+      extra.createdAt ?? null,
     ],
   );
   await query('UPDATE mem.conversations SET updated_at = now() WHERE id = $1', [conversationId]);

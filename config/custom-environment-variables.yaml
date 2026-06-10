@@ -128,6 +128,13 @@ memoryLimits:
     __name: MEMORY_LIMIT_TOTAL
     __format: number
 
+notes:
+  enabled:
+    __name: NOTES_ENABLED
+    __format: boolean
+  publicUrl: NOTES_PUBLIC_URL
+  widgetSecret: NOTES_WIDGET_SECRET
+
 proactive:
   checkinHour:
     __name: PROACTIVE_CHECKIN_HOUR

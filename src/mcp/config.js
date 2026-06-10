@@ -31,6 +31,15 @@ function normalizeServer(alias, raw) {
     headers: raw.headers || null, // transport headers — the place for a future authorization token
     enabled: raw.disabled !== true, // compatible with the "disabled" field of the Claude Code format
     requiresAdmin: raw.requiresAdmin === true,
+    // Forward the caller identity (userId/conversationId) in the _meta of every tools/call. Off by
+    // default: internal ids must not leak to third-party servers. Enabled for our own servers that
+    // need to know whose data to touch (the notes server).
+    forwardUserContext: raw.forwardUserContext === true,
+    // Treat the server's tools as BASE tools: available under any active skill, like the built-in
+    // memory and scheduler tools. Without this flag MCP tools are domain tools and the model sees them
+    // only when the active skill lists them in tools.allowed. Meant for the project's own servers
+    // providing cross-domain capabilities (the notes server).
+    baseTools: raw.baseTools === true,
   };
 }
 

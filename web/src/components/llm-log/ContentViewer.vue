@@ -117,7 +117,8 @@ async function copy() {
 .cv-bar {
   position: absolute;
   top: 4px;
-  right: 6px;
+  /* Отступ от правого края с запасом под вертикальный скроллбар (~17px) плюс 5px зазора. */
+  right: 22px;
   display: flex;
   gap: 4px;
   z-index: 2;

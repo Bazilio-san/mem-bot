@@ -65,11 +65,13 @@ class McpConnection {
 
   // Call a tool. On an error that looks like a dropped connection, reconnect once and retry.
   // Every request and response is traced under the DEBUG=mcp:tool category.
-  async call(name, args) {
+  // `meta` (optional) goes into the request _meta — the channel for the caller identity (userId),
+  // which must not be a model-controlled argument.
+  async call(name, args, meta) {
     const label = `${this.server.alias}__${name}`;
     dbgTool(`-> ${label} request:`, JSON.stringify(args || {}));
     try {
-      const res = await this.invokeOnce(name, args);
+      const res = await this.invokeOnce(name, args, meta);
       dbgTool(`<- ${label} response`, res?.isError ? '(isError)' : '(ok)', ':', JSON.stringify(res?.content ?? res));
       return res;
     } catch (err) {
@@ -79,7 +81,7 @@ class McpConnection {
       }
       dbgTool(`-- ${label} connection dropped, reconnecting and retrying:`, String(err?.message || err));
       await this.reset();
-      const res = await this.invokeOnce(name, args);
+      const res = await this.invokeOnce(name, args, meta);
       dbgTool(
         `<- ${label} response after reconnect`,
         res?.isError ? '(isError)' : '(ok)',
@@ -94,9 +96,10 @@ class McpConnection {
   // The timeout is the THIRD argument of callTool(params, resultSchema, options): the second argument is the
   // response-parsing schema, and call options must not go there, otherwise the SDK treats them as a schema
   // and validation fails.
-  async invokeOnce(name, args) {
+  async invokeOnce(name, args, meta) {
     const client = await this.ensureConnected();
-    return client.callTool({ name, arguments: args || {} }, undefined, { timeout: CALL_TIMEOUT_MS });
+    const params = { name, arguments: args || {}, ...(meta ? { _meta: meta } : {}) };
+    return client.callTool(params, undefined, { timeout: CALL_TIMEOUT_MS });
   }
 }
 
@@ -136,6 +139,9 @@ function wrapMcpTool(connection, server, mcpTool) {
     // the matching must be able to reduce "yafly__search_flights" to "search_flights".
     mcpName: mcpTool.name,
     mcpAlias: server.alias,
+    // Base tools of the project's own servers bypass the active-skill visibility filter (see
+    // allowedForActiveSkill in pipeline/tools.js), just like built-in memory/scheduler tools.
+    isBase: server.baseTools === true,
     title: `Вызываю инструмент ${server.title}: ${mcpTool.name}...`,
     requiresAdmin,
     // If the tool is admin-only, we also hide it from the capability help for everyone else, mirroring the
@@ -151,11 +157,18 @@ function wrapMcpTool(connection, server, mcpTool) {
     },
     async handler(ctx, args) {
       // The name on the server has no prefix; the prefix exists only on the model side.
-      const res = await connection.call(mcpTool.name, args);
+      // For trusted servers (forwardUserContext) the caller identity travels in _meta, so the server
+      // knows whose data to touch without trusting model-controlled arguments.
+      const meta = server.forwardUserContext
+        ? { 'mem-bot/userId': ctx.userId ?? null, 'mem-bot/conversationId': ctx.conversationId ?? null }
+        : undefined;
+      const res = await connection.call(mcpTool.name, args, meta);
       if (res.isError) {
         return { error: `Ошибка инструмента ${prefixedName}: ${describeContent(res.content)}` };
       }
-      return { content: res.content };
+      // structuredContent is passed through: widget-enabled tools (MCP Apps) put the widget descriptor
+      // there, and the channels (admin chat, Telegram) render it from the tool result.
+      return { content: res.content, ...(res.structuredContent ? { structuredContent: res.structuredContent } : {}) };
     },
   };
 }

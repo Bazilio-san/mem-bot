@@ -22,7 +22,7 @@ started with `npm run server`.
 ## Startup and Shutdown
 
 The combined server starts with `npm run server`. It binds to `config.admin.host` and `config.admin.port`
-(defaults `localhost` and `3001`), prints the listening address, then starts the Telegram channel and reports the
+(defaults `localhost` and `9019`), prints the listening address, then starts the Telegram channel and reports the
 bot username. Because the channel is started, the process requires `config.telegram.apiKey`; without the token the
 startup aborts, exactly as in standalone Telegram mode. After the channel is up, the server starts the background
 age-based cleanup of the journals in the logs database (`startLogRetention` from
@@ -101,7 +101,7 @@ Project layout:
 
 The front-end talks to the backend through the relative path `/api`, which works in both run modes. In development
 the Vite dev server (port 5173) proxies `/api` to the backend so the browser sees one origin without CORS setup;
-the proxy target is `config.admin.port` (default `http://localhost:3001`) and is overridable with the
+the proxy target is `config.admin.port` (default `http://localhost:9019`) and is overridable with the
 `VITE_API_TARGET` environment variable. In production the same Express server serves both the built front-end and
 the API from one origin, so the relative path needs no change.
 
@@ -174,7 +174,7 @@ unavailable. In both engines the result streams into the dialog as Server-Sent E
 | Path | Environment variable | Default | Meaning |
 |------|----------------------|---------|---------|
 | `config.admin.host` | `ADMIN_HOST` | `localhost` | address the web server binds to (`0.0.0.0` to expose on all interfaces) |
-| `config.admin.port` | `ADMIN_PORT` | `3001` | TCP port of the web server |
+| `config.admin.port` | `ADMIN_PORT` | `9019` | TCP port of the web server |
 | `config.admin.logAnalysis.llm.models` | — | `['gpt-5.4-mini', 'gpt-5.4']` | allow-list of models offered by the analysis dialog |
 | `config.admin.logAnalysis.llm.defaultModel` | — | `gpt-5.4-mini` | model preselected in the analysis dialog |
 | `config.admin.logAnalysis.cli.presets` | — | `claude -p` preset | CLI presets: `name`, `command`, `args`, `timeoutSec` |
@@ -197,8 +197,8 @@ of front-end versus backend dependencies stays clear, but there is only one inst
 
 ```
 npm install           # once: installs backend and front-end dependencies via the workspace
-npm run server        # backend API on :3001 plus the Telegram channel in one process
-npm run web:dev       # Vite dev server on :5173, proxying /api to :3001
+npm run server        # backend API on :9019 plus the Telegram channel in one process
+npm run web:dev       # Vite dev server on :5173, proxying /api to :9019
 ```
 
 The operator opens `http://localhost:5173`.
@@ -210,7 +210,7 @@ npm run web:build     # build the Vue app into web/dist
 npm run server        # Express serves web/dist and the API, with the Telegram channel alongside
 ```
 
-The operator opens `http://localhost:3001`.
+The operator opens `http://localhost:9019`.
 
 ## Access Control
 

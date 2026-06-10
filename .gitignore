@@ -42,3 +42,4 @@ config/local-*.yaml
 /backups/
 /.claude/worktrees/
 /.browser-session/
+/_misc/

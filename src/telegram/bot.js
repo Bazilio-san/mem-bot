@@ -381,6 +381,33 @@ async function deliverAgentResult(chatId, sourceMessageId, result) {
   await saveSentRefs(chatId, sent, result.assistantMessageId, 'text');
 }
 
+// Inline buttons for widgets returned by tools (MCP Apps, structuredContent.widget). In Telegram the
+// notes widget opens as a Mini App through a web_app button, which Telegram accepts only with a public
+// https URL — so the button appears only when config.notes.publicUrl is configured; otherwise the widget
+// stays available in the admin chat and the agent's text answer still works.
+async function sendWidgetButtons(chatId, result) {
+  const widgets = (result.toolsUsed || []).map((t) => t.result?.structuredContent?.widget).filter(Boolean);
+  for (const w of widgets) {
+    if (w.type !== 'notes') {
+      continue;
+    }
+    if (!w.miniAppUrl || !w.miniAppUrl.startsWith('https://')) {
+      console.error('notes: кнопка Mini App пропущена — notes.publicUrl не задан или не https.');
+      continue;
+    }
+    const url = w.query ? `${w.miniAppUrl}?q=${encodeURIComponent(w.query)}` : w.miniAppUrl;
+    try {
+      await tg('sendMessage', {
+        chat_id: chatId,
+        text: 'Заметки можно открыть и редактировать здесь:',
+        reply_markup: { inline_keyboard: [[{ text: '📝 Открыть заметки', web_app: { url } }]] },
+      });
+    } catch (err) {
+      console.error(`Failed to send the notes Mini App button to chat ${chatId}:`, err.message);
+    }
+  }
+}
+
 // Show the "typing…" indicator while the agent is thinking about the answer.
 async function sendTyping(chatId) {
   try {
@@ -667,6 +694,7 @@ async function handleUpdate(message) {
         chatDomains.set(chatId, res.domainKey); // the agent may have switched domain by the request's meaning
         const sent = await progress.complete(res.answer || '(пустой ответ)');
         await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
+        await sendWidgetButtons(chatId, res);
         await refreshChatMenu(chatId, externalId);
       } catch (err) {
         await progress.fail(err);
@@ -680,6 +708,7 @@ async function handleUpdate(message) {
     const res = await handleMessage({ externalId, userMessage: text, domainKey, channel: 'telegram' });
     chatDomains.set(chatId, res.domainKey); // the agent may have switched domain by the request's meaning
     await deliverAgentResult(chatId, message.message_id, res);
+    await sendWidgetButtons(chatId, res);
     // The command menu depends on the proactivity master flag, which may have changed — recompute it.
     await refreshChatMenu(chatId, externalId);
   } catch (err) {

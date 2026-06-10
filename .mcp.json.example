@@ -1,11 +1,19 @@
 {
-  "_comment": "Формат Claude Code. Скопируйте в .mcp.json (он вне контроля версий). Ключ объекта — alias: попадёт в имена инструментов как <alias>__<имя>. Поддерживается транспорт http/sse (нужен url). Поля title, requiresAdmin, disabled и headers — необязательные.",
+  "_comment": "Формат Claude Code. Скопируйте в .mcp.json (он вне контроля версий). Ключ объекта — alias: попадёт в имена инструментов как <alias>__<имя>. Поддерживается транспорт http/sse (нужен url). Поля title, requiresAdmin, disabled, headers, forwardUserContext и baseTools — необязательные. forwardUserContext: true — передавать серверу userId/conversationId в _meta каждого вызова; baseTools: true — тулы сервера доступны при любом активном навыке (как встроенные память/планировщик). Оба флага включать только для доверенных серверов самого проекта (сервер заметок).",
   "mcpServers": {
     "yafly": {
       "type": "http",
       "url": "http://localhost:9047/mcp",
       "title": "Yafly",
       "requiresAdmin": false
+    },
+    "notes": {
+      "type": "http",
+      "url": "http://localhost:9019/mcp/notes",
+      "title": "Заметки",
+      "requiresAdmin": false,
+      "forwardUserContext": true,
+      "baseTools": true
     }
   }
 }

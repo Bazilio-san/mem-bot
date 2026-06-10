@@ -5,8 +5,7 @@
 //    крупное — в модальном окне на весь экран;
 // 3) tools — по строке на инструмент (имя + первые слова описания), первый клик раскрывает описание,
 //    отдельная кнопка показывает JSON Schema параметров.
-import { ref, computed } from 'vue';
-import Dialog from 'primevue/dialog';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import ContentViewer from './ContentViewer.vue';
 
 const props = defineProps({
@@ -96,6 +95,98 @@ function clickMessage(idx) {
 function setAllMessages(open) {
   openedMessages.value = open ? new Set(messages.value.map((_, i) => i)) : new Set();
 }
+
+// --- Растягиваемое модальное окно «Содержимое сообщения» -------------------------------------------
+// PrimeVue Dialog не умеет менять размер за произвольную сторону, поэтому окно собственное: 8 ручек
+// (4 стороны + 4 угла), размер сохраняется в localStorage и восстанавливается при следующем открытии.
+const DLG_SIZE_KEY = 'llmLog.contentDialog.size';
+const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+const MIN_W = 320;
+const MIN_H = 200;
+const dlg = ref({ w: 900, h: 600, x: 0, y: 0 });
+
+function savedSize() {
+  try {
+    const s = JSON.parse(localStorage.getItem(DLG_SIZE_KEY) || 'null');
+    return s && Number(s.w) >= MIN_W && Number(s.h) >= MIN_H ? { w: Number(s.w), h: Number(s.h) } : null;
+  } catch {
+    return null;
+  }
+}
+
+// При каждом открытии: восстановленный (или дефолтный) размер, ограниченный окном браузера, по центру.
+watch(bigContent, (v) => {
+  if (v === null) {
+    return;
+  }
+  const saved = savedSize();
+  const w = Math.min(saved?.w ?? Math.min(900, window.innerWidth - 24), window.innerWidth - 24);
+  const h = Math.min(saved?.h ?? Math.round(window.innerHeight * 0.8), window.innerHeight - 24);
+  dlg.value = { w, h, x: Math.round((window.innerWidth - w) / 2), y: Math.round((window.innerHeight - h) / 2) };
+});
+
+let drag = null;
+function onResizeMove(e) {
+  if (!drag) {
+    return;
+  }
+  const dx = e.clientX - drag.sx;
+  const dy = e.clientY - drag.sy;
+  const d = { ...dlg.value };
+  if (drag.dir.includes('e')) {
+    d.w = Math.max(MIN_W, drag.w + dx);
+  }
+  if (drag.dir.includes('s')) {
+    d.h = Math.max(MIN_H, drag.h + dy);
+  }
+  if (drag.dir.includes('w')) {
+    d.w = Math.max(MIN_W, drag.w - dx);
+    d.x = drag.x + (drag.w - d.w);
+  }
+  if (drag.dir.includes('n')) {
+    d.h = Math.max(MIN_H, drag.h - dy);
+    d.y = drag.y + (drag.h - d.h);
+  }
+  dlg.value = d;
+}
+
+function onResizeEnd() {
+  if (!drag) {
+    return;
+  }
+  drag = null;
+  window.removeEventListener('pointermove', onResizeMove);
+  window.removeEventListener('pointerup', onResizeEnd);
+  try {
+    localStorage.setItem(DLG_SIZE_KEY, JSON.stringify({ w: dlg.value.w, h: dlg.value.h }));
+  } catch {
+    /* localStorage недоступен — размер просто не сохранится */
+  }
+}
+
+function startResize(e, dir) {
+  drag = { dir, sx: e.clientX, sy: e.clientY, ...dlg.value };
+  window.addEventListener('pointermove', onResizeMove);
+  window.addEventListener('pointerup', onResizeEnd);
+  e.preventDefault();
+}
+
+function onDlgKeydown(e) {
+  if (e.key === 'Escape') {
+    bigContent.value = null;
+  }
+}
+watch(bigContent, (v) => {
+  if (v !== null) {
+    window.addEventListener('keydown', onDlgKeydown);
+  } else {
+    window.removeEventListener('keydown', onDlgKeydown);
+  }
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onDlgKeydown);
+  onResizeEnd();
+});
 </script>
 
 <template>
@@ -165,15 +256,29 @@ function setAllMessages(open) {
       <span v-else>нет содержимого</span>
     </div>
 
-    <Dialog
-      :visible="bigContent !== null"
-      modal
-      header="Содержимое сообщения"
-      :style="{ width: 'min(900px, 92vw)' }"
-      @update:visible="bigContent = null"
-    >
-      <ContentViewer v-if="bigContent !== null" :content="bigContent" />
-    </Dialog>
+    <Teleport to="body">
+      <div v-if="bigContent !== null" class="pv-ovl" @click.self="bigContent = null">
+        <div
+          class="pv-dlg"
+          :style="{ width: `${dlg.w}px`, height: `${dlg.h}px`, left: `${dlg.x}px`, top: `${dlg.y}px` }"
+        >
+          <div class="pv-dlg-h">
+            <span class="pv-dlg-title">Содержимое сообщения</span>
+            <button type="button" class="pv-dlg-x" title="Закрыть" @click="bigContent = null">✕</button>
+          </div>
+          <div class="pv-dlg-b">
+            <ContentViewer :content="bigContent" />
+          </div>
+          <span
+            v-for="dir in RESIZE_DIRS"
+            :key="dir"
+            class="pv-rs"
+            :class="`pv-rs-${dir}`"
+            @pointerdown="startResize($event, dir)"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -303,5 +408,123 @@ function setAllMessages(open) {
 }
 .pv-empty {
   color: #999;
+}
+
+/* Растягиваемое модальное окно просмотра содержимого. */
+.pv-ovl {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 1100;
+}
+.pv-dlg {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+.pv-dlg-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #e2e5e9;
+  flex: none;
+}
+.pv-dlg-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.pv-dlg-x {
+  border: none;
+  background: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.pv-dlg-x:hover {
+  color: #333;
+}
+.pv-dlg-b {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* ContentViewer внутри окна занимает всю высоту, собственный лимит 480px снимается. */
+.pv-dlg-b :deep(.cv) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pv-dlg-b :deep(.cv-out) {
+  max-height: none;
+  flex: 1;
+}
+
+/* Невидимые ручки изменения размера: 4 стороны и 4 угла (углы поверх сторон). */
+.pv-rs {
+  position: absolute;
+  z-index: 5;
+}
+.pv-rs-n,
+.pv-rs-s {
+  left: 10px;
+  right: 10px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.pv-rs-n {
+  top: -3px;
+}
+.pv-rs-s {
+  bottom: -3px;
+}
+.pv-rs-e,
+.pv-rs-w {
+  top: 10px;
+  bottom: 10px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.pv-rs-e {
+  right: -3px;
+}
+.pv-rs-w {
+  left: -3px;
+}
+.pv-rs-ne,
+.pv-rs-nw,
+.pv-rs-se,
+.pv-rs-sw {
+  width: 14px;
+  height: 14px;
+  z-index: 6;
+}
+.pv-rs-ne {
+  top: -4px;
+  right: -4px;
+  cursor: nesw-resize;
+}
+.pv-rs-nw {
+  top: -4px;
+  left: -4px;
+  cursor: nwse-resize;
+}
+.pv-rs-se {
+  bottom: -4px;
+  right: -4px;
+  cursor: nwse-resize;
+}
+.pv-rs-sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: nesw-resize;
 }
 </style>

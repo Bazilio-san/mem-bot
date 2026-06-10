@@ -11,6 +11,8 @@ import express from 'express';
 import { config } from '../config.js';
 import { closePool } from '../db.js';
 import { createAdminApi } from './admin-api.js';
+import { createNotesApi } from './notes-api.js';
+import { mountNotesMcp } from '../notes-mcp/server.js';
 import { startLogRetention, stopLogRetention } from '../pipeline/log-retention.js';
 // Importing bot.js registers the Telegram channel profile and checks that the token is present. The bot
 // itself is not started yet: the auto-start inside bot.js only fires on a direct call (npm run telegram),
@@ -30,11 +32,30 @@ function buildApp() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
+  // The notes widget API lives before the admin API: it has its own authorization (widget token or
+  // Telegram initData) and serves both the admin chat widget and the Telegram Mini App.
+  app.use('/api/notes', createNotesApi());
   app.use('/api', createAdminApi());
+
+  // The notes MCP server (tools for the LLM + the MCP Apps UI resource) lives on the same express app;
+  // the agent connects to it through .mcp.json (alias "notes").
+  mountNotesMcp(app);
 
   // Static files of the built frontend. In development mode the web/dist directory may be absent — that's
   // fine: then the Vite dev server (npm run web:dev) serves the frontend and this process serves only the API.
   app.use(express.static(WEB_DIST));
+
+  // Telegram Mini App page of the notes widget (the web_app button opens this URL without the .html suffix).
+  app.get('/miniapp/notes', (req, res) => {
+    res.sendFile(path.join(WEB_DIST, 'miniapp/notes.html'), (err) => {
+      if (err) {
+        res
+          .status(503)
+          .type('text/plain; charset=utf-8')
+          .send('Страница Mini App ещё не собрана. Выполните «npm run web:build».');
+      }
+    });
+  });
 
   // Return the single-page app for any non-API GET routes. Express 5 does not accept the string pattern '*',
   // so we use a middleware: we pass through requests to /api and serve index.html for other GET requests.

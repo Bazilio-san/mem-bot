@@ -30,7 +30,7 @@ async function selectLog({ requestId, llmRequestId, item }) {
   error.value = '';
   try {
     log.value = requestId ? await fetchCycle(requestId) : await fetchSingleRequest(llmRequestId);
-    logTitle.value = item?.type === 'service' ? `Сервисный запрос · ${item.title}` : `Цикл ${requestId || ''}`;
+    logTitle.value = item?.type === 'service' ? `Сервисный запрос · ${item.title}` : 'Цикл';
   } catch (err) {
     error.value = err.message;
     log.value = null;

@@ -544,7 +544,8 @@ CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
 ON mem.message_external_refs (conversation_message_id);
 ```
 
-With global memory and message external references, the total is nineteen tables in the `mem` schema.
+With global memory, message external references, and user notes ([DATA-13]), the total is twenty tables in the
+`mem` schema.
 
 ---
 
@@ -683,3 +684,43 @@ runner as the memory database). Its tables are never dropped on re-initializatio
 otherwise the log would be wiped on every startup.
 
 ---
+
+---
+
+## [DATA-13] User Notes
+
+The `mem.notes` table stores personal user notes served by the notes subsystem ([15-notes.md](15-notes.md)):
+LLM tools, the interactive widget, and the widget REST API all work through this one table. The primary key is a
+numeric identity (not a uuid like the rest of the schema) because the note number is user-facing: it is shown in
+the widget and pronounced by the agent («заметка #15»). Deletion is soft (`deleted_at`), which powers the undo
+button of the widget. Title and body carry separate embeddings — search takes the best of the two cosine
+distances; the generated `search_tsv` uses the `russian` dictionary with the title weighted above the body.
+
+```sql
+CREATE TABLE IF NOT EXISTS mem.notes (
+    id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
+    title           text NOT NULL DEFAULT '',
+    body            text NOT NULL,
+    tags            text[] NOT NULL DEFAULT '{}',
+    pinned          boolean NOT NULL DEFAULT false,
+    title_embedding vector(1536),
+    body_embedding  vector(1536),
+    search_tsv      tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('russian', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('russian', coalesce(body, '')), 'B')
+    ) STORED,
+    deleted_at      timestamptz,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_user_feed
+    ON mem.notes (user_id, pinned DESC, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_notes_search_tsv      ON mem.notes USING gin (search_tsv);
+CREATE INDEX IF NOT EXISTS idx_notes_tags            ON mem.notes USING gin (tags);
+CREATE INDEX IF NOT EXISTS idx_notes_title_emb_hnsw  ON mem.notes
+    USING hnsw (title_embedding vector_cosine_ops) WHERE title_embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notes_body_emb_hnsw   ON mem.notes
+    USING hnsw (body_embedding vector_cosine_ops) WHERE body_embedding IS NOT NULL;
+```
