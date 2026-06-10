@@ -22,6 +22,10 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'node:url';
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(scriptDir, '..');
+process.chdir(rootDir);
 
 const LINK_MAPPINGS = [
   {
@@ -41,7 +45,7 @@ const LINK_MAPPINGS = [
 function parseArgs(argv) {
   const result = {
     mode: 'setup',
-    repo: process.cwd(),
+    repo: rootDir,
     dryRun: false,
     force: false,
   };
