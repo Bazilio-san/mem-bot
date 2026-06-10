@@ -4,7 +4,7 @@
 // try/catch and on error returns a clear JSON with code 500, so the frontend can show the reason rather
 // than a "white screen".
 import express from 'express';
-import { listUsers, getUserMemory, getProactivity } from '../sandbox/data.js';
+import { listUsers, getUserMemory, getProactivity, deleteItem } from '../sandbox/data.js';
 
 // A small wrapper: catches an async handler's exception and returns it as a JSON 500 error.
 // Without it, a rejected promise in an express handler would not turn into a response and the request would hang.
@@ -44,6 +44,20 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const memory = await getUserMemory(req.params.id);
       res.json(memory);
+    }),
+  );
+
+  // Delete a single memory record (soft delete). The category matches the memory group key on the frontend
+  // (profile/dialog/domain/reminder/secure) and decides which table and status transition is applied.
+  router.delete(
+    '/users/:id/memory/:category/:itemId',
+    wrap(async (req, res) => {
+      const ok = await deleteItem({
+        userId: req.params.id,
+        category: req.params.category,
+        id: req.params.itemId,
+      });
+      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Запись не найдена.' });
     }),
   );
 

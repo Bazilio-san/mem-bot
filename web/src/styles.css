@@ -88,35 +88,20 @@ body {
 }
 
 .memory-group {
-  background: #fff;
-  border: 1px solid #e2e5e9;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  overflow: hidden;
+  margin-bottom: 20px;
 }
 
 .memory-group h3 {
-  margin: 0;
-  padding: 10px 14px;
-  background: #fafbfc;
-  border-bottom: 1px solid #eceef1;
+  margin: 0 0 8px;
   font-size: 14px;
+  color: #3a3f47;
 }
 
-.memory-item {
-  padding: 10px 14px;
-  border-bottom: 1px solid #f2f3f5;
-  font-size: 14px;
-}
-
-.memory-item:last-child {
-  border-bottom: none;
-}
-
-.memory-item .tags {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #8a909a;
+/* Колонка с кнопкой удаления держится узкой и прижата вправо. */
+.memory-group .col-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .empty,

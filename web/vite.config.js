@@ -24,5 +24,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Библиотека компонентов PrimeVue вместе с темой выносится в отдельный чанк vendor-primevue.
+        // Она меняется редко (только при обновлении версии), поэтому браузер кэширует её отдельно от
+        // кода приложения, а сам бандл приложения остаётся небольшим и пересобирается без перезагрузки темы.
+        manualChunks(id) {
+          if (id.includes('node_modules/primevue') || id.includes('node_modules/@primeuix')) {
+            return 'vendor-primevue';
+          }
+          return undefined;
+        },
+      },
+    },
   },
 });

@@ -1,6 +1,24 @@
-// Точка входа фронтенда: создаёт корневой экземпляр приложения Vue и монтирует его в элемент #app.
+// Точка входа фронтенда: создаёт корневой экземпляр приложения Vue, подключает библиотеку компонентов
+// PrimeVue v4 с темой Aura и монтирует приложение в элемент #app. Тема Aura подключается в «стилизованном»
+// режиме (styled mode) — компоненты приходят с готовым оформлением, поверх которого работают наши правки.
 import { createApp } from 'vue';
+import PrimeVue from 'primevue/config';
+import Aura from '@primeuix/themes/aura';
+import 'primeicons/primeicons.css';
 import App from './App.vue';
 import './styles.css';
 
-createApp(App).mount('#app');
+const app = createApp(App);
+
+app.use(PrimeVue, {
+  theme: {
+    preset: Aura,
+    options: {
+      // Тёмную тему не используем: darkModeSelector указывает на несуществующий класс, чтобы Aura всегда
+      // оставалась в светлом варианте независимо от системных настроек пользователя.
+      darkModeSelector: '.app-dark-never',
+    },
+  },
+});
+
+app.mount('#app');
