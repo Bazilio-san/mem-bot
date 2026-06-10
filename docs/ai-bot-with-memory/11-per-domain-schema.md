@@ -1,33 +1,33 @@
-# 11. Skills: домены, схемы и поведение
+# 11. Skills: domains, schemas, and behavior
 
-## [SKILL-1] Структура skill
+## [SKILL-1] Skill structure
 
-Реестр skills — файловый. Каждый skill живёт в своём каталоге:
+The skill registry is file-based. Each skill lives in its own directory:
 
 ```text
 skills/
   <name>/
-    SKILL.md            машинные поля + prompt-блоки
-    domain-schema.json  закрытая схема data и словари entity_key (необязательно)
-    references/         тяжёлые справочники, читаемые по требованию (необязательно)
+    SKILL.md            machine fields + prompt blocks
+    domain-schema.json  closed schema for data and entity_key vocabularies (optional)
+    references/         heavy reference files, read on demand (optional)
 ```
 
-`SKILL.md` делится на машинную часть (YAML-фронтматтер) и человеческие markdown-блоки со стабильными заголовками,
-которые код извлекает детерминированно, не угадывая смысл произвольным разбором:
+`SKILL.md` is divided into a machine section (YAML front matter) and human-readable markdown blocks with stable
+headings that the code extracts deterministically, without guessing meaning through arbitrary parsing:
 
 ```markdown
 ---
 name: flight-search
 domain_key: flight_search
-title: Поиск авиабилетов
-description: Поиск авиабилетов, аэропортов, маршрутов, дат вылета, пересадок и сравнение цен.
+title: Flight Search
+description: Search for flights, airports, routes, departure dates, layovers, and price comparison.
 enabled: true
 classification:
   when_to_use: >
-    Пользователь спрашивает про авиабилеты, перелёты, аэропорты, даты поездки, маршруты,
-    пересадки, цены на рейсы, багаж или варианты добраться самолётом.
-  positive_signals: [билет, авиабилет, рейс, аэропорт, вылет, пересадка, багаж]
-  negative_signals: [обычное путешествие без вопроса о перелёте]
+    The user asks about plane tickets, flights, airports, travel dates, routes,
+    layovers, flight prices, baggage, or ways to get somewhere by air.
+  positive_signals: [ticket, flight, airline, airport, departure, layover, baggage]
+  negative_signals: [general travel question without asking about a flight]
 memory:
   scopes: [profile, domain, dialog]
   schema: domain-schema.json
@@ -43,44 +43,44 @@ references:
 
 # Skill Prompt
 
-Инструкции, которые добавляются в основной ответ при активном skill.
+Instructions that are added to the main response when the skill is active.
 
 ## Fact Extraction Prompt
 
-Инструкции, которые добавляются в prompt извлечения фактов.
+Instructions that are added to the fact extraction prompt.
 
 ## Domain Schema
 
-Закрытую схему можно встроить сюда блоком ```json, если она маленькая, вместо отдельного domain-schema.json.
+The closed schema can be embedded here as a ```json block if it is small, instead of a separate domain-schema.json.
 
 ## References
 
-- `references/airlines.md`: что в нём и когда читать.
+- `references/airlines.md`: what it contains and when to read it.
 ```
 
-Обязательные поля: `name` (ключ skill, совпадает с именем каталога), `domain_key` (доменный namespace памяти),
-`classification.when_to_use` (смысловое правило применения для роутера) и блок `# Skill Prompt`. Остальное
-необязательно: `positive_signals` и `negative_signals` — подсказки роутеру, а не строгий список; `tools.allowed`
-ограничивает предметные инструменты; `tools.base` включает базовые системные инструменты; `memory.scopes` подсказывает,
-какие разделы памяти обычно нужны; `model.main` и `model.extract` переопределяют модели для этого skill; `references`
-включает чтение каталога `references/**`.
+Required fields: `name` (the skill key, matches the directory name), `domain_key` (the domain namespace for memory),
+`classification.when_to_use` (the semantic routing rule for the router), and the `# Skill Prompt` block. Everything
+else is optional: `positive_signals` and `negative_signals` are hints to the router, not a strict list;
+`tools.allowed` restricts the domain-specific tools; `tools.base` enables the base system tools;
+`memory.scopes` hints at which memory sections are typically needed; `model.main` and `model.extract` override
+the models for this skill; `references` enables reading of the `references/**` directory.
 
-## [SKILL-2] Схема доменной памяти
+## [SKILL-2] Domain memory schema
 
-Источник схемы — файл рядом со skill: `domain-schema.json` или встроенный блок `## Domain Schema`. У каждой сущности
-задана закрытая JSON-схема `data` (`additionalProperties: false`, все поля в `required`, конкретные типы и при
-необходимости `enum`) и правило формирования `entity_key`:
+The schema source is a file next to the skill: `domain-schema.json` or an embedded `## Domain Schema` block.
+Each entity has a closed JSON schema for `data` (`additionalProperties: false`, all fields in `required`,
+specific types and `enum` where needed) and an `entity_key` formation rule:
 
 ```jsonc
 {
   "domain_key": "math_tutor",
-  "title": "Репетитор по математике",
+  "title": "Math Tutor",
   "entities": [
     {
       "entity_type": "student_skill",
       "entity_key": { "mode": "fixed_vocab",
         "vocabulary": ["linear_equations", "quadratic_equations", "fractions", "word_problems"],
-        "synonyms": { "quadratic_equations": ["квадратные уравнения", "дискриминант"], "fractions": ["дроби"] } },
+        "synonyms": { "quadratic_equations": ["quadratic equations", "discriminant"], "fractions": ["fractions"] } },
       "data_schema": {
         "type": "object", "additionalProperties": false,
         "required": ["topic", "level", "last_errors"],
@@ -107,28 +107,29 @@ references:
 }
 ```
 
-Главная мысль: схема говорит, какие поля есть в `data`. Поэтому и модель при извлечении знает, что заполнять, и SQL при
-выборке знает, что искать.
+The key idea: the schema declares what fields exist in `data`. As a result, both the model during extraction knows
+what to populate, and the SQL query during lookup knows what to search for.
 
 ```text
-СХЕМА домена = список сущностей + закрытая схема полей data + правило формирования entity_key.
-↓ при записи: по сущности строим строгую закрытую схему → модель заполняет ровно эти поля → data проверен ajv.
-↓ ключ приводится к словарю/слагу → `dedupe_key` и дедупликация по (entity_type, entity_key) надёжны.
-↓ при выборке: по domain_key грузим схему из реестра skills → знаем имена полей → фильтруем data через @> в SQL.
-↓ в промпт идёт memory_text (текст), data остаётся для инструментов и фильтров.
+DOMAIN SCHEMA = list of entities + closed schema of data fields + entity_key formation rule.
+  on write:  build a strict closed schema per entity → model fills exactly those fields → data validated by ajv.
+  key is normalized to vocabulary/slug → `dedupe_key` and deduplication by (entity_type, entity_key) are reliable.
+  on lookup: load schema from skill registry by domain_key → know the field names → filter data via @> in SQL.
+  into prompt: memory_text (text) goes in; data stays for tools and filters.
 ```
 
-Когда пользователь говорит «Путаюсь в дискриминанте и часто теряю знак минуса», извлечение во втором проходе берёт схему
-сущности `student_skill` и просит модель заполнить ровно её поля. Модель возвращает строго проверенный объект:
+When a user says "I keep getting confused by the discriminant and often drop the minus sign", the second extraction
+pass takes the `student_skill` entity schema and asks the model to fill exactly its fields. The model returns a
+strictly validated object:
 
 ```json
 { "entity_key": "quadratic_equations",
-  "memory_text": "Пользователь путается в дискриминанте и часто теряет знак минуса",
+  "memory_text": "User gets confused by the discriminant and often drops the minus sign",
   "data": { "topic": "quadratic_equations", "level": "weak", "last_errors": ["sign_errors"] } }
 ```
 
-При выборке знание схемы равно знанию имён полей, поэтому можно фильтровать прямо внутри `data` через оператор `@>` и
-GIN-индекс `idx_memory_data_gin` — машинно, а не текстовым поиском:
+During lookup, knowing the schema means knowing the field names, so it is possible to filter directly inside `data`
+using the `@>` operator and the `idx_memory_data_gin` GIN index — programmatically, not via text search:
 
 ```sql
 SELECT entity_key, memory_text, data
@@ -139,80 +140,83 @@ WHERE user_id = $1 AND entity_type = 'student_skill'
 
 ---
 
-## [SKILL-3] Как устроен слой
+## [SKILL-3] How the layer is structured
 
-Поведение домена задаётся данными (файлами skill), а не кодом: добавление домена не требует правки исходников.
-Составляющие слоя:
+Domain behavior is defined by data (skill files), not by code: adding a domain requires no changes to source files.
+Layer components:
 
-- Модуль `src/pipeline/skills/`: `parse.js` (разбор `SKILL.md` на фронтматтер и блоки), `registry.js` (загрузка,
-  валидация, кэш в памяти, доступ к prompt-блокам, схеме и справочникам), `cli.js` (команды `validate | list | sync`).
-- Модуль `src/schema/`: `meta.js` (мета-схема определения и общий валидатор `ajv`), `registry.js` (доступ к схеме домена
-  и спецификации сущности через реестр skills), `validate.js` (`validateAndCanonicalize`).
-- Зависимость `ajv` (валидатор JSON-схем).
-- Каталог `skills/` в репозитории: skills как исходный текст для ревью и git. Реестр читает их при старте.
+- Module `src/pipeline/skills/`: `parse.js` (parses `SKILL.md` into front matter and blocks), `registry.js` (loading,
+  validation, in-memory cache, access to prompt blocks, schema, and references), `cli.js` (commands `validate | list | sync`).
+- Module `src/schema/`: `meta.js` (meta-schema definition and the shared `ajv` validator), `registry.js` (access to
+  the domain schema and entity specification via the skill registry), `validate.js` (`validateAndCanonicalize`).
+- Dependency `ajv` (JSON Schema validator).
+- Directory `skills/` in the repository: skills as source text for review and git. The registry reads them at startup.
 
-**Поток добавления домена.** Создаётся каталог `skills/<name>/` с файлом `SKILL.md` и при необходимости
-`domain-schema.json` и `references/`. Команда `validate` проверяет все skills (форма фронтматтера, наличие обязательных
-блоков, валидность схемы по мета-схеме). Команда `sync` заводит в `mem.agent_domains` строку соответствия
-`domain_key` → `domain_id` для каждого нового доменного ключа. Команда `list` показывает активные skills, их инструменты
-и наличие схемы. После добавления каталога skill виден роутеру при следующем запуске.
+**Domain addition flow.** A directory `skills/<name>/` is created with a `SKILL.md` file and, if needed,
+`domain-schema.json` and `references/`. The `validate` command checks all skills (front matter shape, presence of
+required blocks, schema validity against the meta-schema). The `sync` command creates a row in `mem.agent_domains`
+mapping `domain_key` to `domain_id` for each new domain key. The `list` command shows active skills, their tools,
+and whether a schema is present. After adding the skill directory, the router sees it on the next startup.
 
-**Классификация выбирает skill.** Дешёвая модель получает компактный список skills (`name`, `domain_key`, `title`,
-`description`, `when_to_use`, сигналы) и возвращает `skill_name` наиболее подходящего skill. Доменный ключ для адресации
-памяти выводится из выбранного skill кодом, а не из ответа модели. Если ни один специализированный skill не подходит,
-выбирается запасной `general`.
+**Classification selects the skill.** A cheap model receives a compact list of skills (`name`, `domain_key`, `title`,
+`description`, `when_to_use`, signals) and returns the `skill_name` of the most appropriate skill. The domain key
+for memory addressing is derived from the selected skill by code, not from the model's response. If no specialized
+skill fits, the fallback `general` skill is selected.
 
-**Канонизация `entity_key`** имеет два режима. Режим `fixed_vocab` требует, чтобы ключ был из словаря: точное совпадение
-проходит как есть, присланный синоним отображается в канонический ключ, близкое по смыслу значение подбирается по
-эмбеддингу, если близость выше порога, иначе ставится пометка и ключ записывается слагом. Режим `slug` нормализует ключ
-в латинский slug транслитерацией и нижним регистром («Нижний Новгород» становится `nizhniy-novgorod`).
+**Canonicalization of `entity_key`** has two modes. `fixed_vocab` mode requires the key to come from the vocabulary:
+an exact match passes through as-is, a submitted synonym is mapped to the canonical key, a semantically close value
+is matched by embedding if similarity exceeds the threshold, otherwise the fact is flagged and the key is stored as
+a slug. `slug` mode normalizes the key to a Latin slug by transliteration and lowercasing ("Nizhniy Novgorod"
+becomes `nizhniy-novgorod`).
 
-**Проверка `data`.** Сначала идёт дешёвая кодовая нормализация: отбрасываются лишние ключи, одиночное значение
-оборачивается в массив там, где схема ждёт массив, строка-число приводится к числу, отсутствующие поля заполняются
-`null`. Если и после неё `data` не сходится со схемой, факт отклоняется и не сохраняется — режима «сохранить как-нибудь»
-нет. Маркер источника схемы и замечания канонизации пишутся в `metadata` строки факта.
+**Validation of `data`.** First, cheap code-level normalization runs: extra keys are dropped, a single value is
+wrapped in an array where the schema expects an array, a numeric string is coerced to a number, missing fields are
+filled with `null`. If `data` still does not match the schema after this normalization, the fact is rejected and not
+saved — there is no "save anyway" mode. The schema source marker and canonicalization notes are written to the
+`metadata` of the fact row.
 
-**Инструменты и справочники.** Базовые системные инструменты (память, планировщик, глобальная память, форма ответа)
-доступны всегда, если разрешены флагами и правами. Предметный инструмент доступен только если перечислен в
-`tools.allowed` активного skill. Инструмент `skill_read_reference` доступен при активном skill с `references.allowed` и
-читает файлы только из каталога `references/**` этого skill, запрещая абсолютные пути и выход через `..`. Это даёт
-прогрессивное раскрытие: роутер видит короткое описание, основной prompt — компактный `# Skill Prompt`, а тяжёлые
-материалы читаются только по явной необходимости.
+**Tools and references.** Base system tools (memory, scheduler, global memory, response form) are always available
+if permitted by flags and permissions. A domain-specific tool is available only if it is listed in `tools.allowed`
+of the active skill. The `skill_read_reference` tool is available when the active skill has `references.allowed` set
+and reads files only from that skill's `references/**` directory, blocking absolute paths and traversal via `..`.
+This enables progressive disclosure: the router sees a short description, the main prompt receives a compact
+`# Skill Prompt`, and heavy reference material is read only when explicitly needed.
 
-**Точки интеграции.** При ответе `src/agent.js` определяет активный skill, выводит из него доменный ключ, добавляет блок
-`ACTIVE_SKILL_CONTEXT` с содержимым `# Skill Prompt` и ограничивает инструменты по `tools.allowed`. При записи функция
-`processCandidate` в `src/pipeline/merge.js` перед поиском похожих вызывает `validateAndCanonicalize`: предметный факт
-без схемы домена, с сущностью вне схемы или с невалидным `data` отклоняется. При извлечении этап в
-`src/pipeline/extract.js` работает в два прохода: первый определяет, что запоминать и какой это `entity_type` (с
-добавлением блока `## Fact Extraction Prompt` активного skill), а второй для каждого предметного кандидата со схемой
-перезаполняет `data` и `entity_key` строго по закрытой схеме его сущности
-(см. [08-prompts-and-models.md](08-prompts-and-models.md)).
+**Integration points.** When generating a response, `src/agent.js` determines the active skill, derives the domain
+key from it, injects the `ACTIVE_SKILL_CONTEXT` block containing the `# Skill Prompt` content, and restricts tools
+to those in `tools.allowed`. When writing, the `processCandidate` function in `src/pipeline/merge.js` calls
+`validateAndCanonicalize` before searching for duplicates: a domain fact with no domain schema, with an entity type
+outside the schema, or with invalid `data` is rejected. During extraction, the stage in `src/pipeline/extract.js`
+operates in two passes: the first determines what to remember and the `entity_type` (with the active skill's
+`## Fact Extraction Prompt` block injected), and the second re-populates `data` and `entity_key` for each domain
+candidate that has a schema, strictly following the closed schema of its entity
+(see [08-prompts-and-models.md](08-prompts-and-models.md)).
 
 ---
 
-## [SKILL-4] Создание и редактирование навыков
+## [SKILL-4] Creating and editing skills
 
-Навыки создаёт и редактирует администратор через инструментарий редактирования навыков — набор инструментов
-агента, которыми модель управляет прямо в диалоге. Инструментарий доставляется как навык-редактор `skill-author`
-(домен `skill_author`): его блок `# Skill Prompt` описывает анатомию навыка, назначение каждой части и порядок
-работы, а `tools.allowed` перечисляет инструменты редактирования. Это самоприменимая конструкция — навык, который
-редактирует навыки.
+Skills are created and edited by an administrator through the skill authoring toolset — a set of agent tools that
+the model operates directly within the conversation. The toolset is delivered as a skill-editor skill called
+`skill-author` (domain `skill_author`): its `# Skill Prompt` block describes the anatomy of a skill, the purpose
+of each part, and the workflow, while `tools.allowed` lists the authoring tools. This is a self-applicable
+construction — a skill that edits skills.
 
-Под капотом модель генерирует части навыка строгим JSON (черновик целого навыка по описанию, переписывание
-prompt-блоков, генерация и точечная правка схемы домена) в `src/pipeline/skills/author.js`, а код проверяет
-результат мета-валидатором `validateDefinition` до записи. Сборка `SKILL.md` из частей, проверка инвариантов и
-атомарная запись с горячей перезагрузкой реестра живут в `src/pipeline/skills/writer.js`.
+Under the hood, the model generates skill parts as strict JSON (a full skill draft from a description, rewriting
+prompt blocks, generating and patching the domain schema) inside `src/pipeline/skills/author.js`, and the code
+validates the result with the `validateDefinition` meta-validator before writing. Assembling `SKILL.md` from its
+parts, checking invariants, and performing an atomic write with hot-reload of the registry all live in
+`src/pipeline/skills/writer.js`.
 
-Редактируема любая часть навыка: поля фронтматтера (название, описание, признаки классификации, список
-инструментов, модели), блок `# Skill Prompt`, блок `## Fact Extraction Prompt`, закрытая схема домена (сущности,
-поля `data`, словари `entity_key`), справочники, а также включение, выключение и удаление навыка. Порядок работы
-неизменен: чтение текущего состояния навыка, предпросмотр предложенного изменения с замечаниями валидатора,
-подтверждение администратором и только затем запись с резервной копией прежней версии. Запись и удаление
-ограничены каталогом навыков: абсолютные пути и выход за его пределы отклоняются, а разрушающие действия требуют
-явного подтверждения.
+Any part of a skill is editable: front matter fields (name, description, classification signals, tool list, models),
+the `# Skill Prompt` block, the `## Fact Extraction Prompt` block, the closed domain schema (entities, `data`
+fields, `entity_key` vocabularies), references, and also enabling, disabling, and deleting a skill. The workflow
+is fixed: read the current state of the skill, preview the proposed change with validator notes, get confirmation
+from the administrator, and only then write with a backup of the previous version. Writing and deletion are
+restricted to the skills directory: absolute paths and traversal outside it are rejected, and destructive actions
+require explicit confirmation.
 
-Инструментарий доступен только администраторам (пометка `is_admin` в `mem.users`) и только при включённом флаге;
-все операции редактирования журналируются. Подробности доступа и список инструментов — в
-[10-operations.md](10-operations.md), генераторы частей навыка — в [08-prompts-and-models.md](08-prompts-and-models.md).
-
-
+The toolset is available only to administrators (flagged with `is_admin` in `mem.users`) and only when the
+corresponding flag is enabled; all editing operations are logged. Access details and the tool list are in
+[10-operations.md](10-operations.md); skill part generators are described in
+[08-prompts-and-models.md](08-prompts-and-models.md).

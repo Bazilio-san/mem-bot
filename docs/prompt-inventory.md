@@ -1,44 +1,44 @@
-# Реестр промптов и prompt-like шаблонов
+# Prompt and Prompt-Like Template Registry
 
-Этот файл фиксирует координаты промптов текущей реализации. В отличие от переносимой спецификации
-`docs/ai-bot-with-memory/`, этот документ проектный: здесь допустимы ссылки на конкретные каналы, тесты и служебные
-каталоги репозитория.
+This file records the coordinates of all prompts in the current implementation. Unlike the portable specification in
+`docs/ai-bot-with-memory/`, this document is project-specific: references to particular channels, tests, and
+repository service directories are intentional here.
 
-## Runtime-промпты приложения
+## Runtime Application Prompts
 
-| Блок | Координата | Как используется |
-|------|------------|------------------|
-| Основной системный промпт `MAIN_SYSTEM` | `src/agent.js:30` | Первый `system`-блок основного ответа агента. |
-| Сборка основного `messages` | `src/agent.js:553` | Порядок всех `system`, истории и текущего `user`-сообщения. |
-| `CAPABILITIES_CONTEXT` | `src/agent.js:298` | Подмешивается, когда пользователь спрашивает о возможностях бота. |
-| `CURRENT_DATETIME` | `src/agent.js:453` | Текущие дата, время и часовой пояс для каждого запроса. |
-| `WELCOME_BACK_CONTEXT` | `src/agent.js:462` | Контекст возвращения пользователя после паузы. |
-| `CONVERSATION_CONTEXT` | `src/agent.js:481` | Контекст режима собеседника: время, темы, стиль ведения разговора. |
-| `chatJSON` JSON-инструкция | `src/llm.js:203` | Общая обёртка строгого JSON через `response_format: json_object`. |
-| Классификатор намерения | `src/pipeline/classify.js:52` | Динамический system-промпт со списком доменов и user-шаблоном. |
-| Подсказка доменной схемы | `src/pipeline/extract.js:11` | Перечень `entity_type` и полей `data` для первого прохода извлечения. |
-| Уточнение entity/data | `src/pipeline/extract.js:56` | Второй строгий проход извлечения по схеме конкретной сущности. |
-| Извлечение памяти `SYSTEM` | `src/pipeline/extract.js:157` | Первый проход извлечения кандидатов в долговременную память. |
-| Извлечение тем `TOPICS_SYSTEM` | `src/pipeline/extract.js:256` | Выделение тем диалога и оценки вовлечённости пользователя. |
-| Суммаризатор истории `SUMMARY_SYSTEM` | `src/pipeline/history-compress.js:62` | Сжатие холодной части истории и вынос устойчивых фактов. |
-| `HISTORY_CONTEXT` | `src/pipeline/history-context.js:12` | Справочный блок сжатой истории для основного ответа. |
-| `MEMORY_CONTEXT` | `src/pipeline/retrieve.js:121` | Справочный блок релевантной личной памяти, защищённый от injection. |
-| `GLOBAL_FACTS` | `src/pipeline/global-memory.js:71` | Общие факты и политика, подмешиваемые в основной запрос. |
-| Выбор реакции `SYSTEM` | `src/pipeline/reactions.js:26` | Решение, можно ли заменить короткий текст канальной реакцией. |
-| Проактивное сообщение | `src/pipeline/proactiveMessage.js:50` | System + userPrompt для сообщения, которое бот пишет первым. |
-| Оценка релевантности события | `src/pipeline/events.js:127` | JSON-оценка интересности внешнего события для пользователя. |
-| Сообщение с событием | `src/pipeline/events.js:150` | Генерация короткого персонального текста по релевантному событию. |
-| Telegram `OUTPUT_FORMAT` | `src/telegram/bot.js:69` | Канальная инструкция HTML-разметки для Telegram-доставки. |
-| Резюме для TTS | `src/voice/tts.js:61` | Краткое резюме длинного ответа для озвучивания. |
+| Block | Coordinate | How it is used |
+|-------|------------|----------------|
+| Main system prompt `MAIN_SYSTEM` | `src/agent.js:30` | The first `system` block of the agent's primary response. |
+| Main `messages` assembly | `src/agent.js:553` | The ordering of all `system` blocks, history, and the current `user` message. |
+| `CAPABILITIES_CONTEXT` | `src/agent.js:298` | Injected when the user asks about the bot's capabilities. |
+| `CURRENT_DATETIME` | `src/agent.js:453` | Current date, time, and timezone for every request. |
+| `WELCOME_BACK_CONTEXT` | `src/agent.js:462` | Context for when a user returns after a pause. |
+| `CONVERSATION_CONTEXT` | `src/agent.js:481` | Conversation-mode context: timing, topics, and conversational style. |
+| `chatJSON` JSON instruction | `src/llm.js:203` | General wrapper for strict JSON output via `response_format: json_object`. |
+| Intent classifier | `src/pipeline/classify.js:52` | Dynamic system prompt containing the domain list and a user-message template. |
+| Domain schema hint | `src/pipeline/extract.js:11` | Enumeration of `entity_type` values and `data` fields for the first extraction pass. |
+| entity/data refinement | `src/pipeline/extract.js:56` | Second strict extraction pass against the schema of a specific entity. |
+| Memory extraction `SYSTEM` | `src/pipeline/extract.js:157` | First pass for extracting long-term memory candidates. |
+| Topic extraction `TOPICS_SYSTEM` | `src/pipeline/extract.js:256` | Identifying conversation topics and scoring user engagement. |
+| History summarizer `SUMMARY_SYSTEM` | `src/pipeline/history-compress.js:62` | Compressing the cold portion of history and surfacing stable facts. |
+| `HISTORY_CONTEXT` | `src/pipeline/history-context.js:12` | Reference block of compressed history for the main response. |
+| `MEMORY_CONTEXT` | `src/pipeline/retrieve.js:121` | Reference block of relevant personal memory, protected against injection. |
+| `GLOBAL_FACTS` | `src/pipeline/global-memory.js:71` | Shared facts and policies injected into the main request. |
+| Reaction selector `SYSTEM` | `src/pipeline/reactions.js:26` | Decision on whether a short text can be replaced by a channel reaction. |
+| Proactive message | `src/pipeline/proactiveMessage.js:50` | System + userPrompt for a message the bot sends unprompted. |
+| Event relevance scoring | `src/pipeline/events.js:127` | JSON scoring of how interesting an external event is for the user. |
+| Event message generation | `src/pipeline/events.js:150` | Generating a short personalised message for a relevant event. |
+| Telegram `OUTPUT_FORMAT` | `src/telegram/bot.js:69` | Channel instruction for HTML markup used in Telegram delivery. |
+| TTS summary | `src/voice/tts.js:61` | Brief summary of a long response prepared for text-to-speech. |
 
-## Tool definitions, которые видит модель
+## Tool Definitions Visible to the Model
 
-Описания `function.description` и `parameters.properties.*.description` входят в запрос модели как инструкции к
-инструментам. Это не обычные `system`/`user`-промпты, но они влияют на поведение модели. Координата указывает на строку
-с `description` внутри блока `function`.
+The `function.description` and `parameters.properties.*.description` fields are included in the model request as
+instructions for each tool. These are not conventional `system`/`user` prompts, but they do influence model
+behaviour. The coordinate points to the line containing `description` inside the `function` block.
 
-| Инструмент | Координата |
-|------------|------------|
+| Tool | Coordinate |
+|------|------------|
 | `secure_record_get` | `src/pipeline/agent-tools/secure-record-get.js:10` |
 | `skill_read_reference` | `src/pipeline/agent-tools/skill-read-reference.js:15` |
 | `voice_or_text` | `src/pipeline/agent-tools/voice/voice-or-text.js:16` |
@@ -56,12 +56,13 @@
 | `scheduler_create_task` | `src/pipeline/agent-tools/scheduler/scheduler_create_task.js:10` |
 | `scheduler_list_tasks` | `src/pipeline/agent-tools/scheduler/scheduler_list_tasks.js:113` |
 
-### Инструменты авторинга скиллов (`skill-authoring/`)
+### Skill-Authoring Tools (`skill-authoring/`)
 
-Эти инструменты позволяют модели создавать и редактировать скиллы. Их `description` тоже читается моделью как инструкция.
+These tools allow the model to create and edit skills. Their `description` fields are also read by the model as
+instructions.
 
-| Инструмент | Координата |
-|------------|------------|
+| Tool | Coordinate |
+|------|------------|
 | `skill_author_create` | `src/pipeline/agent-tools/skill-authoring/skill-author-create.js:23` |
 | `skill_author_read` | `src/pipeline/agent-tools/skill-authoring/skill-author-read.js:14` |
 | `skill_author_list` | `src/pipeline/agent-tools/skill-authoring/skill-author-list.js:14` |
@@ -79,16 +80,16 @@
 | `skill_author_disable` | `src/pipeline/agent-tools/skill-authoring/skill-author-disable.js:14` |
 | `skill_author_delete` | `src/pipeline/agent-tools/skill-authoring/skill-author-delete.js:14` |
 
-### MCP-инструменты
+### MCP Tools
 
-Инструмент `search_flights` больше не определяется локальным файлом. Теперь он приходит динамически от MCP-сервера
-`yafly` (см. `src/mcp/client.js:134` и `src/pipeline/tools.js:19`), поэтому его `description` задаётся на стороне
-сервера, а в реестре локальных tool-определений координаты нет. Модель видит его под именем с префиксом сервера
-(например, `yafly__search_flights`), а скилл ссылается на логическое имя `search_flights` без префикса.
+The `search_flights` tool is no longer defined in a local file. It is now delivered dynamically by the `yafly` MCP
+server (see `src/mcp/client.js:134` and `src/pipeline/tools.js:19`), so its `description` is set on the server
+side and has no coordinate in the local tool-definition registry. The model sees it under a server-prefixed name
+(e.g. `yafly__search_flights`), while skills reference it by the logical name `search_flights` without a prefix.
 
-## Тестовые промпты
+## Test Prompts
 
-| Файл | Координаты |
-|------|------------|
-| Проверка LLM-прокси | `tests/check-llm.js:77`, `tests/check-llm.js:96`, `tests/check-llm.js:128`, `tests/check-llm.js:164`, `tests/check-llm.js:198` |
-| Проверка streaming | `tests/check-streaming.js:46`, `tests/check-streaming.js:66` |
+| File | Coordinates |
+|------|-------------|
+| LLM proxy check | `tests/check-llm.js:77`, `tests/check-llm.js:96`, `tests/check-llm.js:128`, `tests/check-llm.js:164`, `tests/check-llm.js:198` |
+| Streaming check | `tests/check-streaming.js:46`, `tests/check-streaming.js:66` |

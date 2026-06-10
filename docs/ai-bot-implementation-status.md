@@ -1,281 +1,283 @@
-# Чеклист соответствия: реализация чат-бота с памятью
+# Compliance Checklist: Memory Chatbot Implementation
 
-Это единственный артефакт, который знает про конкретный проект. Спецификация в каталоге `docs/ai-bot-with-memory/` описывает,
-как система должна быть устроена, и ничего не знает о статусе реализации. Здесь, наоборот, собран срез текущего состояния:
-что готово, что сделано частично, а что ещё не сделано, со ссылками на реальный код и на пронумерованные требования
-спецификации.
-
----
-
-## Шапка
-
-- **Проект:** `mem-bot` — агентское приложение с долговременной памятью и проактивностью на Node.js и PostgreSQL.
-- **Привязка к спецификации:** набор документов `docs/ai-bot-with-memory/`, версия `doc-v4` (коммит `d8279fd`).
-- **Дата среза:** 2026-06-07.
-- **Как читать статусы:** «готово» — требование выполнено и подтверждается кодом; «частично» — базовый вариант есть,
-  но часть требования сведена к упрощению; «нет» — требование описано в спецификации как расширение и пока не реализовано.
-- **Как ссылаться на требования:** по устойчивым ID из заголовков спецификации, например `HIST-3`, `DATA-5`, `CRIT-7`.
+This is the single artifact that knows about the specific project. The specification in the `docs/ai-bot-with-memory/`
+directory describes how the system is designed to work and contains no information about implementation status. This
+document, by contrast, captures the current state: what is done, what is partially done, and what is not yet done,
+with references to real code and to numbered specification requirements.
 
 ---
 
-## Сводка по слоям
+## Header
 
-- **Реактивное ядро** (контур ответа, пять видов памяти, выборка, запись, приватность, планировщик, инструменты) —
-  реализовано; базовый прогон проверок `npm test` проходит полностью (36 из 36 проверок).
-- **Проактивность и режим собеседника** (`COMPANION_MODE`, `PROACTIVE_ENABLED`, `PROACTIVE_EVENTS_ENABLED`) —
-  реализовано; слой проверок проактивности подключается отдельным флагом.
-- **Поджатие истории диалога** (`HISTORY_COMPRESSION_ENABLED`) — реализовано; слой проверок `layerHistory` подключается
-  отдельным флагом.
-- **Глобальная память** (`GLOBAL_MEMORY_ENABLED`, `GLOBAL_RAG_ENABLED`) — реализовано: глобальные факты (always-on) и
-  общая база знаний (RAG), запись только администратору; слой проверок `layerGlobalMemory` подключается флагами и при
-  включении обоих проходит полностью (16 из 16 проверок слоя, суммарно `npm test` — 78 из 78).
-- **Внешняя доставка уведомлений** — частично: добавлен канал Telegram (`src/telegram/bot.js`); каналы электронной почты и
-  push-уведомлений не реализованы.
-- **Слой per-domain-схем** (`DOMAIN-1`…`DOMAIN-3`) — реализован: схема домена обязательна для предметных фактов,
-  реестр `mem.domain_schemas` (миграция `006`), модуль `src/schema/`, валидация и канонизация при записи, строгий
-  двухпроходный контракт при извлечении. Отдельный прогон проверок `npm run test:schema` проходит полностью (32 из 32).
+- **Project:** `mem-bot` — an agentic application with long-term memory and proactivity, built on Node.js and PostgreSQL.
+- **Specification reference:** document set `docs/ai-bot-with-memory/`, version `doc-v4` (commit `d8279fd`).
+- **Snapshot date:** 2026-06-07.
+- **How to read statuses:** "done" means the requirement is fulfilled and confirmed by code; "partial" means a basic
+  version exists but part of the requirement has been simplified; "no" means the requirement is described in the
+  specification as an extension and has not yet been implemented.
+- **How to reference requirements:** by stable IDs from specification headings, e.g. `HIST-3`, `DATA-5`, `CRIT-7`.
 
 ---
 
-## Таблица соответствия требованиям
+## Summary by Layer
 
-### Обзор — `OVR`
+- **Reactive core** (response loop, five memory kinds, retrieval, write, privacy, scheduler, tools) — implemented;
+  the baseline `npm test` run passes fully (36 of 36 checks).
+- **Proactivity and companion mode** (`COMPANION_MODE`, `PROACTIVE_ENABLED`, `PROACTIVE_EVENTS_ENABLED`) —
+  implemented; the proactivity check layer is enabled by a separate flag.
+- **History compression** (`HISTORY_COMPRESSION_ENABLED`) — implemented; the `layerHistory` check layer is enabled
+  by a separate flag.
+- **Global memory** (`GLOBAL_MEMORY_ENABLED`, `GLOBAL_RAG_ENABLED`) — implemented: global facts (always-on) and a
+  shared knowledge base (RAG), writes restricted to admin; the `layerGlobalMemory` check layer is enabled by flags
+  and, when both are on, passes fully (16 of 16 layer checks; total `npm test` — 78 of 78).
+- **External notification delivery** — partial: Telegram channel added (`src/telegram/bot.js`); email and push
+  notification channels are not implemented.
+- **Per-domain schema layer** (`DOMAIN-1`…`DOMAIN-3`) — implemented: a domain schema is required for domain-specific
+  facts, the `mem.domain_schemas` registry (migration `006`), the `src/schema/` module, validation and
+  canonicalization on write, and a strict two-pass contract on retrieval. The separate `npm run test:schema` run
+  passes fully (32 of 32 checks).
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `OVR-1` | Три контура обработки (ответ, триггеры, события) | готово | `src/agent.js`, `src/pipeline/proactive.js`, `src/pipeline/events.js` |
-| `OVR-2` | Жанр: реактивный агент плюс собеседник | готово | реактивное ядро в `src/agent.js`, собеседник под флагами |
-| `OVR-3` | Базовое поведение стабильно при выключенных флагах | готово | `src/config.js` — флаги по умолчанию выключены |
+---
 
-### Критерии готовности — `CRIT`
+## Requirements Compliance Table
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `CRIT-1` | Пять видов памяти, каждый в своей логике | готово | `migrations/001_init.sql`, таблицы `mem.*` |
-| `CRIT-2` | Не сохраняет мусор (порог автосохранения) | готово | `passesAutoSave` в `src/pipeline/merge.js` |
-| `CRIT-3` | Не раздувает промпт (10–30 фактов) | готово | `LIMITS` в `src/pipeline/retrieve.js` |
-| `CRIT-4` | Новое сообщение важнее старой памяти | готово | правило в `MAIN_SYSTEM`, `src/agent.js` |
-| `CRIT-5` | Обновляет факт без дублей | готово | `decideMerge` в `src/pipeline/merge.js` |
-| `CRIT-6` | Различает факт, намерение и задачу | готово | поля `scope` / `memory_kind` плюс планировщик |
-| `CRIT-7` | Чувствительные данные — только с подтверждением | готово | `src/pipeline/secure.js` |
-| `CRIT-8` | Не раскрывает лишние данные (только `redacted_summary`) | готово | `src/pipeline/secure.js`, `src/pipeline/retrieve.js` |
-| `CRIT-9` | Вызывает инструменты | готово | `src/pipeline/tools.js`, цикл инструментов в `src/agent.js` |
-| `CRIT-10` | Работает с планировщиком | готово | `src/pipeline/scheduler.js` |
-| `CRIT-11` | Устойчив к вредным инструкциям в памяти | готово | `MEMORY_CONTEXT` подаётся как справка, `src/pipeline/retrieve.js` |
-| `CRIT-12` | Быстрый (дешёвая классификация, быстрая выборка, асинхронная запись) | готово | `src/agent.js`, `src/pipeline/classify.js`, `src/pipeline/retrieve.js` |
-| `CRIT-13` | Тематический трекинг (не зацикливаться) | готово | `mem.topic_mentions`, `src/pipeline/topics.js` (`COMPANION_MODE`) |
-| `CRIT-14` | Темпоральный контекст | готово | `src/utils/temporal.js` (`COMPANION_MODE`) |
-| `CRIT-15` | Триггеры проактивности и анти-спам | готово | `mem.proactive_triggers`, `src/pipeline/proactive.js` (`PROACTIVE_ENABLED`) |
-| `CRIT-16` | Тёплая встреча возврата и единый стиль | частично | `src/pipeline/proactiveMessage.js`; возврат определяется по паузе, сигнала web-клиента нет |
-| `CRIT-17` | Внешние события как персональные поводы | частично | `src/pipeline/events.js`; источник событий — встроенная заглушка новостей |
-| `CRIT-18` | Сжатая история: горячее окно, дайджест, дедупликация | готово | `src/pipeline/history-context.js`, `history-compress.js` (`HISTORY_COMPRESSION_ENABLED`) |
-| `CRIT-19` | Глобальные факты подмешиваются всегда, ограничены по числу | готово | `mem.global_facts`, `buildGlobalFactsBlock` в `src/pipeline/global-memory.js` (`GLOBAL_MEMORY_ENABLED`) |
-| `CRIT-20` | Общая база знаний (RAG): поиск по релевантности, удаление по id | готово | `mem.global_knowledge`, `src/pipeline/global-memory.js` (`GLOBAL_RAG_ENABLED`) |
-| `CRIT-21` | Запись в глобальную память — только администратору | готово | `isAdmin` в `src/pipeline/admin.js`, проверка в `executeTool` (`src/pipeline/tools.js`) |
+### Overview — `OVR`
 
-### Быстрый старт и структура — `QS`
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `OVR-1` | Three processing loops (response, triggers, events) | done | `src/agent.js`, `src/pipeline/proactive.js`, `src/pipeline/events.js` |
+| `OVR-2` | Genre: reactive agent plus companion | done | reactive core in `src/agent.js`, companion under flags |
+| `OVR-3` | Core behavior is stable when flags are off | done | `src/config.js` — flags off by default |
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `QS-1` | Требования окружения (Node.js 22, PostgreSQL 16, расширения) | готово | `package.json`, `migrations/001_init.sql` |
-| `QS-2` | Команды (`migrate`, `chat`, `scheduler`, `test`, `check:llm`, `schema:*`, `test:schema`) | готово | `package.json`, `src/cli.js`, `src/scheduler-run.js`, `src/schema/cli.js` |
-| `QS-3` | Флаги проактивности | готово | `src/config.js`, блок `proactive` |
-| `QS-4` | Флаги поджатия истории | готово | `src/config.js`, блок `historyCompression` |
-| `QS-4a` | Флаги глобальной памяти | готово | `src/config.js`, блок `globalMemory` |
-| `QS-5` | Структура каталогов | готово | каталоги `src/` (включая `src/schema/`), `migrations/`, `schemas/`, `tests/` соответствуют спецификации |
-| `QS-6` | Порядок сборки с нуля | готово | подтверждается составом репозитория |
+### Readiness Criteria — `CRIT`
 
-### Архитектура контура ответа — `ARCH`
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `CRIT-1` | Five memory kinds, each with its own logic | done | `migrations/001_init.sql`, `mem.*` tables |
+| `CRIT-2` | Does not save noise (auto-save threshold) | done | `passesAutoSave` in `src/pipeline/merge.js` |
+| `CRIT-3` | Does not bloat the prompt (10–30 facts) | done | `LIMITS` in `src/pipeline/retrieve.js` |
+| `CRIT-4` | New message takes priority over old memory | done | rule in `MAIN_SYSTEM`, `src/agent.js` |
+| `CRIT-5` | Updates a fact without duplicates | done | `decideMerge` in `src/pipeline/merge.js` |
+| `CRIT-6` | Distinguishes fact, intention, and task | done | `scope` / `memory_kind` fields plus scheduler |
+| `CRIT-7` | Sensitive data only with confirmation | done | `src/pipeline/secure.js` |
+| `CRIT-8` | Does not expose excess data (only `redacted_summary`) | done | `src/pipeline/secure.js`, `src/pipeline/retrieve.js` |
+| `CRIT-9` | Calls tools | done | `src/pipeline/tools.js`, tool loop in `src/agent.js` |
+| `CRIT-10` | Works with the scheduler | done | `src/pipeline/scheduler.js` |
+| `CRIT-11` | Resilient to harmful instructions in memory | done | `MEMORY_CONTEXT` is provided as reference material, `src/pipeline/retrieve.js` |
+| `CRIT-12` | Fast (cheap classification, fast retrieval, async write) | done | `src/agent.js`, `src/pipeline/classify.js`, `src/pipeline/retrieve.js` |
+| `CRIT-13` | Topic tracking (no fixation) | done | `mem.topic_mentions`, `src/pipeline/topics.js` (`COMPANION_MODE`) |
+| `CRIT-14` | Temporal context | done | `src/utils/temporal.js` (`COMPANION_MODE`) |
+| `CRIT-15` | Proactivity triggers and anti-spam | done | `mem.proactive_triggers`, `src/pipeline/proactive.js` (`PROACTIVE_ENABLED`) |
+| `CRIT-16` | Warm return welcome and consistent style | partial | `src/pipeline/proactiveMessage.js`; return detected by pause, no web-client signal |
+| `CRIT-17` | External events as personal occasions | partial | `src/pipeline/events.js`; event source is a built-in news stub |
+| `CRIT-18` | Compressed history: hot window, digest, deduplication | done | `src/pipeline/history-context.js`, `history-compress.js` (`HISTORY_COMPRESSION_ENABLED`) |
+| `CRIT-19` | Global facts always injected, capped by count | done | `mem.global_facts`, `buildGlobalFactsBlock` in `src/pipeline/global-memory.js` (`GLOBAL_MEMORY_ENABLED`) |
+| `CRIT-20` | Shared knowledge base (RAG): search by relevance, delete by id | done | `mem.global_knowledge`, `src/pipeline/global-memory.js` (`GLOBAL_RAG_ENABLED`) |
+| `CRIT-21` | Writing to global memory — admin only | done | `isAdmin` in `src/pipeline/admin.js`, checked in `executeTool` (`src/pipeline/tools.js`) |
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `ARCH-1` | Стабильный системный промпт агента | готово | `MAIN_SYSTEM` в `src/agent.js` |
-| `ARCH-2` | Пайплайн `handleMessage` пошагово | готово | `handleMessage` в `src/agent.js` |
-| `ARCH-3` | Пять этапов (классификация, выборка, ответ, сохранение, запись) | готово | `src/agent.js` плюс модули `src/pipeline/*` |
-| `ARCH-4` | Аддитивные ветки проактивности под флагами | готово | ветки `COMPANION_MODE` и `PROACTIVE_ENABLED` в `src/agent.js` |
-| `ARCH-5` | Аддитивная ветка поджатия истории под флагом | готово | ветка `HISTORY_COMPRESSION_ENABLED` в `src/agent.js` |
-| `ARCH-6` | Аддитивные блоки глобальной памяти под флагами | готово | блоки `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` плюс `buildToolDefs(ctx)` в `src/agent.js` |
+### Quick Start and Structure — `QS`
 
-### Схема данных — `DATA`
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `QS-1` | Environment requirements (Node.js 22, PostgreSQL 16, extensions) | done | `package.json`, `migrations/001_init.sql` |
+| `QS-2` | Commands (`migrate`, `chat`, `scheduler`, `test`, `check:llm`, `schema:*`, `test:schema`) | done | `package.json`, `src/cli.js`, `src/scheduler-run.js`, `src/schema/cli.js` |
+| `QS-3` | Proactivity flags | done | `src/config.js`, `proactive` block |
+| `QS-4` | History compression flags | done | `src/config.js`, `historyCompression` block |
+| `QS-4a` | Global memory flags | done | `src/config.js`, `globalMemory` block |
+| `QS-5` | Directory structure | done | `src/` (including `src/schema/`), `migrations/`, `schemas/`, `tests/` match the specification |
+| `QS-6` | From-scratch build order | done | confirmed by repository contents |
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `DATA-1` | Расширения, схема `mem`, ENUM-типы | готово | `migrations/001_init.sql` |
-| `DATA-2` | Пользователи и домены | готово | `migrations/001_init.sql` (`users`, `agent_domains`) |
-| `DATA-3` | Диалоги, сообщения, сводки | готово | `migrations/001_init.sql`, колонки сводок — `003_history_summaries.sql` |
-| `DATA-4` | Главная таблица памяти `memory_items` | готово | `migrations/001_init.sql` |
-| `DATA-5` | Защищённая память (`secure_records`, `memory_secure_links`) | частично | таблицы созданы; `memory_secure_links` пока не наполняется явной связью |
-| `DATA-6` | Планировщик: задачи, запуски, исходящие уведомления | готово | таблицы есть; `cron_expr` и `rrule` считаются календарно с timezone |
-| `DATA-7` | Журнал инструментов и очередь записи памяти | частично | `tool_calls` работает; `memory_jobs` создана, но запись идёт промисом в процессе ответа |
-| `DATA-8` | Три таблицы проактивности | готово | `migrations/002_proactive.sql` |
-| `DATA-9` | Две таблицы глобальной памяти и колонка `is_admin` | готово | `migrations/005_global_memory.sql` (`global_facts`, `global_knowledge`) |
-| `DATA-10` | Реестр схем `data` под домен | готово | `migrations/006_domain_schemas.sql` (`mem.domain_schemas`, активная версия одна на домен) |
+### Response Loop Architecture — `ARCH`
 
-### Память: виды, выборка, запись — `MEM`
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `ARCH-1` | Stable agent system prompt | done | `MAIN_SYSTEM` in `src/agent.js` |
+| `ARCH-2` | `handleMessage` pipeline step by step | done | `handleMessage` in `src/agent.js` |
+| `ARCH-3` | Five stages (classify, retrieve, respond, save, write) | done | `src/agent.js` plus `src/pipeline/*` modules |
+| `ARCH-4` | Additive proactivity branches under flags | done | `COMPANION_MODE` and `PROACTIVE_ENABLED` branches in `src/agent.js` |
+| `ARCH-5` | Additive history compression branch under flag | done | `HISTORY_COMPRESSION_ENABLED` branch in `src/agent.js` |
+| `ARCH-6` | Additive global memory blocks under flags | done | `GLOBAL_FACTS` and `GLOBAL_KNOWLEDGE` blocks plus `buildToolDefs(ctx)` in `src/agent.js` |
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `MEM-1` | Пять видов памяти | готово | `src/pipeline/retrieve.js`, `migrations/001_init.sql` |
-| `MEM-2` | Выборка и три сигнала релевантности | готово | `src/pipeline/retrieve.js` (`scoreItem`, структурный фильтр) |
-| `MEM-3` | Сборка `MEMORY_CONTEXT` | готово | `buildMemoryContext` в `src/pipeline/retrieve.js` |
-| `MEM-4` | Контур записи (извлечение, фильтр, дедупликация) | готово | `src/pipeline/extract.js`, `src/pipeline/merge.js` |
-| `MEM-5` | Порог автосохранения и приватность | готово | `passesAutoSave` в `src/pipeline/merge.js` |
-| `MEM-6` | Дедупликация и обновление вместо дублей | готово | `decideMerge` в `src/pipeline/merge.js` |
-| `MEM-7` | Удаление памяти пользователем | готово | `src/pipeline/admin.js`; в диалоге — `memory_list`, `memory_forget_entity`, `memory_forget_all` в `src/pipeline/tools.js` |
+### Data Schema — `DATA`
 
-### Защищённая память — `SEC`
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `DATA-1` | Extensions, `mem` schema, ENUM types | done | `migrations/001_init.sql` |
+| `DATA-2` | Users and domains | done | `migrations/001_init.sql` (`users`, `agent_domains`) |
+| `DATA-3` | Conversations, messages, summaries | done | `migrations/001_init.sql`, summary columns — `003_history_summaries.sql` |
+| `DATA-4` | Main memory table `memory_items` | done | `migrations/001_init.sql` |
+| `DATA-5` | Secure memory (`secure_records`, `memory_secure_links`) | partial | tables created; `memory_secure_links` not yet populated with explicit links |
+| `DATA-6` | Scheduler: tasks, runs, outgoing notifications | done | tables present; `cron_expr` and `rrule` are evaluated with timezone support |
+| `DATA-7` | Tool call log and memory write queue | partial | `tool_calls` works; `memory_jobs` created but writes happen as a promise during the response |
+| `DATA-8` | Three proactivity tables | done | `migrations/002_proactive.sql` |
+| `DATA-9` | Two global memory tables and `is_admin` column | done | `migrations/005_global_memory.sql` (`global_facts`, `global_knowledge`) |
+| `DATA-10` | Per-domain `data` schema registry | done | `migrations/006_domain_schemas.sql` (`mem.domain_schemas`, one active version per domain) |
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `SEC-1` | Шифрование (AES-256-GCM) и маскирование | готово | `encrypt` / `redact` в `src/pipeline/secure.js` |
-| `SEC-2` | Согласие и доступ к полному значению | готово | `getSecureValue` в `src/pipeline/secure.js` |
-| `SEC-3` | Проверки приватности (четыре ветки) | готово | слой приватности в `tests/run.js` |
-| `SEC-4` | Распознавание секретов при извлечении | готово | промпт извлечения в `src/pipeline/extract.js` |
-| `SEC-5` | Проактивность не раскрывает защищённые данные | готово | `src/pipeline/proactiveMessage.js` использует только безопасные резюме |
+### Memory: Kinds, Retrieval, Write — `MEM`
 
-### Промпты, прокси, модели — `PROMPT`
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `MEM-1` | Five memory kinds | done | `src/pipeline/retrieve.js`, `migrations/001_init.sql` |
+| `MEM-2` | Retrieval and three relevance signals | done | `src/pipeline/retrieve.js` (`scoreItem`, structural filter) |
+| `MEM-3` | Building `MEMORY_CONTEXT` | done | `buildMemoryContext` in `src/pipeline/retrieve.js` |
+| `MEM-4` | Write loop (extraction, filter, deduplication) | done | `src/pipeline/extract.js`, `src/pipeline/merge.js` |
+| `MEM-5` | Auto-save threshold and privacy | done | `passesAutoSave` in `src/pipeline/merge.js` |
+| `MEM-6` | Deduplication and update instead of duplicates | done | `decideMerge` in `src/pipeline/merge.js` |
+| `MEM-7` | User-initiated memory deletion | done | `src/pipeline/admin.js`; in conversation — `memory_list`, `memory_forget_entity`, `memory_forget_all` in `src/pipeline/tools.js` |
 
-Полные координаты runtime-промптов, tool definitions, тестовых и исторических шаблонов вынесены в
+### Secure Memory — `SEC`
+
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `SEC-1` | Encryption (AES-256-GCM) and redaction | done | `encrypt` / `redact` in `src/pipeline/secure.js` |
+| `SEC-2` | Consent and access to full value | done | `getSecureValue` in `src/pipeline/secure.js` |
+| `SEC-3` | Privacy checks (four branches) | done | privacy layer in `tests/run.js` |
+| `SEC-4` | Secret detection during extraction | done | extraction prompt in `src/pipeline/extract.js` |
+| `SEC-5` | Proactivity does not expose secured data | done | `src/pipeline/proactiveMessage.js` uses only safe summaries |
+
+### Prompts, Proxy, Models — `PROMPT`
+
+Full runtime prompt coordinates, tool definitions, and test and historical templates are documented in
 [`prompt-inventory.md`](prompt-inventory.md).
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `PROMPT-1` | Клиент LLM и строгий JSON (`chatJSON`) | готово | `src/llm.js` |
-| `PROMPT-2` | Промпт классификатора запроса | готово | `src/pipeline/classify.js` |
-| `PROMPT-3` | Промпт извлечения кандидатов в память (двухпроходный: подсказка сущностей + строгое заполнение по схеме) | готово | `src/pipeline/extract.js` |
-| `PROMPT-4` | Создание задачи через tool definition `scheduler_create_task` | готово | `src/pipeline/agent-tools/scheduler/scheduler_create_task.js` |
-| `PROMPT-5` | Промпт извлечения тем диалога | готово | `extractTopics` в `src/pipeline/extract.js` |
-| `PROMPT-6` | Промпт суммаризатора истории | готово | `src/pipeline/history-compress.js` |
-| `PROMPT-7` | Опциональная схема решения о слиянии (`MergeDecision`) | нет | конфликт решается правилами `decideMerge`; модельная схема не используется |
-| `PROMPT-8` | Конфигурация из YAML-иерархии `config/` (пакет `node-config`) | готово | `src/config.js` |
-| `PROMPT-9` | Выбор моделей по этапам | готово | `src/config.js`; реальные значения — в разделе «Проектный конфиг» ниже |
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `PROMPT-1` | LLM client and strict JSON (`chatJSON`) | done | `src/llm.js` |
+| `PROMPT-2` | Request classifier prompt | done | `src/pipeline/classify.js` |
+| `PROMPT-3` | Memory candidate extraction prompt (two-pass: entity hint + strict schema fill) | done | `src/pipeline/extract.js` |
+| `PROMPT-4` | Task creation via tool definition `scheduler_create_task` | done | `src/pipeline/agent-tools/scheduler/scheduler_create_task.js` |
+| `PROMPT-5` | Conversation topic extraction prompt | done | `extractTopics` in `src/pipeline/extract.js` |
+| `PROMPT-6` | History summarizer prompt | done | `src/pipeline/history-compress.js` |
+| `PROMPT-7` | Optional merge decision schema (`MergeDecision`) | no | conflict resolved by `decideMerge` rules; model-based schema not used |
+| `PROMPT-8` | Configuration from the `config/` YAML hierarchy (`node-config` package) | done | `src/config.js` |
+| `PROMPT-9` | Model selection per pipeline stage | done | `src/config.js`; actual values listed in the "Project Config" section below |
 
-### Проактивность — `PROACT`
+### Proactivity — `PROACT`
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `PROACT-1` | Три столпа (триггеры, контекст, доставка) | частично | доставка реализована в Telegram (`src/telegram/bot.js`); email/push нет |
-| `PROACT-2` | Тематический трекинг | частично | `src/pipeline/topics.js` работает; оценка вовлечённости — грубая метрика |
-| `PROACT-3` | Темпоральный контекст | готово | `src/utils/temporal.js` |
-| `PROACT-4` | Триггеры, contact policy и анти-спам | готово | `src/pipeline/proactive.js`, `src/pipeline/proactiveContactPolicy.js`, `mem.proactive_contact_state` |
-| `PROACT-5` | Возвращение и стиль коммуникатора | готово | `welcome_back` определяется входящим turn в `src/agent.js`; фоновый push возврата не используется |
-| `PROACT-6` | Фильтр релевантности внешних событий | частично | `src/pipeline/events.js`; источник — встроенная заглушка новостей; contact policy применяется до LLM-релевантности |
-| `PROACT-7` | Запуск проактивности воркером | частично | совмещён с `src/scheduler-run.js`; отдельного процесса нет |
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `PROACT-1` | Three pillars (triggers, context, delivery) | partial | delivery implemented in Telegram (`src/telegram/bot.js`); email/push not done |
+| `PROACT-2` | Topic tracking | partial | `src/pipeline/topics.js` works; engagement scoring is a rough metric |
+| `PROACT-3` | Temporal context | done | `src/utils/temporal.js` |
+| `PROACT-4` | Triggers, contact policy, and anti-spam | done | `src/pipeline/proactive.js`, `src/pipeline/proactiveContactPolicy.js`, `mem.proactive_contact_state` |
+| `PROACT-5` | Return welcome and communicator style | done | `welcome_back` determined by incoming turn in `src/agent.js`; background return push not used |
+| `PROACT-6` | External event relevance filter | partial | `src/pipeline/events.js`; source is a built-in news stub; contact policy applied before LLM relevance |
+| `PROACT-7` | Proactivity run by a worker | partial | merged with `src/scheduler-run.js`; no separate process |
 
-### Операции: планировщик, инструменты, тесты — `OPS`
+### Operations: Scheduler, Tools, Tests — `OPS`
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `OPS-1` | Планировщик напоминаний и фоновых задач | готово | `src/pipeline/scheduler.js`; cron/rrule считаются через `cron-parser` и `rrule` |
-| `OPS-2` | Безопасный захват задач (`FOR UPDATE SKIP LOCKED`) | готово | `src/pipeline/scheduler.js` |
-| `OPS-3` | Выполнение, перепланирование, устойчивость к ошибкам | готово | разовые, interval, cron и rrule перепланируются; ошибки расписания диагностируются |
-| `OPS-4` | Инструменты агента и журнал | готово | `src/pipeline/tools.js` (`executeTool`), таблица `tool_calls` |
-| `OPS-5` | Логирование | частично | `DEBUG`-трассировка и журналы таблиц есть; единого JSON-логгера нет |
-| `OPS-6` | Тесты на реальной базе и моделях | готово | `tests/run.js`, `npm test` — 36 из 36 |
-| `OPS-7` | Слои проверки | готово | `tests/run.js` (структура, извлечение, обязательные тесты, приватность, сценарий, слои 6/7/8) |
-| `OPS-8` | Двенадцать обязательных тестов | готово | `tests/run.js` |
-| `OPS-9` | Правила тестирования (без моков, реальная база) | готово | `tests/run.js`, `tests/memory_cases.json` |
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `OPS-1` | Reminder and background task scheduler | done | `src/pipeline/scheduler.js`; cron/rrule evaluated via `cron-parser` and `rrule` |
+| `OPS-2` | Safe task acquisition (`FOR UPDATE SKIP LOCKED`) | done | `src/pipeline/scheduler.js` |
+| `OPS-3` | Execution, rescheduling, error resilience | done | one-time, interval, cron, and rrule tasks all reschedule; schedule errors diagnosed |
+| `OPS-4` | Agent tools and log | done | `src/pipeline/tools.js` (`executeTool`), `tool_calls` table |
+| `OPS-5` | Logging | partial | `DEBUG`-level tracing and table logs present; no unified JSON logger |
+| `OPS-6` | Tests against a real database and real models | done | `tests/run.js`, `npm test` — 36 of 36 |
+| `OPS-7` | Check layers | done | `tests/run.js` (structure, extraction, mandatory tests, privacy, scenario, layers 6/7/8) |
+| `OPS-8` | Twelve mandatory tests | done | `tests/run.js` |
+| `OPS-9` | Testing rules (no mocks, real database) | done | `tests/run.js`, `tests/memory_cases.json` |
 
-### Слой схем `data` под домен — `DOMAIN`
+### Per-Domain `data` Schema Layer — `DOMAIN`
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `DOMAIN-1` | Сквозной механизм per-domain-схем | готово | `validateAndCanonicalize` в `src/schema/validate.js`, шаг в `processCandidate` (`src/pipeline/merge.js`) |
-| `DOMAIN-2` | Реестр схем, модуль `src/schema/`, миграция `006` | готово | `migrations/006_domain_schemas.sql`, `src/schema/` (meta/registry/validate/generate/cli), зависимость `ajv` |
-| `DOMAIN-3` | Выгоды и риски слоя; строгий двухпроходный контракт | готово | второй проход извлечения в `src/pipeline/extract.js`; схема обязательна, без режима совместимости |
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `DOMAIN-1` | End-to-end per-domain schema mechanism | done | `validateAndCanonicalize` in `src/schema/validate.js`, step in `processCandidate` (`src/pipeline/merge.js`) |
+| `DOMAIN-2` | Schema registry, `src/schema/` module, migration `006` | done | `migrations/006_domain_schemas.sql`, `src/schema/` (meta/registry/validate/generate/cli), `ajv` dependency |
+| `DOMAIN-3` | Layer benefits and risks; strict two-pass contract | done | second extraction pass in `src/pipeline/extract.js`; schema is mandatory, no compatibility mode |
 
-### Поджатие истории диалога — `HIST`
+### History Compression — `HIST`
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `HIST-1` | Порядок блоков в запросе | готово | `src/agent.js` (сборка `messages`) |
-| `HIST-2` | Рекомендуемые параметры и профили | готово | `src/config.js`, блок `historyCompression` |
-| `HIST-3` | Градиентное сжатие по зонам | готово | `summarizeColdHistory` в `src/pipeline/history-compress.js` |
-| `HIST-4` | Память против истории: разделение ролей | готово | передача `active_memory` суммаризатору в `src/pipeline/history-compress.js` |
-| `HIST-5` | Приоритет источников при конфликте | готово | служебный заголовок в `formatHistoryContext`, `src/pipeline/history-context.js` |
-| `HIST-6` | Схема хранения и миграция `003` | готово | `migrations/003_history_summaries.sql` |
-| `HIST-7` | Конфигурация и инвариант гистерезиса | готово | `src/config.js` (проверка `shrinkTokens < maxTokens`) |
-| `HIST-8` | Алгоритм сборки контекста | готово | `buildHistoryContext` в `src/pipeline/history-context.js` |
-| `HIST-9` | Новые модули пайплайна | готово | `history-context.js`, `history-compress.js`, `token-counter.js` |
-| `HIST-10` | Подсчёт токенов | частично | эвристика `estimateTokens` в `src/pipeline/token-counter.js`; точного токенизатора (`tiktoken`) нет |
-| `HIST-11` | Суммаризатор: промпт и схема ответа | готово | `src/pipeline/history-compress.js` |
-| `HIST-12` | Защита от утечек и вредных инструкций | готово | `formatHistoryContext` в `src/pipeline/history-context.js` |
-| `HIST-13` | Когда запускать сжатие (порог, `compressSync`) | готово | `maybeCompressHistory` в `src/pipeline/history-compress.js` |
-| `HIST-14` | Слой проверок `layerHistory` | готово | `tests/run.js` (12 проверок при `HISTORY_COMPRESSION_ENABLED`) |
-| `HIST-15` | Критерии приёмки | готово | подтверждаются слоем `layerHistory` |
-| `HIST-16` | План внедрения и метрики | частично | поэтапная сборка выполнена; послойное досжатие не реализовано |
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `HIST-1` | Block order in the request | done | `src/agent.js` (`messages` assembly) |
+| `HIST-2` | Recommended parameters and profiles | done | `src/config.js`, `historyCompression` block |
+| `HIST-3` | Gradient compression by zones | done | `summarizeColdHistory` in `src/pipeline/history-compress.js` |
+| `HIST-4` | Memory vs history: separation of concerns | done | passing `active_memory` to the summarizer in `src/pipeline/history-compress.js` |
+| `HIST-5` | Source priority on conflict | done | service header in `formatHistoryContext`, `src/pipeline/history-context.js` |
+| `HIST-6` | Storage schema and migration `003` | done | `migrations/003_history_summaries.sql` |
+| `HIST-7` | Configuration and hysteresis invariant | done | `src/config.js` (check `shrinkTokens < maxTokens`) |
+| `HIST-8` | Context assembly algorithm | done | `buildHistoryContext` in `src/pipeline/history-context.js` |
+| `HIST-9` | New pipeline modules | done | `history-context.js`, `history-compress.js`, `token-counter.js` |
+| `HIST-10` | Token counting | partial | heuristic `estimateTokens` in `src/pipeline/token-counter.js`; no exact tokenizer (`tiktoken`) |
+| `HIST-11` | Summarizer: prompt and response schema | done | `src/pipeline/history-compress.js` |
+| `HIST-12` | Protection against leaks and harmful instructions | done | `formatHistoryContext` in `src/pipeline/history-context.js` |
+| `HIST-13` | When to trigger compression (threshold, `compressSync`) | done | `maybeCompressHistory` in `src/pipeline/history-compress.js` |
+| `HIST-14` | `layerHistory` check layer | done | `tests/run.js` (12 checks when `HISTORY_COMPRESSION_ENABLED`) |
+| `HIST-15` | Acceptance criteria | done | confirmed by `layerHistory` layer |
+| `HIST-16` | Implementation plan and metrics | partial | phased assembly complete; layered re-compression not implemented |
 
-### Глобальная память — `GLOB`
+### Global Memory — `GLOB`
 
-| ID требования | Краткая формулировка | Статус | Ссылка на код / заметка |
-|---------------|----------------------|--------|--------------------------|
-| `GLOB-1` | Граница со всегда-включённым блоком даты и времени | готово | `CURRENT_DATETIME` остаётся в динамической зоне `src/agent.js` |
-| `GLOB-2` | Критерий качества слоя | готово | подтверждается слоем `layerGlobalMemory` |
-| `GLOB-3` | Две таблицы и пометка `is_admin` (миграция `005`) | готово | `migrations/005_global_memory.sql`, засев базовых фактов |
-| `GLOB-4` | Модуль `src/pipeline/global-memory.js` | готово | факты и база знаний: выборка, поиск, запись, удаление |
-| `GLOB-5` | Проверка прав администратора | готово | `isAdmin` в `src/pipeline/admin.js`, `ctx.isAdmin` в `src/agent.js` |
-| `GLOB-6` | Подмешивание блоков `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` | готово | сборка `messages` в `src/agent.js` |
-| `GLOB-7` | Инструменты: чтение базы знаний всем, запись администратору | готово | `buildToolDefs` и `executeTool` в `src/pipeline/tools.js` |
-| `GLOB-8` | Минимизация: лимиты `GLOBAL_FACTS_LIMIT` / `GLOBAL_RAG_LIMIT` | готово | `src/config.js`, блок `globalMemory` |
-| `GLOB-9` | Конфигурация, флаги и команды CLI | готово | `src/config.js`, команды `/fact-*` и `/kb-*` в `src/cli.js` |
-| `GLOB-10` | Критерии `CRIT-19`…`CRIT-21` | готово | см. раздел критериев выше |
-| `GLOB-11` | Слой проверок `layerGlobalMemory` | готово | `tests/run.js` (16 проверок при включённых флагах) |
-| `GLOB-12` | Порядок реализации | готово | подтверждается составом репозитория |
-
----
-
-## Запланированные улучшения
-
-Этот раздел переносит таблицу «Упрощения и доделки», ранее находившуюся в `12-appendix.md`. Он фиксирует места, где
-реализация описанной архитектуры пока упрощена. Перечисленные упрощения не ломают базовые 36 проверок и слой проактивности,
-но важны для честного статуса.
-
-| Что | Текущий статус | Связанные ID | Где продолжать |
-|-----|----------------|--------------|----------------|
-| Точный токенизатор истории | эвристика на символах; точного токенизатора нет | `HIST-10` | подключить `tiktoken` под модель |
-| Послойное досжатие истории | используется зонирование; послойного досжатия нет | `HIST-16` | пересжатие пересказа по слоям `near`/`middle`/`far` |
-| Очередь записи памяти | `memory_jobs` создана, запись идёт промисом в процессе ответа | `DATA-7` | отдельный memory-worker |
-| Внешняя доставка уведомлений | реализован Telegram; email и push нет | `PROACT-1`, `DATA-6` | transport-worker для остальных каналов |
-| Сложное слияние фактов | конфликт решается правилами, без модели `MergeDecision` | `PROMPT-7`, `MEM-6` | модельное решение конфликта |
-| Источник внешних событий | встроенная заглушка новостей | `PROACT-6`, `CRIT-17` | внешний API событий |
-| Тест событий | смоук-проход и дедупликация, без детерминированной релевантности | `PROACT-6` | ручной сценарий или фикстуры |
-| Триггер возврата | входящий сигнал после паузы в `handleMessage` | `PROACT-5`, `CRIT-16` | дополнительные канальные подсказки |
-| Воркер проактивности | совмещён со `src/scheduler-run.js` | `PROACT-7` | отдельный процесс при масштабе |
-| Оценка вовлечённости | грубая метрика (модель плюс сглаживание) | `PROACT-2` | дополнительные эвристики |
-| Потоковая передача ответа | обычный ответ без streaming | `ARCH-2` | streaming в `src/agent.js` и `src/llm.js` |
-| Кэширование системного промпта | стабильный промпт отделён, кэш не подключён | `ARCH-1` | кэш неизменной части промпта |
-| JSON-логирование | `DEBUG`-трассировка и журналы таблиц, единого логгера нет | `OPS-5` | настраиваемый уровень логирования, correlation id |
-| Очистка памяти по расписанию | задачи `memory_cleanup` нет | `DATA-4`, `OPS-1` | регулярная задача `memory_cleanup` в `scheduler.js` |
-| Связь безопасного факта с секретом | `memory_secure_links` создана, но не наполняется | `DATA-5`, `SEC-1` | заполнение `memory_secure_links` в `src/pipeline/secure.js` |
+| Requirement ID | Short description | Status | Code reference / note |
+|----------------|-------------------|--------|------------------------|
+| `GLOB-1` | Boundary with always-on date/time block | done | `CURRENT_DATETIME` stays in the dynamic zone in `src/agent.js` |
+| `GLOB-2` | Layer quality criterion | done | confirmed by `layerGlobalMemory` layer |
+| `GLOB-3` | Two tables and `is_admin` flag (migration `005`) | done | `migrations/005_global_memory.sql`, seed of base facts |
+| `GLOB-4` | `src/pipeline/global-memory.js` module | done | facts and knowledge base: retrieval, search, write, delete |
+| `GLOB-5` | Admin permission check | done | `isAdmin` in `src/pipeline/admin.js`, `ctx.isAdmin` in `src/agent.js` |
+| `GLOB-6` | Injecting `GLOBAL_FACTS` and `GLOBAL_KNOWLEDGE` blocks | done | `messages` assembly in `src/agent.js` |
+| `GLOB-7` | Tools: knowledge base readable by all, writable by admin only | done | `buildToolDefs` and `executeTool` in `src/pipeline/tools.js` |
+| `GLOB-8` | Minimization: `GLOBAL_FACTS_LIMIT` / `GLOBAL_RAG_LIMIT` limits | done | `src/config.js`, `globalMemory` block |
+| `GLOB-9` | Configuration, flags, and CLI commands | done | `src/config.js`, `/fact-*` and `/kb-*` commands in `src/cli.js` |
+| `GLOB-10` | Criteria `CRIT-19`…`CRIT-21` | done | see criteria section above |
+| `GLOB-11` | `layerGlobalMemory` check layer | done | `tests/run.js` (16 checks when flags are enabled) |
+| `GLOB-12` | Implementation order | done | confirmed by repository contents |
 
 ---
 
-## Проектный конфиг
+## Planned Improvements
 
-Реальные значения инфраструктуры, вынесенные из спецификации в плейсхолдеры. В спецификации эти значения подаются как
-`<MAIN_MODEL>`, `<AUX_MODEL>`, `<EMBED_MODEL>` и `<LLM_PROXY_BASE_URL>`; здесь приведены их конкретные значения для данного
-проекта.
+This section replaces the "Simplifications and follow-ups" table that was previously in `12-appendix.md`. It records
+areas where the current implementation of the described architecture is simplified. The listed simplifications do not
+break the baseline 36 checks or the proactivity layer, but are important for an honest status picture.
 
-| Плейсхолдер спецификации | Назначение | Значение в проекте | Путь в `config` | Переменная окружения |
-|--------------------------|------------|--------------------|-----------------|----------------------|
-| `<OPENAI_BASE_URL>` | адрес OpenAI-compatible endpoint | `https://litellm.my-proxy.com/v1` или пусто | `llm.baseURL` | `OPENAI_BASE_URL` |
-| `<MAIN_MODEL>` | основная модель ответа агента | `gpt-5.4-mini` | `llm.mainModel` | `MAIN_MODEL` |
-| `<AUX_MODEL>` | вспомогательная дешёвая модель (классификация, темы, суммаризатор) | `gpt-5.4-nano` | `llm.auxModel` | `AUX_MODEL` |
-| `<MAIN_MODEL>` (извлечение фактов) | извлечение фактов в память | `gpt-5.4-mini` | `llm.extractModel` | `EXTRACT_MODEL` |
-| `<EMBED_MODEL>` | модель эмбеддингов (размерность 1536) | `text-embedding-3-small` | `llm.embedModel` | `EMBED_MODEL` |
-
-Если `OPENAI_BASE_URL` задан, OpenAI SDK обращается к прокси по этому адресу; если не задан, используется прямой OpenAI
-API. Замечание о скорости конкретного прокси: модели семейства `gpt-5.4-*` на этом прокси отвечают примерно за 5–10
-секунд, а `gpt-4o-mini` — примерно за 1,2 секунды. Для максимально быстрого отклика можно задать
-`MAIN_MODEL=gpt-4o-mini`. Все модели проверяются через выбранный endpoint скриптом `tests/check-llm.js`
-(`npm run check:llm`): подтверждаются чат, строгий JSON, вызов инструментов и эмбеддинги.
+| What | Current status | Related IDs | Where to continue |
+|------|----------------|-------------|-------------------|
+| Exact history tokenizer | character-based heuristic; no exact tokenizer | `HIST-10` | integrate `tiktoken` for the target model |
+| Layered history re-compression | zone-based compression used; no layered re-compression | `HIST-16` | re-compress summaries across `near`/`middle`/`far` layers |
+| Memory write queue | `memory_jobs` created; writes happen as a promise during the response | `DATA-7` | separate memory-worker process |
+| External notification delivery | Telegram implemented; email and push not done | `PROACT-1`, `DATA-6` | transport-worker for remaining channels |
+| Complex fact merging | conflict resolved by rules, no `MergeDecision` model | `PROMPT-7`, `MEM-6` | model-based conflict resolution |
+| External event source | built-in news stub | `PROACT-6`, `CRIT-17` | external events API |
+| Event test | smoke pass and deduplication, no deterministic relevance | `PROACT-6` | manual scenario or fixtures |
+| Return trigger | incoming signal after pause in `handleMessage` | `PROACT-5`, `CRIT-16` | additional channel-side hints |
+| Proactivity worker | merged with `src/scheduler-run.js` | `PROACT-7` | separate process at scale |
+| Engagement scoring | rough metric (model plus smoothing) | `PROACT-2` | additional heuristics |
+| Response streaming | standard response, no streaming | `ARCH-2` | streaming in `src/agent.js` and `src/llm.js` |
+| System prompt caching | stable prompt is separated; cache not wired up | `ARCH-1` | cache the immutable part of the prompt |
+| JSON logging | `DEBUG`-level tracing and table logs; no unified logger | `OPS-5` | configurable log level, correlation id |
+| Scheduled memory cleanup | no `memory_cleanup` task | `DATA-4`, `OPS-1` | recurring `memory_cleanup` task in `scheduler.js` |
+| Secure fact-to-secret link | `memory_secure_links` created but not populated | `DATA-5`, `SEC-1` | populate `memory_secure_links` in `src/pipeline/secure.js` |
 
 ---
 
-## Связанные документы
+## Project Config
 
-- Вход в спецификацию — [`docs/ai-bot-with-memory/README.md`](../docs/ai-bot-with-memory/README.md)
-- Критерии готовности — [`docs/ai-bot-with-memory/02-criteria.md`](../docs/ai-bot-with-memory/02-criteria.md)
-- Тесты и слои проверки — [`docs/ai-bot-with-memory/10-operations.md`](../docs/ai-bot-with-memory/10-operations.md)
-- Поджатие истории диалога — [`docs/ai-bot-with-memory/13-history-compression.md`](../docs/ai-bot-with-memory/13-history-compression.md)
-- Глобальная память — [`docs/ai-bot-with-memory/14-global-memory.md`](../docs/ai-bot-with-memory/14-global-memory.md)
+Concrete infrastructure values that are placeholders in the specification. The specification uses `<MAIN_MODEL>`,
+`<AUX_MODEL>`, `<EMBED_MODEL>`, and `<LLM_PROXY_BASE_URL>`; the table below shows their actual values for this
+project.
+
+| Specification placeholder | Purpose | Project value | Path in `config` | Environment variable |
+|---------------------------|---------|---------------|------------------|----------------------|
+| `<OPENAI_BASE_URL>` | address of the OpenAI-compatible endpoint | `https://litellm.my-proxy.com/v1` or empty | `llm.baseURL` | `OPENAI_BASE_URL` |
+| `<MAIN_MODEL>` | primary agent response model | `gpt-5.4-mini` | `llm.mainModel` | `MAIN_MODEL` |
+| `<AUX_MODEL>` | cheap auxiliary model (classification, topics, summarizer) | `gpt-5.4-nano` | `llm.auxModel` | `AUX_MODEL` |
+| `<MAIN_MODEL>` (fact extraction) | fact extraction into memory | `gpt-5.4-mini` | `llm.extractModel` | `EXTRACT_MODEL` |
+| `<EMBED_MODEL>` | embeddings model (1536 dimensions) | `text-embedding-3-small` | `llm.embedModel` | `EMBED_MODEL` |
+
+When `OPENAI_BASE_URL` is set, the OpenAI SDK routes requests to the proxy at that address; when unset, the direct
+OpenAI API is used. A note on proxy speed: `gpt-5.4-*` family models on this proxy respond in roughly 5–10 seconds,
+while `gpt-4o-mini` responds in roughly 1.2 seconds. For the fastest response times, set `MAIN_MODEL=gpt-4o-mini`.
+All models are verified against the chosen endpoint by `tests/check-llm.js` (`npm run check:llm`): chat, strict JSON,
+tool calling, and embeddings are all confirmed.
+
+---
+
+## Related Documents
+
+- Specification entry point — [`docs/ai-bot-with-memory/README.md`](../docs/ai-bot-with-memory/README.md)
+- Readiness criteria — [`docs/ai-bot-with-memory/02-criteria.md`](../docs/ai-bot-with-memory/02-criteria.md)
+- Tests and check layers — [`docs/ai-bot-with-memory/10-operations.md`](../docs/ai-bot-with-memory/10-operations.md)
+- History compression — [`docs/ai-bot-with-memory/13-history-compression.md`](../docs/ai-bot-with-memory/13-history-compression.md)
+- Global memory — [`docs/ai-bot-with-memory/14-global-memory.md`](../docs/ai-bot-with-memory/14-global-memory.md)

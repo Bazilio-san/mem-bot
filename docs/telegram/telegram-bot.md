@@ -1,254 +1,276 @@
-# Телеграм-бот: реализация поверх ИИ-бота
+# Telegram Bot: Implementation on Top of the AI Bot
 
-Документация адаптера Telegram привязана к правилам в
-[00-documentation-principles.md](00-documentation-principles.md). Этот документ описывает только интеграцию Telegram
-(бот `src/telegram/bot.js`, модули `src/telegram/`) и как API ИИ-бота выражается в командах, реакциях и форматах
-канала.
+This documentation for the Telegram adapter is bound by the rules in
+[00-documentation-principles.md](00-documentation-principles.md). This document covers only the Telegram integration
+(bot `src/telegram/bot.js`, modules under `src/telegram/`) and how the AI bot's API is expressed in commands,
+reactions, and channel formats.
 
-## Запуск и транспорт
+## Startup and Transport
 
-Бот запускается командой `npm run telegram`. Токен берётся из `config.telegram.apiKey`; без него запуск прерывается. Входящие обновления адаптер получает длинным опросом (метод `getUpdates` с тайм-аутом 30 секунд), ответы и
-проактивные сообщения отправляет методом `sendMessage` с разметкой Telegram (`parse_mode=HTML`), разбивая длинный текст
-на части по 4000 символов под лимит Telegram по границам тегов (подробнее — раздел «Разметка ответа»). Для точечных
-реакций бот использует метод `setMessageReaction`; если Telegram не принимает реакцию в
-конкретном чате, адаптер отправляет текстовый fallback методом `sendMessage`. В опросе запрошены три типа обновлений:
-обычные сообщения, нажатия инлайн-кнопок и реакции на сообщения:
+The Telegram adapter runs in either of two process modes, exposing the start and stop entry points
+`startTelegram()` and `stopTelegram()` from `src/telegram/bot.js`. Standalone, it starts with `npm run telegram`
+and is the sole occupant of the process. Co-hosted, it runs inside the combined web server (`npm run server`,
+entry `src/server/index.js`), which on the very same Node.js process and event loop also serves the
+administrative web interface and its JSON API under `/api`; the server brings the channel up by calling
+`startTelegram()` after its HTTP listener is ready. Both services are I/O-bound and share one event loop without
+interfering, because long polling and the background worker are asynchronous network operations rather than CPU
+work. In both modes the token is taken from `config.telegram.apiKey`; without it the startup aborts. The web
+server's own address and port come from `config.admin.host` and `config.admin.port` (defaults `localhost` and
+`3001`). The adapter receives incoming updates via long polling (`getUpdates` with a 30-second timeout); replies and
+proactive messages are sent via `sendMessage` with Telegram markup (`parse_mode=HTML`), splitting long text into
+chunks of up to 4000 characters at tag boundaries to stay within Telegram's limit (see the "Response Markup"
+section). For targeted reactions the bot uses `setMessageReaction`; if Telegram rejects a reaction in a particular
+chat, the adapter sends a text fallback via `sendMessage`. Three update types are requested in the poll:
+ordinary messages, inline-button taps, and message reactions:
 `allowed_updates: ['message', 'callback_query', 'message_reaction']`.
 
-Внешним идентификатором пользователя (`external_id` в базе) служит идентификатор чата Telegram. Благодаря этому
-проактивные сообщения из очереди доставки `mem.notification_outbox` находят нужный чат. Сообщения разных чатов
-обрабатываются параллельно, а внутри одного чата — строго по порядку; число одновременных тяжёлых обработок (вызовов
-модели) ограничено семафором с пределом `config.telegram.maxConcurrency` (по умолчанию 5). Очередь доставки опустошается
-по событиям PostgreSQL (`LISTEN`/`NOTIFY`), а страховочный таймер с интервалом `config.telegram.outboxSafetyIntervalMs`
-(по умолчанию 30000 миллисекунд) делает контрольный проход на случай пропущенного уведомления. Исходящие Telegram
-`message_id` сохраняются в `mem.message_external_refs`, чтобы входящая реакция пользователя могла быть сопоставлена с
-внутренней строкой истории.
+The Telegram chat ID serves as the user's external identifier (`external_id` in the database). This is what allows
+proactive messages from the delivery queue `mem.notification_outbox` to find the right chat. Messages from different
+chats are processed in parallel; within a single chat they are processed strictly in order. The number of concurrent
+heavyweight operations (model calls) is capped by a semaphore limited to `config.telegram.maxConcurrency`
+(default 5). The delivery queue is drained on PostgreSQL events (`LISTEN`/`NOTIFY`), and a safety timer at interval
+`config.telegram.outboxSafetyIntervalMs` (default 30000 ms) performs a sweep in case a notification was missed.
+Outgoing Telegram `message_id` values are stored in `mem.message_external_refs` so that an incoming user reaction
+can be matched to the corresponding internal history entry.
 
-При получении сигнала остановки (`SIGINT` или `SIGTERM`) бот завершается корректно: останавливает циклы опроса и
-фонового воркера, отпускает соединение-слушатель очереди доставки, принудительно дописывает остаток буфера журнала
-обращений к модели (`flushLlmLog`, см. `docs/ai-bot-with-memory/10-operations.md`, раздел [OPS-5]) и закрывает пул
-соединений с базой.
+On a stop signal (`SIGINT` or `SIGTERM`) the process shuts down gracefully. The adapter's own stop routine
+`stopTelegram()` halts the polling and background-worker loops, wakes the sleeping worker so it observes the stop
+flag at once, releases the delivery-queue listener connection, and force-flushes the remaining model-call log
+buffer (`flushLlmLog`, see `docs/ai-bot-with-memory/10-operations.md`, section [OPS-5]). Closing the database
+connection pool belongs to whichever component owns the process: in standalone mode the adapter closes the pool
+itself after stopping; in co-hosted mode the web server first stops accepting HTTP requests, then calls
+`stopTelegram()`, and only then closes the shared pool, so the pool is closed exactly once.
 
-## Разметка ответа
+## Response Markup
 
-Ответ доставляется в разметке Telegram: бот форматирует текст подмножеством HTML, которое понимает Telegram Bot API
-(`parse_mode=HTML`). Чтобы модель форматировала ответ именно так, адаптер на старте регистрирует в ядре профиль
-представления канала под ключом `telegram` (функция `registerChannelProfile` из `src/pipeline/channels.js`). Профиль
-несёт инструкцию форматирования, которую ядро подмешивает в системный промпт служебным блоком `OUTPUT_FORMAT` (механизм
-профилей описан в спецификации ИИ-бота, `docs/ai-bot-with-memory/04-architecture.md`, раздел [ARCH-8]). Инструкция
-разрешает только теги, которые поддерживает Telegram: `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a>`,
-`<blockquote>`, `<span class="tg-spoiler">`; заголовки, таблицы и Markdown-разметка запрещены, а маркированные списки
-оформляются строками с «• ». Ключ канала передаётся в каждом вызове ядра: `handleMessage({ …, channel: 'telegram' })`.
+The response is delivered in Telegram markup: the bot formats text with the HTML subset that the Telegram Bot API
+understands (`parse_mode=HTML`). So that the model formats its reply exactly this way, the adapter registers a
+channel presentation profile under the key `telegram` at startup (via `registerChannelProfile` from
+`src/pipeline/channels.js`). The profile carries a formatting instruction that the core injects into the system
+prompt as a service block named `OUTPUT_FORMAT` (the profile mechanism is described in the AI bot spec,
+`docs/ai-bot-with-memory/04-architecture.md`, section [ARCH-8]). The instruction permits only the tags Telegram
+supports: `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a>`, `<blockquote>`,
+`<span class="tg-spoiler">`; headings, tables, and Markdown are forbidden, and bulleted lists are formatted as
+lines starting with "• ". The channel key is passed in every core call: `handleMessage({ …, channel: 'telegram' })`.
 
-Перед отправкой текст проходит две обработки, собранные в модуле `src/telegram/format.js`. Сначала санитайзер
-(`telegramPostProcess`, обёртка над библиотекой `sanitize-html`) приводит ответ к белому списку тегов Telegram:
-недопустимые теги экранируются и показываются как обычный текст, опасные схемы ссылок отбрасываются, а одиночные символы
-`&`, `<` и `>` в обычном тексте экранируются под `parse_mode=HTML`. Затем разбивка под лимит Telegram
-(`telegramSplit`) режет длинный текст **по границам тегов**: ни одна часть не содержит оборванного тега, а разметка,
-которая пересекает границу разреза, закрывается в конце части и заново открывается в начале следующей.
+Before sending, the text goes through two processing steps assembled in `src/telegram/format.js`. First, the
+sanitizer (`telegramPostProcess`, a wrapper around the `sanitize-html` library) reduces the response to Telegram's
+allowed tag whitelist: disallowed tags are escaped and shown as plain text, dangerous link schemes are dropped, and
+bare `&`, `<`, and `>` characters in plain text are escaped for `parse_mode=HTML`. Then the splitter
+(`telegramSplit`) cuts long text **at tag boundaries**: no chunk contains a broken tag, and markup that crosses a
+split boundary is closed at the end of one chunk and reopened at the start of the next.
 
-Доставка защищена откатом. Каждый кусок отправляется методом `sendMessage` с `parse_mode=HTML`; если Telegram всё же
-отверг разметку (например, модель прислала повреждённый HTML и не прошёл разбор сущностей с ошибкой
-`can't parse entities`), как последний рубеж тот же кусок отправляется повторно без `parse_mode`. Благодаря этому ответ
-доходит до пользователя в любом случае, а причина сбоя пишется в журнал на русском языке.
+Delivery is protected by a fallback. Each chunk is sent via `sendMessage` with `parse_mode=HTML`; if Telegram still
+rejects the markup (for example, the model returned malformed HTML that fails entity parsing with
+`can't parse entities`), the same chunk is sent again as a last resort without `parse_mode`. This guarantees the
+response reaches the user regardless, and the reason for the failure is written to the log.
 
-## Распознавание входящего аудио
+## Incoming Audio Recognition
 
-Бот понимает не только текст, но и речь. Если пользователь присылает голосовое сообщение (`message.voice`),
-видео-кружок (`message.video_note`), аудиофайл (`message.audio`), видеофайл (`message.video`) или документ с
-аудио- или видео-MIME-типом (`message.document`), адаптер распознаёт речь и подаёт полученный текст в обычный
-пайплайн агента так же, как если бы пользователь написал это сообщение текстом. Вся содержательная обработка
-(классификация запроса, выборка памяти, вызов инструментов, запись фактов) при этом не меняется — меняется лишь
-источник текста на входе. Распознавание изолировано в модуле `src/voice/transcribe.js`; Telegram-адаптер
-обращается к нему через явный контракт и не содержит деталей работы с распознавателями.
+The bot understands not only text but also speech. If the user sends a voice message (`message.voice`), a video
+note (`message.video_note`), an audio file (`message.audio`), a video file (`message.video`), or a document with
+an audio or video MIME type (`message.document`), the adapter transcribes the speech and feeds the resulting text
+into the normal agent pipeline exactly as if the user had typed the message. All substantive processing —
+request classification, memory retrieval, tool calls, fact recording — remains unchanged; only the source of the
+input text is different. Transcription is isolated in the module `src/voice/transcribe.js`; the Telegram adapter
+calls it through an explicit contract and contains no details about individual transcription providers.
 
-Распознавание включается флагом `config.voiceInput.enabled`. При старте адаптер дополнительно проверяет,
-что для выбранного распознавателя задан ключ доступа: если ключа нет или распознаватель неизвестен, контур
-остаётся выключенным, а причина пишется в журнал, и входящее аудио тогда, как и при выключенном флаге,
-игнорируется. Распознаватель выбирается параметром `config.voiceInput.provider` из пяти поддерживаемых вариантов;
-значение по умолчанию — `groq-whisper-large-v3-turbo` (самый быстрый и дешёвый по итогам проверки):
+Transcription is enabled by the flag `config.voiceInput.enabled`. At startup the adapter also checks that an access
+key is configured for the selected provider; if the key is missing or the provider is unknown, the subsystem stays
+disabled, the reason is written to the log, and incoming audio is then ignored — just as when the flag is off. The
+provider is selected via `config.voiceInput.provider` from five supported options; the default is
+`groq-whisper-large-v3-turbo` (the fastest and cheapest based on testing):
 
-| Значение `config.voiceInput.provider` | Поставщик и модель                       | Путь к ключу доступа              |
-|---------------------------------------|------------------------------------------|-----------------------------------|
-| `groq-whisper-large-v3-turbo`         | Groq `whisper-large-v3-turbo`            | `config.providers.groqApiKey`     |
-| `groq-whisper-large-v3`               | Groq `whisper-large-v3`                  | `config.providers.groqApiKey`     |
+| `config.voiceInput.provider` value    | Provider and model                       | Access key path                     |
+|---------------------------------------|------------------------------------------|-------------------------------------|
+| `groq-whisper-large-v3-turbo`         | Groq `whisper-large-v3-turbo`            | `config.providers.groqApiKey`       |
+| `groq-whisper-large-v3`               | Groq `whisper-large-v3`                  | `config.providers.groqApiKey`       |
 | `assemblyai-universal-2`              | AssemblyAI `universal-2`                 | `config.providers.assemblyaiApiKey` |
-| `openai-gpt-4o-transcribe`            | прокси `openai/gpt-4o-transcribe`        | `config.llm.apiKey`               |
-| `openai-gpt-4o-mini-transcribe`       | прокси `openai/gpt-4o-mini-transcribe`   | `config.llm.apiKey`               |
+| `openai-gpt-4o-transcribe`            | proxy `openai/gpt-4o-transcribe`         | `config.llm.apiKey`                 |
+| `openai-gpt-4o-mini-transcribe`       | proxy `openai/gpt-4o-mini-transcribe`    | `config.llm.apiKey`                 |
 
-Распознавание выполняется в режиме готового файла: вложение целиком отправляется распознавателю одним запросом,
-внешняя утилита `ffmpeg` не нужна. Файл скачивается на сторону бота (методом `getFile` и затем по файловому
-адресу Telegram) и передаётся распознавателю уже потоком байтов, а не ссылкой: прямой адрес файла содержит токен
-бота, и отдавать его стороннему сервису небезопасно.
+Transcription is performed in whole-file mode: the attachment is sent to the provider in a single request; no
+external `ffmpeg` utility is needed. The file is downloaded to the bot's side (via `getFile` and then by the
+Telegram file URL) and passed to the provider as a byte stream rather than a link: the direct file URL contains
+the bot token and sharing it with a third-party service would be unsafe.
 
-Перед скачиванием адаптер проверяет лимиты. Максимальная поддерживаемая длительность — `config.voiceInput.maxSeconds`
-(по умолчанию 300 секунд, то есть пять минут); более длинные записи отклоняются с просьбой прислать короче, файл
-при этом не скачивается. Если Telegram не сообщает длительность (это характерно для документа), вместо неё
-действует лимит размера `config.voiceInput.maxBytes` (по умолчанию 25 МБ). Код языка-подсказки задаётся параметром
-`config.voiceInput.language` (по умолчанию `ru`).
+Before downloading, the adapter checks limits. The maximum supported duration is `config.voiceInput.maxSeconds`
+(default 300 seconds, i.e. five minutes); longer recordings are rejected with a prompt to send a shorter one, and
+the file is not downloaded. If Telegram does not report a duration (common for documents), the size limit
+`config.voiceInput.maxBytes` (default 25 MB) applies instead. The language hint code is set via
+`config.voiceInput.language` (default `ru`).
 
-Показ распознанного текста зависит от типа вложения. Для голосовых сообщений и видео-кружков распознанный текст
-пользователю не показывается — это живое голосовое общение, и бот сразу отвечает по сути. Для присланных
-аудиофайлов, видеофайлов и документов бот сначала отправляет распознанный текст строкой вида
-«Распознанный текст: …», а затем отвечает, чтобы пользователь видел, что именно распознано в файле. Если в записи
-не нашлось речи (тишина, только музыка, слишком тихая запись), бот вежливо сообщает об этом и не обращается к
-модели впустую. На время скачивания и распознавания, которое заметно дольше обработки текста, адаптер
-поддерживает индикатор «печатает…», периодически обновляя его. Слот семафора параллелизма захватывается на весь
-тяжёлый участок голосового сообщения — скачивание, распознавание и последующий вызов агента, — чтобы несколько
-одновременных голосовых сообщений не перегрузили внешние сервисы распознавания.
+Whether the transcribed text is shown to the user depends on the attachment type. For voice messages and video
+notes the transcribed text is not shown — this is live voice conversation, and the bot replies directly to the
+content. For sent audio files, video files, and documents the bot first sends the transcribed text as a line such
+as "Transcribed text: …" and then replies, so the user can see exactly what was recognized from the file. If no
+speech was found in the recording (silence, music only, or a recording that is too quiet), the bot politely
+reports this and does not call the model. During downloading and transcription, which takes noticeably longer than
+text processing, the adapter maintains a "typing…" indicator by refreshing it periodically. The concurrency
+semaphore slot is held for the entire heavy portion of a voice message — downloading, transcription, and the
+subsequent agent call — so that multiple simultaneous voice messages do not overload the external transcription
+services.
 
-## Потоковая доставка ответа
+## Streaming Response Delivery
 
-Адаптер показывает ответ постепенно, по мере того как его генерирует модель. Ядро ИИ-бота для этого ничего не знает о
-Telegram: оно вызывается с `stream: true` и абстрактным callback `onEvent` и испускает события хода обработки
-(`assistant.delta`, `tool.started`, `tool.completed`, `assistant.completed` и другие — их контракт описан в спецификации
-ядра, раздел [ARCH-7]). Telegram-адаптер — лишь один потребитель этих событий: он превращает их в конкретные вызовы Bot
-API. Вся эта логика собрана в фабрике `createTelegramProgress(chatId)` (модуль `src/telegram/progress.js`), которую
-можно тестировать без реального Telegram, подставив fake-функцию вызова API.
+The adapter shows the response progressively as the model generates it. The AI bot core knows nothing about
+Telegram for this purpose: it is invoked with `stream: true` and an abstract `onEvent` callback, and emits
+processing-progress events (`assistant.delta`, `tool.started`, `tool.completed`, `assistant.completed`, and
+others — their contract is described in the core spec, section [ARCH-7]). The Telegram adapter is simply one
+consumer of these events: it turns them into concrete Bot API calls. All of this logic is assembled in the factory
+`createTelegramProgress(chatId)` (module `src/telegram/progress.js`), which can be tested without a real Telegram
+connection by substituting a fake API-call function.
 
-Базовая модель отображения такая. Сразу после приёма сообщения запускается индикатор «печатает…» методом
-`sendChatAction` с действием `typing`. Этот индикатор короткоживущий: Telegram гасит его примерно через пять
-секунд и при любом сообщении от бота, поэтому он переотправляется по таймеру и служит только заполнением
-паузы до первого видимого текста, а не самим механизмом стриминга. Когда приходит первый фрагмент ответа
-(`assistant.delta`), адаптер создаёт одно черновое сообщение методом `sendMessage` с уже накопленным текстом
-и останавливает индикатор «печатает…»: видимое сообщение само показывает прогресс. Дальше адаптер редактирует
-это же сообщение методом `editMessageText` с троттлингом — не чаще одного раза в `config.telegram.streaming.editIntervalMs`
-(по умолчанию 500 мс) и не реже, чем накопится `config.telegram.streaming.minEditChars` новых символов (по умолчанию 20).
-Первый видимый черновик создаётся не раньше, чем накопится `config.telegram.streaming.minFirstDraftChars` символов
-(по умолчанию 50). На финале выполняется обязательное последнее редактирование полным текстом ответа.
+The basic display model works as follows. Immediately after a message is received, a "typing…" indicator is started
+via `sendChatAction` with action `typing`. This indicator is short-lived: Telegram extinguishes it after roughly
+five seconds and on any message from the bot, so it is re-sent on a timer and serves only to fill the gap before
+the first visible text rather than as the streaming mechanism itself. When the first response fragment arrives
+(`assistant.delta`), the adapter creates a single draft message via `sendMessage` with the accumulated text so far
+and stops the "typing…" indicator: the visible message itself shows progress. The adapter then edits that same
+message via `editMessageText` with throttling — no more than once per `config.telegram.streaming.editIntervalMs`
+(default 500 ms) and not until at least `config.telegram.streaming.minEditChars` new characters have accumulated
+(default 20). The first visible draft is not created until `config.telegram.streaming.minFirstDraftChars` characters
+have accumulated (default 50). At the end, a mandatory final edit with the full response text is performed.
 
-Редактировать сообщение на каждый токен нельзя: это быстро упирается в ограничения частоты запросов Telegram и портит
-историю чата. Поэтому поток сводится к одному редактируемому черновику. Ошибки редактирования у Telegram часто
-нормальны — например, текст не изменился или сообщение уже недоступно для правки; такие ошибки не роняют ответ, а
-финальный текст всё равно гарантированно доставляется.
+Editing a message on every token is not feasible: it quickly hits Telegram's rate limits and clutters the chat
+history. Therefore the stream is reduced to a single editable draft. Edit errors from Telegram are often normal —
+for example, the text has not changed, or the message is no longer editable; such errors do not drop the response,
+and the final text is still guaranteed to be delivered.
 
-Разметка применяется только к финалу. Промежуточный черновик редактируется сырым текстом, без `parse_mode`: незакрытый
-тег в недописанном тексте во время инкрементального редактирования ломал бы отображение. Когда ответ готов целиком,
-завершающая доставка приводит его к разметке Telegram — текст проходит санитайзер и разбивку по границам тегов из раздела
-«Разметка ответа», а финальное редактирование черновика и отправка остатка идут уже с `parse_mode=HTML` и тем же
-откатом на сырой текст при ошибке разбора разметки.
+Markup is applied only to the final version. The intermediate draft is edited as plain text, without `parse_mode`:
+an unclosed tag in incomplete text during incremental editing would break the display. Once the response is
+complete, the final delivery converts it to Telegram markup — the text goes through the sanitizer and tag-boundary
+splitter described in the "Response Markup" section, and the final draft edit and any remaining chunks are sent
+with `parse_mode=HTML` and the same fallback to plain text on a markup parsing error.
 
-Длинный ответ. Telegram ограничивает сообщение примерно 4096 символами, адаптер держит запас `TG_MAX_LEN = 4000`. В
-потоковом режиме редактируется только первый фрагмент до этого предела; когда полный ответ длиннее, остаток отправляется
-обычными `sendMessage` после завершения, а внешние идентификаторы всех отправленных сообщений сохраняются в
-`mem.message_external_refs`.
+Long responses. Telegram limits a message to roughly 4096 characters; the adapter keeps a safety margin of
+`TG_MAX_LEN = 4000`. In streaming mode only the first segment up to this limit is edited; when the full response
+is longer, the remainder is sent as ordinary `sendMessage` calls after completion, and the external `message_id`
+values of all sent messages are stored in `mem.message_external_refs`.
 
-Статусы инструментов. Когда модель вызывает инструмент, пользователь видит готовую строку из поля `toolTitle` события,
-например `Ищу в базе знаний...`. Этот текст задан разработчиком рядом с самим инструментом; аргументы, результаты,
-трассировки стека и внутренние идентификаторы в статус не попадают. Адаптер держит одно
-status-сообщение на текущую обработку: событие `tool.started` создаёт или обновляет его, а появление первого фрагмента
-ответа удаляет его методом `deleteMessage`, чтобы статус инструмента не смешивался с текстом ответа. Если за время
-обработки текстового ответа так и не появилось (например, ответ пришёл целиком после инструментов), статус убирается на
-финале. Несколько инструментов одного хода показываются последовательно, в порядке их вызова. Показ статусов выключается
-флагом `config.telegram.streaming.toolStatuses`; при этом индикатор «печатает…» сохраняется.
+Tool statuses. When the model calls a tool, the user sees a ready-made string from the `toolTitle` field of the
+event, for example `Searching the knowledge base...`. This text is defined by the developer alongside the tool
+itself; arguments, results, stack traces, and internal identifiers do not appear in the status. The adapter
+maintains one status message per current operation: a `tool.started` event creates or updates it, and the
+appearance of the first response fragment deletes it via `deleteMessage` so that the tool status does not mix with
+the response text. If no response text arrives during processing (for example, the entire response comes after all
+tool calls), the status is removed at the end. Multiple tools in a single turn are shown sequentially, in the
+order they are called. Status display is disabled by the flag `config.telegram.streaming.toolStatuses`; the
+"typing…" indicator is preserved in that case.
 
-Включение и граница с голосом. Потоковая доставка работает, когда включены и ядро (`config.streaming.enabled`), и Telegram
-(`config.telegram.streaming.enabled`). При выключенном `config.telegram.streaming.enabled` адаптер отправляет индикатор
-«печатает…» и финальный ответ одним `sendMessage`, как при разовой доставке. Реакции (`delivery.kind = 'reaction'`) идут не
-через поток: у них нет полного текста ответа, поэтому остаётся прежний путь через `deliverAgentResult`. При включённом
-голосовом ответе (`config.voiceOutput.enabled`) текст не стримится — голосовой ответ требует целого финального текста для
-синтеза, и смешивать редактируемый черновик с отправкой голоса значило бы дублировать ответ; в этом случае действует
-путь голосовой доставки, описанный ниже. Для голосового входа потоковый прогресс применим обычным образом: пока идёт
-распознавание речи, показывается индикатор «печатает…», а после входа в агентский контур начинается обычный стриминг
-текста.
+Enabling and boundary with voice. Streaming delivery works when both the core (`config.streaming.enabled`) and
+Telegram (`config.telegram.streaming.enabled`) have streaming enabled. When `config.telegram.streaming.enabled`
+is off, the adapter sends the "typing…" indicator and the final response in a single `sendMessage`, as in
+non-streaming delivery. Reactions (`delivery.kind = 'reaction'`) do not go through the stream: they have no full
+response text, so they still take the old path through `deliverAgentResult`. When voice output is enabled
+(`config.voiceOutput.enabled`), text is not streamed — voice synthesis requires the complete final text, and
+mixing an editable draft with sending a voice message would duplicate the response; in that case the voice
+delivery path described below applies. For voice input, streaming progress works normally: while speech is being
+transcribed the "typing…" indicator is shown, and once the agent pipeline begins, normal text streaming starts.
 
-## Голосовой ответ
+## Voice Response
 
-Бот умеет отвечать не только текстом, но и голосом. Форму ответа выбирает сам пользователь обычными словами:
-фраза вроде «отвечай голосом» включает голосовые ответы, а «отвечай текстом» или «хватит голоса» возвращает
-текстовые. Намерение распознаёт модель и вызывает ядровый инструмент `voice_or_text`, который сохраняет
-предпочтение пользователя; подробности хранения и постоянства настройки описаны в спецификации ИИ-бота
-(`docs/ai-bot-with-memory/06-memory.md`). Telegram-адаптер берёт готовое предпочтение из поля `replyMode`
-результата `handleMessage` и решает, как доставить ответ. Предпочтение — это пожелание, а не команда каналу:
-голосом ответ уходит только при включённом флаге `config.voiceOutput.enabled`, иначе адаптер молча отвечает текстом.
+The bot can respond not only in text but also in voice. The user chooses the response form in plain words: a phrase
+like "reply in voice" enables voice responses, while "reply in text" or "stop the voice" switches back to text.
+The intent is recognized by the model, which calls the core tool `voice_or_text` to save the user's preference;
+details of how the preference is stored and persisted are described in the AI bot spec
+(`docs/ai-bot-with-memory/06-memory.md`). The Telegram adapter reads the ready preference from the `replyMode`
+field of the `handleMessage` result and decides how to deliver the response. The preference is a wish, not a
+channel command: a response is delivered as voice only when the flag `config.voiceOutput.enabled` is on; otherwise
+the adapter silently replies in text.
 
-Тембр голосового ответа пользователь тоже выбирает обычными словами: «поставь голос onyx», «говори голосом nova»,
-«хочу женский голос», «выбери мужской голос». Модель вызывает ядровый инструмент `voice_set_preference`, и
-`handleMessage` возвращает выбранный тембр в поле `voiceOutputVoice`. Поддерживаются голоса `alloy`, `ash`, `ballad`,
-`cedar`, `coral`,
-`marin`, `nova`, `fable`, `onyx`, `sage`, `verse`; для мужского, женского и нейтрального выбора используются
-детерминированные значения по умолчанию. Если пользователь назвал неизвестный голос, настройка не записывается, а бот
-коротко перечисляет допустимые варианты. Если тембр не выбран, используется глобальный `config.voiceOutput.voice`.
+The user also chooses the voice timbre in plain words: "set the voice to onyx", "speak in nova", "I want a female
+voice", "pick a male voice". The model calls the core tool `voice_set_preference`, and `handleMessage` returns the
+chosen timbre in the field `voiceOutputVoice`. The supported voices are `alloy`, `ash`, `ballad`, `cedar`, `coral`,
+`marin`, `nova`, `fable`, `onyx`, `sage`, `verse`; for male, female, and neutral selections deterministic defaults
+are used. If the user names an unknown voice, the preference is not saved and the bot briefly lists the valid
+options. If no timbre has been selected, the global `config.voiceOutput.voice` is used.
 
-Развилка доставки сведена в единую точку `deliverAgentResult`. Сначала проверяется ветка реакции: если для
-короткой реплики слой доставки выбрал `delivery.kind = 'reaction'`, адаптер ставит реакцию как обычно, и синтез
-речи не запускается — реакции остаются допустимыми и в голосовом режиме. Содержательные ответы агента при
-выбранном голосовом режиме озвучиваются, остальные отправляются текстом.
+The delivery fork is consolidated in a single entry point `deliverAgentResult`. First the reaction branch is
+checked: if the delivery layer chose `delivery.kind = 'reaction'` for a short reply, the adapter sets the reaction
+as usual and speech synthesis is not triggered — reactions remain valid in voice mode. Substantive agent responses
+in voice mode are synthesized; all other responses are sent as text.
 
-Не всякий ответ читается вслух целиком. Короткий ответ без кода и списков озвучивается полностью. Если ответ
-длиннее жёсткого предела `config.voiceOutput.maxChars` (значение по умолчанию и максимум — 500 символов) либо
-содержит блоки кода или многострочные списки, бот строит краткое резюме вспомогательной быстрой моделью
-(`config.voiceOutput.summaryModel`) и озвучивает именно его, а полный ответ при этом дополнительно отправляет текстом,
-чтобы ничего не терялось. В синтез никогда не уходит строка длиннее предела: резюме дополнительно обрезается по
-границе предложения. Если подготовить пригодное резюме не удалось, адаптер откатывается на текстовую доставку.
+Not every response is read aloud in full. A short response without code or lists is fully synthesized. If the
+response exceeds the hard limit `config.voiceOutput.maxChars` (default and maximum: 500 characters) or contains
+code blocks or multi-line lists, the bot builds a brief summary using an auxiliary fast model
+(`config.voiceOutput.summaryModel`) and synthesizes that instead, while the full response is also sent as text so
+nothing is lost. Nothing longer than the limit is ever passed to synthesis: the summary is additionally truncated
+at a sentence boundary. If a usable summary cannot be prepared, the adapter falls back to text delivery.
 
-Перед синтезом с текста снимается разметка. Ответ в голосовом режиме приходит с той же разметкой, что и текстовый
-(теги Telegram), а зачитывать теги и знаки форматирования вслух недопустимо. Поэтому подготовка текста к озвучиванию
-(`src/voice/tts.js`) удаляет HTML-теги, возвращает экранированные сущности к обычным символам и снимает основные знаки
-Markdown, и в синтез уходит уже чистая речь. Признак кода и списков при этом проверяется по исходному размеченному
-ответу — именно наличие разметки служит сигналом построить резюме, поэтому снятие разметки идёт после этой проверки.
+Before synthesis, markup is stripped from the text. In voice mode the response arrives with the same markup as
+the text response (Telegram tags), and reading tags and formatting characters aloud is not acceptable. Therefore
+the text preparation for speech (`src/voice/tts.js`) removes HTML tags, restores escaped entities to normal
+characters, and strips common Markdown characters, so that clean speech is passed to synthesis. The check for code
+and list markers is done on the original marked-up response — the presence of markup is the signal to build a
+summary, so markup removal happens after that check.
 
-Синтез речи изолирован в модуле `src/voice/tts.js`: он принимает текст и возвращает байты голосового сообщения в
-формате OGG/OPUS, скрывая выбор поставщика и модели. Озвучивание идёт через конечную точку `audio/speech` выбранного
-OpenAI-compatible endpoint: `config.llm.baseURL`, если нужен прокси, либо прямой OpenAI API, если значение не задано
-(модель `config.voiceOutput.model`, глобальный тембр `config.voiceOutput.voice`, формат `config.voiceOutput.format`). В сам запрос
-`audio/speech` передаётся пользовательский `voiceOutputVoice`, если он выбран, иначе глобальный тембр. Отдельный ключ
-доступа не
-нужен. Некоторые прокси периодически обрывают соединение по тайм-ауту, поэтому запрос синтеза повторяется несколько
-раз. Язык речи не задаётся: он подстраивается под язык ответа автоматически, поскольку озвучивается сам текст ответа.
+Speech synthesis is isolated in the module `src/voice/tts.js`: it receives text and returns the bytes of a voice
+message in OGG/OPUS format, hiding the choice of provider and model. Synthesis is done through the `audio/speech`
+endpoint of the selected OpenAI-compatible endpoint: `config.llm.baseURL` if a proxy is needed, or the direct
+OpenAI API if no value is set (model `config.voiceOutput.model`, global timbre `config.voiceOutput.voice`,
+format `config.voiceOutput.format`). The per-user `voiceOutputVoice` is passed in the `audio/speech` request if
+selected, otherwise the global timbre is used. No separate access key is required. Some proxies periodically
+close the connection on timeout, so the synthesis request is retried several times. The speech language is not
+specified: it adapts to the language of the response automatically, because the response text itself is
+synthesized.
 
-Готовый звук отправляется методом `sendVoice`. В отличие от текстового `sendMessage` это не JSON-запрос, а
-загрузка файла (`multipart/form-data`), поэтому тело собирается через `FormData`. Формат OGG/OPUS Telegram
-показывает как привычную голосовую «каплю» с волной и регулировкой скорости, перекодировка не требуется. На время
-синтеза адаптер показывает индикатор действия `record_voice` («записывает голосовое сообщение…»), чтобы ожидание
-выглядело осмысленно. После успешной отправки внешний `message_id` голосового сообщения сохраняется в
-`mem.message_external_refs` с видом `voice`, как и для текстовых ответов. При любом сбое синтеза ответ не теряется:
-причина пишется в журнал на русском, а тот же ответ отправляется пользователю текстом.
+The finished audio is sent via `sendVoice`. Unlike the text `sendMessage`, this is a file upload
+(`multipart/form-data`) rather than a JSON request, so the body is assembled via `FormData`. The OGG/OPUS format
+is shown by Telegram as the familiar voice "blob" with a waveform and playback speed control; no re-encoding is
+needed. During synthesis the adapter shows the action indicator `record_voice` ("recording a voice message…") so
+the wait looks meaningful. After a successful send, the external `message_id` of the voice message is stored in
+`mem.message_external_refs` with kind `voice`, just as for text responses. On any synthesis failure the response
+is not lost: the reason is written to the log and the same response is sent to the user as text.
 
-## Команды бота
+## Bot Commands
 
-Имена команд Telegram допускают только строчные латинские буквы, цифры и подчёркивание, поэтому команды управления
-проактивностью названы через подчёркивание (`proactivity_on`), а не через дефис.
+Telegram command names allow only lowercase Latin letters, digits, and underscores, so proactivity-control
+commands use underscores (`proactivity_on`) rather than hyphens.
 
-| Команда | Назначение | Функция программного API ИИ-бота |
-|---------|------------|----------------------------------|
-| `/start`, `/help` | приветствие и справка; список проактивных команд показывается только при включённом `config.proactive.enabled` | — |
-| `/domain <ключ>` | сменить домен общения для чата (хранится в памяти процесса) | — |
-| `/proactivity_on` | включить проактивность у пользователя и завести выключенный набор триггеров | `setUserProactivity(externalId, true)` |
-| `/proactivity_off` | выключить проактивность у пользователя | `setUserProactivity(externalId, false)` |
-| `/proactivity` | открыть экранное подменю выбора поводов | `getProactivityState(externalId)`, `setTrigger(...)` |
+| Command | Purpose | AI bot programmatic API function |
+|---------|---------|----------------------------------|
+| `/start`, `/help` | greeting and help; the list of proactivity commands is shown only when `config.proactive.enabled` is on | — |
+| `/domain <key>` | change the conversation domain for the chat (stored in process memory) | — |
+| `/proactivity_on` | enable proactivity for the user and create a disabled set of triggers | `setUserProactivity(externalId, true)` |
+| `/proactivity_off` | disable proactivity for the user | `setUserProactivity(externalId, false)` |
+| `/proactivity` | open the on-screen trigger-selection submenu | `getProactivityState(externalId)`, `setTrigger(...)` |
 
-Команды глобальной памяти (`/fact-add`, `/fact-list`, `/fact-del`, `/kb-add`, `/kb-find`, `/kb-del`) в телеграм-адаптере
-не реализованы; они есть в эталонном интерактивном чате (`src/cli.js`).
+The global memory commands (`/fact-add`, `/fact-list`, `/fact-del`, `/kb-add`, `/kb-find`, `/kb-del`) are not
+implemented in the Telegram adapter; they are available in the reference interactive CLI (`src/cli.js`).
 
-## Управление проактивностью
+## Proactivity Management
 
-Управление повторяет двухуровневую модель из спецификации (`docs/ai-bot-with-memory/09-proactivity.md`): глобальный флаг
-`config.proactive.enabled`, мастер-признак пользователя `mem.users.proactivity_enabled` и потриггерный признак `enabled`.
+The management mirrors the two-level model from the spec (`docs/ai-bot-with-memory/09-proactivity.md`): the global
+flag `config.proactive.enabled`, the user master flag `mem.users.proactivity_enabled`, and the per-trigger flag
+`enabled`.
 
-- `/proactivity_on` вызывает `setUserProactivity(externalId, true)`. Функция включает мастер-признак и идемпотентно
-  заводит набор триггеров, все выключенными. Бот сообщает, что ни один повод пока не активирован, и предлагает открыть
-  `/proactivity`.
-- `/proactivity_off` вызывает `setUserProactivity(externalId, false)` — мастер-признак выключается, бот перестаёт писать
-  первым.
-- `/proactivity` читает состояние через `getProactivityState(externalId)`. Если проактивность у пользователя выключена,
-  бот предлагает сначала выполнить `/proactivity_on`; иначе показывает инлайн-подменю поводов.
+- `/proactivity_on` calls `setUserProactivity(externalId, true)`. The function enables the master flag and
+  idempotently creates the trigger set, all disabled. The bot reports that no triggers are active yet and
+  suggests opening `/proactivity`.
+- `/proactivity_off` calls `setUserProactivity(externalId, false)` — the master flag is disabled and the bot
+  stops messaging first.
+- `/proactivity` reads the state via `getProactivityState(externalId)`. If proactivity is disabled for the user,
+  the bot suggests running `/proactivity_on` first; otherwise it shows the inline trigger submenu.
 
-Если проактивность выключена глобально (`config.proactive.enabled` снят), команды включения отвечают, что включить нельзя.
+If proactivity is disabled globally (`config.proactive.enabled` is off), the enable commands respond that enabling
+is not possible.
 
-## Реакции на сообщения
+## Message Reactions
 
-Для коротких реплик, где естественный ответ — реакция, адаптер передаёт текст в `decideDeliveryIntent` с возможностями
-канала `supportsReactions = true` и набором ключей `like`, `okay`, `heart`, `laugh`, `fire`, `smile`, `100`, `sad`.
-Если слой выбирает `delivery.kind = 'reaction'`, адаптер сохраняет ход диалога через `recordReactionTurn` и пытается
-поставить реакцию на исходное сообщение пользователя методом `setMessageReaction`.
+For short replies where a reaction is the natural response, the adapter passes the text to `decideDeliveryIntent`
+with the channel capabilities `supportsReactions = true` and the key set `like`, `okay`, `heart`, `laugh`,
+`fire`, `smile`, `100`, `sad`. If the delivery layer chooses `delivery.kind = 'reaction'`, the adapter records
+the conversation turn via `recordReactionTurn` and attempts to set a reaction on the user's original message via
+`setMessageReaction`.
 
-Вся раскладка эмодзи Telegram собрана в одном модуле адаптера `src/telegram/reactions.js` — и прямое соответствие
-канонического ключа эмодзи для отправки, и обратное распознавание входящего эмодзи в канонический ключ. Ядро
-(`src/pipeline/reactions.js`) про эмодзи Telegram не знает. Прямая раскладка ключа в эмодзи для исходящей реакции:
+The entire Telegram emoji mapping is assembled in a single adapter module `src/telegram/reactions.js` — both the
+forward mapping from a canonical key to the emoji for sending and the reverse mapping from an incoming emoji to
+its canonical key. The core (`src/pipeline/reactions.js`) knows nothing about Telegram emojis. The forward
+mapping from key to emoji for outgoing reactions:
 
-| Ключ | Telegram emoji |
-|------|----------------|
+| Key | Telegram emoji |
+|-----|----------------|
 | `like` | `👍` |
 | `okay` | `👌` |
 | `heart` | `❤` |
@@ -258,60 +280,61 @@ OpenAI-compatible endpoint: `config.llm.baseURL`, если нужен прокс
 | `100` | `💯` |
 | `sad` | `😢` |
 
-Если Telegram возвращает ошибку на `setMessageReaction` (например, реакция недоступна в чате), адаптер отправляет
-`fallbackText` обычным сообщением и связывает отправленное сообщение с внутренней репликой ассистента через
-`mem.message_external_refs`. Если слой доставки выбирает `text_needed`, адаптер вызывает обычный `handleMessage`.
+If Telegram returns an error from `setMessageReaction` (for example, reactions are not available in the chat),
+the adapter sends the `fallbackText` as an ordinary message and links the sent message to the internal assistant
+turn via `mem.message_external_refs`. If the delivery layer chooses `text_needed`, the adapter calls the normal
+`handleMessage`.
 
-Входящие реакции пользователя приходят как обновления `message_reaction`. Адаптер нормализует первый элемент
-`new_reaction` в канонический ключ функцией `normalizeTelegramReaction` из того же модуля `src/telegram/reactions.js`,
-ищет целевое сообщение по `(channel = 'telegram', chat_id, message_id)` в
-`mem.message_external_refs` и вызывает `recordUserReaction`. В истории появляется отдельная пользовательская реплика
-вида «Пользователь отреагировал :heart: на сообщение ассистента: ...». Если реакция снята, событие также сохраняется в
-истории, но не запускает запись памяти. Если целевое сообщение ассистента найдено и смысл реакции однозначен, общий
-контур извлечения памяти может сохранить устойчивый факт.
+Incoming user reactions arrive as `message_reaction` updates. The adapter normalizes the first element of
+`new_reaction` to a canonical key using `normalizeTelegramReaction` from the same module
+`src/telegram/reactions.js`, looks up the target message by `(channel = 'telegram', chat_id, message_id)` in
+`mem.message_external_refs`, and calls `recordUserReaction`. A separate user turn of the form "User reacted
+:heart: to the assistant's message: …" appears in the history. If a reaction is removed, the event is also
+saved in history but does not trigger memory recording. If the target assistant message is found and the meaning
+of the reaction is unambiguous, the common memory-extraction pipeline may save a persistent fact.
 
-## Динамическое меню команд
+## Dynamic Command Menu
 
-Видимый в чате набор команд (кнопка «Меню» и подсказки при наборе «/») пересчитывается под состояние пользователя
-методом `setMyCommands` с областью видимости конкретного чата (`scope: { type: 'chat', chat_id }`). Логика набора:
+The set of commands visible in the chat (the "Menu" button and hints shown when typing "/") is recalculated for
+the user's current state via `setMyCommands` scoped to the specific chat
+(`scope: { type: 'chat', chat_id }`). The logic for building the set:
 
-- проактивность выключена глобально — только базовые команды (`/start`, `/help`, `/domain`);
-- глобально включена, мастер-признак пользователя выключен — базовые плюс `/proactivity_on`;
-- глобально включена, мастер-признак включён — базовые плюс `/proactivity_off` и `/proactivity`.
+- proactivity is disabled globally — only the base commands (`/start`, `/help`, `/domain`);
+- globally enabled, user master flag disabled — base commands plus `/proactivity_on`;
+- globally enabled, master flag enabled — base commands plus `/proactivity_off` and `/proactivity`.
 
-Меню пересчитывается после каждого обычного сообщения (потому что мастер-признак мог измениться) и сразу после
-переключений. При старте бот регистрирует глобальный набор команд как запасной для чатов без собственного меню: базовые
-команды плюс `/proactivity_on`, если проактивность включена глобально.
+The menu is recalculated after every ordinary message (because the master flag could have changed) and immediately
+after any toggle. At startup the bot registers a global command set as a fallback for chats without their own
+menu: the base commands plus `/proactivity_on` if proactivity is enabled globally.
 
-## Инлайн-подменю поводов
+## Inline Trigger Submenu
 
-Подменю `/proactivity` — это инлайн-клавиатура: по одной кнопке на каждый повод и отдельная кнопка выключения всей
-проактивности. У каждого повода стоит отметка состояния: `✅` для включённого и `⬜` для выключенного. Пользователю
-показываются русские подписи, а технические ключи триггеров остаются в базе и в данных нажатия:
+The `/proactivity` submenu is an inline keyboard: one button per trigger and a separate button to disable all
+proactivity. Each trigger shows a state indicator: `✅` for enabled and `⬜` for disabled. Users see descriptive
+labels while the technical trigger keys remain in the database and in the tap payload:
 
-| Ключ триггера | Подпись в подменю |
-|---------------|-------------------|
-| `inactivity` | Неактивность |
-| `daily_checkin` | Ежедневное приветствие |
-| `goal_reminder` | Напоминание о цели |
-| `welcome_back` | Возвращение |
+| Trigger key | Label in submenu |
+|-------------|-----------------|
+| `inactivity` | Inactivity |
+| `daily_checkin` | Daily check-in |
+| `goal_reminder` | Goal reminder |
+| `welcome_back` | Welcome back |
 
-Данные нажатия (`callback_data`) — короткие коды, заведомо укладывающиеся в лимит Telegram в 64 байта: `pa:t:<тип>`
-переключает один повод (например, `pa:t:inactivity`), `pa:off` выключает мастер-признак.
+The tap payload (`callback_data`) uses short codes that comfortably fit within Telegram's 64-byte limit:
+`pa:t:<type>` toggles a single trigger (for example, `pa:t:inactivity`), and `pa:off` disables the master flag.
 
-Нажатия приходят как обновления `callback_query` и обрабатываются сразу, без вызова модели. Обработчик подтверждает
-нажатие методом `answerCallbackQuery` (короткое всплывающее уведомление о результате) и перерисовывает интерфейс:
+Taps arrive as `callback_query` updates and are handled immediately, without calling the model. The handler
+confirms the tap via `answerCallbackQuery` (a brief pop-up notification with the result) and redraws the UI:
 
-- `pa:t:<тип>` читает текущее состояние через `getProactivityState`, переключает повод вызовом
-  `setTrigger(externalId, triggerType, enabled)` и обновляет клавиатуру методом `editMessageReplyMarkup` с новыми
-  отметками;
-- `pa:off` вызывает `setUserProactivity(externalId, false)`, обновляет меню чата и заменяет текст сообщения методом
-  `editMessageText` на подсказку о том, что проактивность выключена.
+- `pa:t:<type>` reads the current state via `getProactivityState`, toggles the trigger with
+  `setTrigger(externalId, triggerType, enabled)`, and updates the keyboard via `editMessageReplyMarkup` with the
+  new indicators;
+- `pa:off` calls `setUserProactivity(externalId, false)`, updates the chat menu, and replaces the message text
+  via `editMessageText` with a hint that proactivity has been disabled.
 
-## Соответствие команд и функций API
+## Command-to-API Function Mapping
 
-Адаптер не содержит собственной бизнес-логики проактивности — он лишь отображает действия пользователя в функции
-программного API ИИ-бота из `src/repo.js` (`setUserProactivity`, `getProactivityState`, `setTrigger`,
-`ensureDefaultTriggers`, `listUsersWithTriggers`). Любой другой канал (веб-интерфейс, иной мессенджер) может
-отобразить те же функции в свои команды и меню, не меняя ядро бота.
-
+The adapter contains no proactivity business logic of its own — it merely maps user actions to the AI bot's
+programmatic API functions from `src/repo.js` (`setUserProactivity`, `getProactivityState`, `setTrigger`,
+`ensureDefaultTriggers`, `listUsersWithTriggers`). Any other channel (a web interface, another messenger) can
+map the same functions to its own commands and menus without changing the bot core.

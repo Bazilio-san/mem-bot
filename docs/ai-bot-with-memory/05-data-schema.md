@@ -1,6 +1,6 @@
-# 05. Схема данных PostgreSQL
+# 05. PostgreSQL Data Schema
 
-## [DATA-1] Расширения, схема и ENUM-типы
+## [DATA-1] Extensions, Schema, and ENUM Types
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -18,30 +18,31 @@ CREATE TYPE mem.task_schedule_kind AS ENUM ('one_time','interval','cron','rrule'
 CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed','skipped');
 ```
 
-В самой миграции каждый `CREATE TYPE` обёрнут в защищённый блок ради идемпотентности.
+In the migration itself, each `CREATE TYPE` is wrapped in a guarded block for idempotency.
 
 ---
 
-## [DATA-2] Пользователи и домены
+## [DATA-2] Users and Domains
 
-`mem.users` хранит пользователей; `external_id` связывает запись с внешней системой (например, идентификатор в
-мессенджере, CRM или системе авторизации); `timezone` нужен планировщику и темпоральному контексту. Колонка `is_admin`
-даёт права на запись в глобальную память, мастер-переключатель проактивности `proactivity_enabled` управляет всем
-проактивным контуром у пользователя, `reply_mode` хранит предпочитаемую форму ответа (текст или голос), а
-`voice_output_voice` — выбранный тембр голосового ответа; это управляющие настройки пользователя, которые канал
-доставки читает на каждом ответе (см. [MEM-8]). Колонка `is_test` помечает технических пользователей, которых заводят
-автотесты: точка входа `ensureUser` выставляет её из условия `NODE_ENV === 'test'`, поэтому любой пользователь,
-созданный во время прогона тестов (в том числе неявно через `handleMessage`), помечается тестовым; на уже существующего
-пользователя флаг повторно не переустанавливается. По этому признаку тестовые данные затем выборочно вычищаются, как и
-тестовые записи журнала обращений к модели в схеме `log` (см. [DATA-12]).
-`mem.agent_domains` — тонкий справочник соответствия `domain_key` → числовой `domain_id`, на который ссылаются внешние
-ключи таблиц памяти. Содержательное описание домена живёт в реестре skills (см.
-[11-per-domain-schema.md](11-per-domain-schema.md)); строки этого справочника заводятся из skills (командой `sync`) и
-руками не редактируются. Базовый домен `general` засевается прямо в миграции, чтобы адресация памяти работала с первого
-запуска. Навык-редактор `skill-author` (домен `skill_author`) живёт в этом же справочнике как обычный домен —
-отдельных таблиц для инструментария редактирования навыков нет. Наличие строки домена само по себе не означает, что
-бот умеет выполнять действие в этой области: реальные действия выводятся из доступных инструментов активного skill и
-явно описанных функций.
+`mem.users` stores users; `external_id` links a record to an external system (for example, a messenger ID, CRM, or
+auth system); `timezone` is used by the scheduler and the temporal context. The `is_admin` column grants write access
+to global memory. The master proactivity switch `proactivity_enabled` controls the entire proactive loop for the user.
+`reply_mode` stores the preferred response format (text or voice), and `voice_output_voice` stores the chosen voice
+timbre for audio replies — these are user-level control settings that the delivery channel reads on every response
+(see [MEM-8]). The `is_test` column marks technical users created by automated tests: the `ensureUser` entry point
+sets it based on the `NODE_ENV === 'test'` condition, so any user created during a test run (including ones created
+implicitly via `handleMessage`) is marked as a test user; the flag is not re-set on an already existing user. This
+marker is later used to selectively purge test data, including test entries in the model-call log under the `log`
+schema (see [DATA-12]).
+
+`mem.agent_domains` is a thin lookup table mapping `domain_key` to a numeric `domain_id` referenced by foreign keys
+in the memory tables. The human-readable domain description lives in the skills registry (see
+[11-per-domain-schema.md](11-per-domain-schema.md)); rows in this table are created by the skills `sync` command and
+are not edited manually. The base `general` domain is seeded directly in the migration so that memory addressing
+works from the very first run. The skill-authoring editor `skill-author` (domain `skill_author`) lives in the same
+table as a regular domain — there are no separate tables for the skill-editing toolset. The presence of a domain row
+does not by itself mean the bot can perform actions in that area: actual actions are derived from the tools available
+in the active skill and from explicitly described functions.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.users (
@@ -50,14 +51,14 @@ CREATE TABLE IF NOT EXISTS mem.users (
     display_name text,
     locale       text NOT NULL DEFAULT 'ru',
     timezone     text NOT NULL DEFAULT 'Europe/Moscow',
-    is_admin     boolean NOT NULL DEFAULT false,    -- ручная пометка администратора (управление глобальной памятью)
-    proactivity_enabled boolean NOT NULL DEFAULT false, -- мастер-переключатель проактивности пользователя (см. 09)
-    reply_mode   text NOT NULL DEFAULT 'text'           -- предпочитаемая форма ответа: 'text' | 'voice' (см. [MEM-8])
+    is_admin     boolean NOT NULL DEFAULT false,    -- manual admin flag (controls global memory writes)
+    proactivity_enabled boolean NOT NULL DEFAULT false, -- master proactivity switch for the user (see 09)
+    reply_mode   text NOT NULL DEFAULT 'text'           -- preferred response format: 'text' | 'voice' (see [MEM-8])
                  CHECK (reply_mode IN ('text', 'voice')),
-    voice_output_voice text                             -- выбранный тембр голосового ответа или NULL = fallback
+    voice_output_voice text                             -- chosen voice timbre for audio replies, or NULL = fallback
                  CHECK (voice_output_voice IS NULL OR voice_output_voice IN
                    ('alloy','ash','ballad','cedar','coral','marin','nova','fable','onyx','sage','verse')),
-    is_test      boolean NOT NULL DEFAULT false,         -- технический пользователь автотестов (NODE_ENV=test)
+    is_test      boolean NOT NULL DEFAULT false,         -- technical user created by automated tests (NODE_ENV=test)
     metadata     jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
@@ -75,23 +76,23 @@ CREATE TABLE IF NOT EXISTS mem.agent_domains (
 );
 
 INSERT INTO mem.agent_domains (domain_key, title, description) VALUES
-  ('general',       'Универсальный помощник',  'Базовый домен без узкой специализации'),
-  ('joke_teller',   'Знаток анекдотов',        'Поиск свежих анекдотов в интернете и их рассказ'),
-  ('math_tutor',    'Репетитор по математике', 'Темы, ошибки, прогресс ученика')
+  ('general',       'General Assistant',    'Base domain with no narrow specialization'),
+  ('joke_teller',   'Joke Teller',          'Searching for fresh jokes online and telling them'),
+  ('math_tutor',    'Math Tutor',           'Topics, errors, and student progress')
 ON CONFLICT (domain_key) DO NOTHING;
 ```
 
-Идентификатор пользователя: внутренний ключ — `mem.users.id` (UUID), внешний — `external_id`. Мультиюзерность заложена на
-уровне данных: все таблицы памяти ссылаются на `user_id uuid`. Точка входа `handleMessage` принимает `external_id`, а
-дальше работа идёт по внутреннему UUID.
+User identifier: the internal key is `mem.users.id` (UUID) and the external key is `external_id`. Multi-user support
+is built into the data layer: all memory tables reference `user_id uuid`. The `handleMessage` entry point accepts
+`external_id`; from that point on, all operations use the internal UUID.
 
 ---
 
-## [DATA-3] Диалоги, сообщения и сводки
+## [DATA-3] Conversations, Messages, and Summaries
 
-`mem.conversations` — отдельные диалоги; `current_state` хранит оперативное состояние задачи. `mem.conversation_messages`
-— сырые сообщения; в промпт идут только последние несколько. `mem.conversation_summaries` хранит сжатую краткосрочную
-память: резюме диалога плюс структурированное состояние.
+`mem.conversations` holds individual conversations; `current_state` stores the active task state.
+`mem.conversation_messages` holds raw messages; only the most recent ones are included in the prompt.
+`mem.conversation_summaries` stores compressed short-term memory: a conversation summary plus structured state.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.conversations (
@@ -134,21 +135,22 @@ CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
 CREATE INDEX IF NOT EXISTS idx_summaries_conversation_created ON mem.conversation_summaries (conversation_id, created_at DESC);
 ```
 
-Слой поджатия истории диалога наполняет именно `conversation_summaries`. Её служебные колонки —
+The conversation history compression layer populates `conversation_summaries`. Its service columns are
 `layer` (`near` / `middle` / `far` / `full`), `covered_from_message_id`, `covered_to_message_id`, `covered_until`,
-`source_message_count`, `source_token_count`, `summary_token_count`, `memory_dedupe`, `summary_version` и `is_active`
-(в каждом диалоге активна ровно одна сводка). Полный DDL и смысл колонок — в
+`source_message_count`, `source_token_count`, `summary_token_count`, `memory_dedupe`, `summary_version`, and
+`is_active` (exactly one summary is active per conversation). The full DDL and column descriptions are in
 [13-history-compression.md](13-history-compression.md).
 
 ---
 
-## [DATA-4] Главная таблица памяти `memory_items`
+## [DATA-4] The Primary Memory Table `memory_items`
 
-Одна универсальная таблица закрывает и профильную, и предметную память. Различие задаёт поле `scope`: `profile`, `domain`,
-`dialog`, `system`. Человекочитаемый текст факта — в `memory_text` (он попадает в промпт), структурированные данные домена
-— в `data jsonb`. Столбец `search_tsv` — автоматический полнотекстовый вектор, `embedding` — вектор размерности 1536 для
-смыслового поиска. Поля `dedupe_key`, `canonical_group_id` и `dedupe_status` связывают смысловые дубли в одну
-каноническую группу: активной остаётся одна строка, а заменённые строки архивируются с аудитом в `metadata`.
+A single universal table covers both profile memory and domain memory. The difference is expressed by the `scope`
+field: `profile`, `domain`, `dialog`, `system`. The human-readable text of a fact goes in `memory_text` (it is
+included in the prompt), and structured domain data goes in `data jsonb`. The `search_tsv` column is an
+automatically generated full-text vector; `embedding` is a 1536-dimensional vector for semantic search. The fields
+`dedupe_key`, `canonical_group_id`, and `dedupe_status` link semantic duplicates into a single canonical group: one
+row stays active while replaced rows are archived with an audit trail in `metadata`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.memory_items (
@@ -199,21 +201,23 @@ CREATE INDEX IF NOT EXISTS idx_memory_canonical_group    ON mem.memory_items (us
                                                           WHERE canonical_group_id IS NOT NULL;
 ```
 
-Размерность `vector(1536)` соответствует модели `<EMBED_MODEL>`. Если векторный поиск не нужен, поле `embedding`
-и HNSW-индекс можно убрать — система корректно откатывается на полнотекстовый и структурный поиск.
+The `vector(1536)` dimensionality matches the `<EMBED_MODEL>` model. If vector search is not needed, the `embedding`
+field and the HNSW index can be removed — the system gracefully falls back to full-text and structural search.
 
-`dedupe_key` строится из устойчивой смысловой идентичности факта, а не из произвольного текста. Примеры:
-`profile:communication_style:short_direct_answers`, `feature_request:global_memory` и
-`flight_search:trip:sgn_mow_2026_06_16_2_adults_baggage`. `canonical_group_id` объединяет строки одной группы,
-`dedupe_status` показывает роль строки внутри группы (`canonical`, `duplicate`, `superseded`, `candidate`).
+`dedupe_key` is built from the stable semantic identity of the fact, not from arbitrary text. Examples:
+`profile:communication_style:short_direct_answers`, `feature_request:global_memory`, and
+`flight_search:trip:sgn_mow_2026_06_16_2_adults_baggage`. `canonical_group_id` groups rows that belong to the same
+cluster; `dedupe_status` shows the role of a row within the group (`canonical`, `duplicate`, `superseded`,
+`candidate`).
 
 ---
 
-## [DATA-5] Защищённая память
+## [DATA-5] Secure Memory
 
-Секретные данные хранятся в `mem.secure_records` в зашифрованном виде (`encrypted_payload bytea`), а в обычную память и
-в промпт идёт только безопасное описание `redacted_summary`. Таблица `memory_secure_links` связывает безопасный факт с
-секретной записью. Подробности работы — в [07-secure-privacy.md](07-secure-privacy.md).
+Secret data is stored in `mem.secure_records` in encrypted form (`encrypted_payload bytea`), while only the safe
+description `redacted_summary` is written to regular memory and included in the prompt. The
+`memory_secure_links` table links a regular memory fact to a secure record. For details on how this works, see
+[07-secure-privacy.md](07-secure-privacy.md).
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.secure_records (
@@ -250,12 +254,12 @@ CREATE TABLE IF NOT EXISTS mem.memory_secure_links (
 
 ---
 
-## [DATA-6] Планировщик: задачи, запуски, исходящие уведомления
+## [DATA-6] Scheduler: Tasks, Runs, and Outbound Notifications
 
-`scheduled_tasks` хранит напоминания и фоновые проверки; главное поле — `next_run_at`. Поля `locked_by` и `locked_until`
-обеспечивают безопасный захват задачи одним воркером. `scheduled_task_runs` хранит историю запусков,
-`notification_outbox` — очередь сообщений пользователю (её же использует проактивный контур). Работа планировщика — в
-[10-operations.md](10-operations.md).
+`scheduled_tasks` stores reminders and background checks; the key field is `next_run_at`. The `locked_by` and
+`locked_until` fields provide safe exclusive acquisition of a task by a single worker. `scheduled_task_runs` stores
+the run history, and `notification_outbox` holds the message queue for the user (the proactive loop also uses it).
+The scheduler's behavior is described in [10-operations.md](10-operations.md).
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.scheduled_tasks (
@@ -323,11 +327,12 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_a
 
 ---
 
-## [DATA-7] Журнал инструментов и очередь записи памяти
+## [DATA-7] Tool Call Log and Memory Write Queue
 
-`tool_calls` — журнал всех вызовов инструментов (вход, выход, статус, задержка, ошибка) для отладки, аудита и
-безопасности. Таблица `memory_jobs` обслуживает очередь асинхронной записи памяти отдельным воркером; в
-базовом контуре запись запускается после ответа неблокирующим промисом внутри процесса ответа.
+`tool_calls` is a log of all tool invocations (input, output, status, latency, error) for debugging, auditing, and
+security purposes. The `memory_jobs` table serves the asynchronous memory write queue, processed by a separate
+worker; in the basic flow, writing is triggered after the response as a non-blocking promise inside the response
+process.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.tool_calls (
@@ -364,19 +369,19 @@ CREATE TABLE IF NOT EXISTS mem.memory_jobs (
 CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_at) WHERE status = 'pending';
 ```
 
-Итого базовая схема — тринадцать таблиц: `users`, `agent_domains`, `conversations`, `conversation_messages`,
+The base schema totals thirteen tables: `users`, `agent_domains`, `conversations`, `conversation_messages`,
 `conversation_summaries`, `memory_items`, `secure_records`, `memory_secure_links`, `scheduled_tasks`,
 `scheduled_task_runs`, `notification_outbox`, `tool_calls`, `memory_jobs`.
 
 ---
 
-## [DATA-8] Таблицы проактивности
+## [DATA-8] Proactivity Tables
 
-Схема инициализации определяет таблицы проактивности. Назначение и поведение — в
+The initialization schema defines the proactivity tables. Their purpose and behavior are described in
 [09-proactivity.md](09-proactivity.md).
 
 ```sql
--- Тематический трекинг (критерий 13): одна строка на пару «пользователь + домен + тема».
+-- Topic tracking (criterion 13): one row per user + domain + topic combination.
 CREATE TABLE IF NOT EXISTS mem.topic_mentions (
     id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id               uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
@@ -393,7 +398,7 @@ CREATE TABLE IF NOT EXISTS mem.topic_mentions (
 CREATE INDEX IF NOT EXISTS idx_topic_mentions_user_last       ON mem.topic_mentions (user_id, last_mentioned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_topic_mentions_user_engagement ON mem.topic_mentions (user_id, user_engagement_score DESC);
 
--- Триггеры проактивности (критерии 15 и 16): набор триггеров на пользователя.
+-- Proactive triggers (criteria 15 and 16): a set of triggers per user.
 CREATE TABLE IF NOT EXISTS mem.proactive_triggers (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
@@ -408,7 +413,7 @@ CREATE TABLE IF NOT EXISTS mem.proactive_triggers (
 );
 CREATE INDEX IF NOT EXISTS idx_proactive_triggers_enabled ON mem.proactive_triggers (enabled) WHERE enabled = true;
 
--- Состояние контакта: общий анти-спам и реакция на молчание пользователя.
+-- Contact state: global anti-spam and reaction to user silence.
 CREATE TABLE IF NOT EXISTS mem.proactive_contact_state (
     user_id                           uuid PRIMARY KEY REFERENCES mem.users(id) ON DELETE CASCADE,
     mode                              text NOT NULL DEFAULT 'active'
@@ -431,7 +436,7 @@ CREATE TABLE IF NOT EXISTS mem.proactive_contact_state (
 CREATE INDEX IF NOT EXISTS idx_proactive_contact_state_mode
     ON mem.proactive_contact_state (mode, quiet_until);
 
--- Журнал доставленных внешних событий (критерий 17): защита от повторной доставки.
+-- Log of delivered external events (criterion 17): protection against duplicate delivery.
 CREATE TABLE IF NOT EXISTS mem.event_deliveries (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
@@ -445,29 +450,28 @@ CREATE TABLE IF NOT EXISTS mem.event_deliveries (
 CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (user_id, delivered_at DESC);
 ```
 
-Признак `enabled` отдельного триггера выбирает активные поводы, а мастер-переключатель `mem.users.proactivity_enabled`
-стоит над ним и управляет всем контуром у пользователя. Набор триггеров заводится
-выключенным, когда пользователь включает проактивность. Таблица `proactive_contact_state` хранит общий режим контакта,
+The `enabled` flag on an individual trigger selects active reasons for outreach, while the master switch
+`mem.users.proactivity_enabled` sits above it and controls the entire proactive loop for the user. The set of
+triggers is created in a disabled state when the user enables proactivity. The `proactive_contact_state` table stores
+the overall contact mode; see [09-proactivity.md](09-proactivity.md).
 
-[09-proactivity.md](09-proactivity.md).
-
-Итого с проактивностью — семнадцать таблиц.
+With proactivity, the total is seventeen tables.
 
 ---
 
-## [DATA-9] Две таблицы глобальной памяти
+## [DATA-9] Two Global Memory Tables
 
-Схема инициализации заводит колонку `is_admin` в `mem.users`, определяет две таблицы глобальной памяти, общей для всех
-пользователей, и засевает базовый набор глобальных фактов. Назначение и поведение — в
+The initialization schema adds the `is_admin` column to `mem.users`, defines two global memory tables shared by all
+users, and seeds a base set of global facts. Purpose and behavior are described in
 [14-global-memory.md](14-global-memory.md).
 
 ```sql
--- Глобальные факты (критерий 19): always-on записи, видимые всем и подмешиваемые в каждый запрос.
+-- Global facts (criterion 19): always-on records visible to all users, injected into every request.
 CREATE TABLE IF NOT EXISTS mem.global_facts (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = факт действует во всех доменах
+    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = fact applies across all domains
     fact_text   text NOT NULL,
-    priority    integer NOT NULL DEFAULT 100,             -- меньше число — выше при отборе под лимит
+    priority    integer NOT NULL DEFAULT 100,             -- lower number = higher priority when trimming to limit
     enabled     boolean NOT NULL DEFAULT true,
     created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
     metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -476,10 +480,10 @@ CREATE TABLE IF NOT EXISTS mem.global_facts (
 );
 CREATE INDEX IF NOT EXISTS idx_global_facts_enabled ON mem.global_facts (enabled, priority) WHERE enabled = true;
 
--- Общая база знаний (критерий 20): корпус текстов, видимый всем, поиск по релевантности (вектор + полнотекст).
+-- Shared knowledge base (criterion 20): a corpus of texts visible to all users, searched by relevance (vector + full-text).
 CREATE TABLE IF NOT EXISTS mem.global_knowledge (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = знание общее для всех доменов
+    domain_id   uuid REFERENCES mem.agent_domains(id),    -- NULL = knowledge applies across all domains
     title       text,
     content     text NOT NULL,
     tags        text[] NOT NULL DEFAULT '{}',
@@ -502,24 +506,25 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
                                                               WHERE embedding IS NOT NULL;
 ```
 
-Глобальные таблицы не содержат `user_id`: записи общие для всех. Запись закрыта правами администратора (пометка
-`is_admin`), а секреты пользователей в глобальную память не попадают — они остаются в личной защищённой памяти.
+The global tables contain no `user_id`: records are shared across all users. Writes are restricted to users with the
+`is_admin` flag, and user secrets never enter global memory — they remain in the user's personal secure memory.
 
 ---
 
-## [DATA-10] Схема `data` под домен
+## [DATA-10] Domain `data` Schema
 
-Закрытая схема полей `data` и правила канонизации `entity_key` по доменам хранятся не в базе, а в файле рядом со skill
-(`skills/<name>/domain-schema.json`) и загружаются реестром skills в память при старте. База лишь применяет результат:
-проверенный `data` и канонизированный `entity_key` записываются в `mem.memory_items`, а маркер источника схемы и
-замечания канонизации — в его `metadata`. Подробно слой описан в [11-per-domain-schema.md](11-per-domain-schema.md).
+The closed schema for `data` fields and the `entity_key` canonicalization rules per domain are not stored in the
+database — they live in a file alongside the skill (`skills/<name>/domain-schema.json`) and are loaded into memory
+by the skills registry at startup. The database only applies the result: the validated `data` and the canonicalized
+`entity_key` are written to `mem.memory_items`, while the schema source marker and canonicalization notes go into
+its `metadata`. The layer is described in detail in [11-per-domain-schema.md](11-per-domain-schema.md).
 
-## [DATA-11] Внешние ссылки сообщений
+## [DATA-11] Message External References
 
-Таблица `mem.message_external_refs` связывает внутреннюю строку истории с сообщением во внешнем канале доставки. Она
-нужна для событий, которые ссылаются на уже доставленное сообщение: реакции, прочтения, клики или другие канальные
-события. Таблица остаётся канально-нейтральной: конкретный адаптер сам выбирает значение `channel` и формат внешних
-идентификаторов.
+The `mem.message_external_refs` table links an internal history row to a message in an external delivery channel.
+It is needed for events that reference an already-delivered message: reactions, read receipts, clicks, or other
+channel events. The table remains channel-neutral: each concrete adapter chooses its own `channel` value and the
+format of external identifiers.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.message_external_refs (
@@ -537,55 +542,55 @@ CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
 ON mem.message_external_refs (conversation_message_id);
 ```
 
-Итого с глобальной памятью и внешними ссылками сообщений — девятнадцать таблиц схемы `mem`.
+With global memory and message external references, the total is nineteen tables in the `mem` schema.
 
 ---
 
-## [DATA-12] Журнал обращений к языковой модели (схема `log`)
+## [DATA-12] LLM Call Log (the `log` schema)
 
-Каждое обращение к языковой модели (LLM — large language model) и к смежным сервисам (получение эмбеддингов,
-распознавание речи STT и синтез речи TTS) записывается в отдельную схему `log`. Журнал состоит из двух таблиц: полной
-`log.llm_request` и узкой `log.llm_usage`. Полная таблица хранит весь контекст обращения — тип запроса `request_kind`,
-конечную точку, провайдера и модель, текстовый `payload` запроса и ответа (для бинарных данных вроде аудио — только
-метаданные файла в `binary_meta`, без содержимого), число входящих и исходящих токенов, рассчитанную стоимость в
-долларах США, длительность и идентификаторы корреляции. Узкая таблица содержит только то, что нужно для быстрого
-подсчёта затрат, и заполняется автоматически триггером `log.llm_request_to_usage` после каждой вставки в полную
-таблицу — но лишь когда есть что считать (известны токены или рассчитана цена), чтобы неудавшиеся обращения не засоряли
-агрегаты. Поведение журнала, пакетную выгрузку и расчёт стоимости см. в [10-operations.md](10-operations.md), раздел
-[OPS-5].
+Every call to a language model (LLM — large language model) and to related services (embedding generation,
+speech-to-text transcription, and text-to-speech synthesis) is recorded in a dedicated `log` schema. The log
+consists of two tables: the full `log.llm_request` and the narrow `log.llm_usage`. The full table stores the entire
+context of a call — the request type `request_kind`, the endpoint, provider and model, the text `payload` of the
+request and response (for binary data such as audio — only file metadata in `binary_meta`, without the content),
+the number of input and output tokens, the calculated cost in US dollars, duration, and correlation identifiers.
+The narrow table contains only what is needed for fast cost aggregation, and it is populated automatically by the
+`log.llm_request_to_usage` trigger after each insert into the full table — but only when there is something to
+count (tokens or price are known), so that failed calls do not pollute the aggregates. For log behavior, batch
+export, and cost calculation, see [10-operations.md](10-operations.md), section [OPS-5].
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS log;
 
--- Полный журнал: одна строка на каждое обращение к модели или смежному сервису.
+-- Full log: one row per call to a model or related service.
 CREATE TABLE IF NOT EXISTS log.llm_request (
   llm_request_id    bigserial PRIMARY KEY,
   created_at        timestamptz NOT NULL DEFAULT now(),
-  request_id        text,                              -- идентификатор корреляции одного хода диалога
-  request_kind      text,                              -- назначение обращения (см. ниже)
+  request_id        text,                              -- correlation identifier for a single conversation turn
+  request_kind      text,                              -- purpose of the call (see below)
   endpoint          text,                              -- chat.completions, embeddings, audio.transcriptions, audio.speech
   provider          text,
-  model             text,                              -- имя модели, как его прислал вызов
-  model_priced      text,                              -- имя модели, по которому взята цена из прайс-листа
+  model             text,                              -- model name as returned by the call
+  model_priced      text,                              -- model name used to look up the price in the rate card
   user_id           text,
   conversation_id   text,
   domain_key        text,
   channel           text,
-  is_binary         boolean NOT NULL DEFAULT false,    -- обращение с бинарным телом (аудио)
-  payload           jsonb,                             -- запрос и ответ; усекается до config.llmLog.maxPayloadChars
-  binary_meta       jsonb,                             -- для аудио — только метаданные файла, без содержимого
-  payload_truncated boolean NOT NULL DEFAULT false,    -- payload был усечён по лимиту длины
+  is_binary         boolean NOT NULL DEFAULT false,    -- call with a binary body (audio)
+  payload           jsonb,                             -- request and response; truncated to config.llmLog.maxPayloadChars
+  binary_meta       jsonb,                             -- for audio: file metadata only, no content
+  payload_truncated boolean NOT NULL DEFAULT false,    -- payload was truncated at the length limit
   prompt_tokens     integer,
   completion_tokens integer,
   total_tokens      integer,
-  price_usd         numeric(12,6),                     -- стоимость обращения; NULL, если модели нет в прайс-листе
+  price_usd         numeric(12,6),                     -- call cost; NULL if the model is not in the rate card
   duration_ms       integer,
   status            text NOT NULL DEFAULT 'ok',
   error             text,
-  is_test           boolean NOT NULL DEFAULT false     -- запись тестового прогона (NODE_ENV=test)
+  is_test           boolean NOT NULL DEFAULT false     -- record from a test run (NODE_ENV=test)
 );
 
--- Узкий журнал: только токены и стоимость для быстрых агрегатов по затратам.
+-- Narrow log: only tokens and cost for fast cost aggregates.
 CREATE TABLE IF NOT EXISTS log.llm_usage (
   llm_usage_id      bigserial PRIMARY KEY,
   created_at        timestamptz NOT NULL DEFAULT now(),
@@ -601,7 +606,7 @@ CREATE TABLE IF NOT EXISTS log.llm_usage (
   is_test           boolean NOT NULL DEFAULT false
 );
 
--- Триггер зеркалит биллинговую часть в узкий журнал, но только если есть что считать.
+-- Trigger mirrors the billing portion into the narrow log, but only when there is something to count.
 CREATE OR REPLACE FUNCTION log.llm_request_to_usage() RETURNS trigger AS $$
 BEGIN
   IF NEW.total_tokens IS NOT NULL OR NEW.price_usd IS NOT NULL THEN
@@ -618,16 +623,15 @@ CREATE TRIGGER llm_request_to_usage_trg AFTER INSERT ON log.llm_request
   FOR EACH ROW EXECUTE FUNCTION log.llm_request_to_usage();
 ```
 
-Поле `request_kind` различает назначения обращений: `main_agent_answer` (главный ответ агента), `delivery_intent`
-(выбор формы доставки — текст или реакция), `intent_classify`, `fact_extract`, `topic_extract`, `event_relevance`,
-`proactive_message`, `history_compress`, `skill_authoring`, `voice_summary`, `embedding`, `stt`, `tts`. Для конечных
-точек со строго одним назначением (эмбеддинги, распознавание и синтез речи) тип выводится по самой конечной точке. У
-конечной точки `chat.completions` назначений много, поэтому тип обязан передавать вызывающий код явно; пропуск
-помечается отдельным типом `untyped` и служит сигналом об ошибке вызова.
+The `request_kind` field distinguishes the purposes of calls: `main_agent_answer` (the agent's main response),
+`delivery_intent` (choosing the delivery format — text or reaction), `intent_classify`, `fact_extract`,
+`topic_extract`, `event_relevance`, `proactive_message`, `history_compress`, `skill_authoring`, `voice_summary`,
+`embedding`, `stt`, `tts`. For endpoints with a strictly single purpose (embeddings, speech recognition, and
+synthesis), the kind is derived from the endpoint itself. The `chat.completions` endpoint has many purposes, so the
+calling code must pass the kind explicitly; an omission is marked with the special kind `untyped` and serves as a
+signal of a call-site error.
 
-В отличие от схемы `mem`, таблицы журнала не удаляются и не пересоздаются при повторной инициализации (`CREATE TABLE IF
-NOT EXISTS`), иначе журнал стирался бы при каждом запуске.
+Unlike the `mem` schema, the log tables are not dropped and recreated on re-initialization (`CREATE TABLE IF NOT
+EXISTS`); otherwise the log would be wiped on every startup.
 
 ---
-
-

@@ -1,58 +1,58 @@
-# Разработка
+# Development
 
-Команды тестирования и служебные скрипты проекта. В главном `README.md` показаны лишь основные команды — здесь
-собран полный перечень проверок по подсистемам и вспомогательных скриптов.
+Testing commands and utility scripts for the project. The main `README.md` covers only the essential commands —
+this document provides the full list of subsystem checks and helper scripts.
 
-## Тестирование
+## Testing
 
-Проект использует встроенный тест-раннер Node.js — внешних фреймворков нет. Тесты работают с реальной базой данных и
-реальными моделями через выбранную конечную точку (адрес API), поэтому перед запуском должна быть заполнена
-конфигурация (`config/local.yaml` или переменные окружения) и применены миграции.
+The project uses Node.js's built-in test runner — no external frameworks are required. Tests run against a real
+database and real models through the configured endpoint (API address), so the configuration must be populated
+(`config/local.yaml` or environment variables) and migrations applied before running them.
 
 ```bash
-npm test                 # многослойный набор проверок ядра (структура БД, память, приватность, диалог)
-npm run check:llm        # проверка доступности и скорости выбранной модели
+npm test                 # multi-layer core check suite (DB schema, memory, privacy, dialogue)
+npm run check:llm        # verify availability and response speed of the selected model
 ```
 
-## Тесты по подсистемам
+## Subsystem Tests
 
-Каждую проверку можно запустить отдельным npm-скриптом.
+Each check can be run individually via its own npm script.
 
-| Скрипт | Что проверяет |
-|--------|---------------|
-| `npm run test:schema` | Структуру схемы базы данных. |
-| `npm run test:streaming` | Потоковый вывод ответа. |
-| `npm run test:progress` | Отображение прогресса вызова инструментов. |
-| `npm run test:reactions` | Реакции бота. |
-| `npm run test:voice` | Распознавание голосового ввода. |
-| `npm run test:voice-output` | Синтез голосового ответа. |
-| `npm run test:voice-selector` | Выбор голоса. |
-| `npm run test:channels` | Каналы доставки сообщений. |
-| `npm run test:telegram-format` | Форматирование сообщений Telegram. |
-| `npm run test:progress-format` | Форматирование статуса инструментов. |
-| `npm run test:tts-strip` | Очистку текста перед озвучиванием. |
-| `npm run test:skills` | Загрузку и валидацию навыков. |
-| `npm run test:skill-authoring` | Инструментарий редактирования навыков. |
+| Script | What it checks |
+|--------|----------------|
+| `npm run test:schema` | Database schema structure. |
+| `npm run test:streaming` | Streaming response output. |
+| `npm run test:progress` | Tool-call progress display. |
+| `npm run test:reactions` | Bot reactions. |
+| `npm run test:voice` | Voice input transcription. |
+| `npm run test:voice-output` | Voice response synthesis. |
+| `npm run test:voice-selector` | Voice selection logic. |
+| `npm run test:channels` | Message delivery channels. |
+| `npm run test:telegram-format` | Telegram message formatting. |
+| `npm run test:progress-format` | Tool status formatting. |
+| `npm run test:tts-strip` | Text sanitization before text-to-speech. |
+| `npm run test:skills` | Skill loading and validation. |
+| `npm run test:skill-authoring` | Skill authoring tooling. |
 
-## Служебные скрипты
+## Utility Scripts
 
-| Скрипт | Назначение |
-|--------|------------|
-| `npm run memory:dedupe` | Дедупликация памяти. |
-| `npm run delete:user` | Удаление пользователя со всеми его данными. |
-| `npm run seed:sandbox` | Наполнение песочницы тестовыми данными. |
-| `npm run sandbox` | Запуск веб-песочницы на порту `3002`. |
-| `npm run skills:list` | Список загруженных навыков. |
-| `npm run skills:validate` | Валидация навыков и их схем. |
-| `npm run skills:sync` | Синхронизация навыков. |
+| Script | Purpose |
+|--------|---------|
+| `npm run memory:dedupe` | Deduplicate memory entries. |
+| `npm run delete:user` | Delete a user and all their associated data. |
+| `npm run seed:sandbox` | Seed the sandbox with test data. |
+| `npm run sandbox` | Start the web sandbox on port `3002`. |
+| `npm run skills:list` | List all loaded skills. |
+| `npm run skills:validate` | Validate skills and their schemas. |
+| `npm run skills:sync` | Synchronize skills. |
 
-## Раскладка исходного кода
+## Source Code Layout
 
-- `src/agent.js` — главный пайплайн ответа;
-- `src/pipeline/` — этапы обработки (классификация, выборка, извлечение, слияние, защищённая память, планировщик,
-  проактивность);
-- `src/telegram/` — канал Telegram;
-- `src/voice/` — голос (распознавание `transcribe.js`, синтез `tts.js`, перечень голосов `voices.js`);
-- `src/mcp/` — клиент Model Context Protocol;
-- `src/schema/` — предметные схемы;
-- `migrations/` — миграции базы данных.
+- `src/agent.js` — main response pipeline;
+- `src/pipeline/` — processing stages (classification, retrieval, extraction, merging, protected memory,
+  scheduler, proactivity);
+- `src/telegram/` — Telegram channel;
+- `src/voice/` — voice support (transcription `transcribe.js`, synthesis `tts.js`, voice list `voices.js`);
+- `src/mcp/` — Model Context Protocol client;
+- `src/schema/` — domain schemas;
+- `migrations/` — database migrations.

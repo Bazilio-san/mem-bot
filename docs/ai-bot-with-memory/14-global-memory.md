@@ -1,37 +1,38 @@
-# 14. Слой глобальной памяти: глобальные факты и общая база знаний
+# 14. Global Memory Layer: Global Facts and Shared Knowledge Base
 
-## [GLOB-1] Граница со всегда-включённым блоком даты и времени
+## [GLOB-1] Boundary with the Always-On Date/Time Block
 
-В контуре ответа уже есть отдельный всегда-включённый справочный блок `CURRENT_DATETIME` — текущая дата, время, день
-недели и часовой пояс (см. [04-architecture.md](04-architecture.md) и [09-proactivity.md](09-proactivity.md), критерий
-14). Он тоже присутствует в каждом запросе, но **в этот слой не входит и остаётся на своём месте**. Причина в
-кэшировании: содержимое `CURRENT_DATETIME` меняется каждую минуту, поэтому блок намеренно стоит в динамической зоне
-промпта, последним system-сообщением перед диалогом, чтобы не ломать кэш стабильного префикса. Глобальные факты, наоборот,
-меняются редко и одинаковы для всех пользователей, поэтому их выгодно держать ближе к стабильному началу промпта (см.
-раздел `GLOB-6`). Таким образом, оба блока всегда-включённые, но живут в разных зонах промпта по разным причинам, и
-смешивать их не следует.
+The response pipeline already contains a dedicated always-on reference block, `CURRENT_DATETIME`, which holds the
+current date, time, day of the week, and timezone (see [04-architecture.md](04-architecture.md) and
+[09-proactivity.md](09-proactivity.md), criterion 14). It is also present in every request, but **it is not part of
+this layer and stays in its own place**. The reason is caching: the content of `CURRENT_DATETIME` changes every
+minute, so the block is intentionally placed in the dynamic zone of the prompt — as the last system message before
+the dialogue — to avoid breaking the stable prefix cache. Global facts, by contrast, change infrequently and are
+identical for all users, so it is more efficient to keep them closer to the stable beginning of the prompt (see
+section `GLOB-6`). Both blocks are always-on, but they live in different prompt zones for different reasons, and
+the two should not be mixed.
 
 ---
 
-## [GLOB-3] Две таблицы и пометка администратора
+## [GLOB-3] Two Tables and the Admin Flag
 
-Слой держит две таблицы в схеме `mem` и одну колонку в таблице пользователей; всё это определяется единой инициализацией
-`001_init.sql` теми же идемпотентными приёмами, что и остальная схема: `CREATE TABLE IF NOT EXISTS`,
-`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`. Тип статуса
-переиспользуется существующий — `mem.memory_status`. Размерность вектора `vector(1536)` совпадает с личной памятью,
-поэтому векторный слой опционален точно так же: при недоступности эмбеддингов поиск по базе знаний откатывается на
-полнотекстовый.
+The layer maintains two tables in the `mem` schema and one column in the users table. Everything is defined by the
+single initialisation script `001_init.sql` using the same idempotent patterns as the rest of the schema:
+`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`. The existing type
+`mem.memory_status` is reused for status values. The vector dimension `vector(1536)` matches personal memory, so
+the vector layer is equally optional: when embeddings are unavailable, knowledge-base search falls back to
+full-text search.
 
 ```sql
--- Ручная пометка администратора. Только администратор может наполнять и чистить глобальную память.
+-- Manual admin flag. Only an admin can populate and clean global memory.
 ALTER TABLE mem.users ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;
 
--- Глобальные факты (always-on): короткие записи, которые подмешиваются в каждый запрос.
+-- Global facts (always-on): short entries mixed into every request.
 CREATE TABLE IF NOT EXISTS mem.global_facts (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_id   uuid REFERENCES mem.agent_domains(id),   -- NULL = факт действует во всех доменах
+    domain_id   uuid REFERENCES mem.agent_domains(id),   -- NULL = fact applies to all domains
     fact_text   text NOT NULL,
-    priority    integer NOT NULL DEFAULT 100,            -- меньше число — выше в списке при отборе под лимит
+    priority    integer NOT NULL DEFAULT 100,            -- lower number = higher in the list when trimming to limit
     enabled     boolean NOT NULL DEFAULT true,
     created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
     metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -40,16 +41,16 @@ CREATE TABLE IF NOT EXISTS mem.global_facts (
 );
 CREATE INDEX IF NOT EXISTS idx_global_facts_enabled ON mem.global_facts (enabled, priority) WHERE enabled = true;
 
--- Общая база знаний (RAG): тексты, видимые всем, подмешиваются по релевантности к запросу.
+-- Shared knowledge base (RAG): texts visible to all, mixed in by relevance to the request.
 CREATE TABLE IF NOT EXISTS mem.global_knowledge (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_id   uuid REFERENCES mem.agent_domains(id),   -- NULL = знание общее для всех доменов
+    domain_id   uuid REFERENCES mem.agent_domains(id),   -- NULL = knowledge shared across all domains
     title       text,
     content     text NOT NULL,
     tags        text[] NOT NULL DEFAULT '{}',
     importance  numeric(3,2) NOT NULL DEFAULT 0.50 CHECK (importance >= 0 AND importance <= 1),
     status      mem.memory_status NOT NULL DEFAULT 'active',
-    source      text,                                     -- откуда взят текст (документ, ссылка, автор)
+    source      text,                                     -- where the text came from (document, URL, author)
     created_by  uuid REFERENCES mem.users(id) ON DELETE SET NULL,
     embedding   vector(1536),
     search_tsv  tsvector GENERATED ALWAYS AS (
@@ -66,144 +67,146 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
                                                               WHERE embedding IS NOT NULL;
 ```
 
-С этими двумя таблицами общее число таблиц схемы — девятнадцать (вместе со справочником доменов
-`mem.agent_domains` и внешними ссылками сообщений `mem.message_external_refs`, см.
-[05-data-schema.md](05-data-schema.md)). Колонка `is_admin` намеренно живёт в таблице `mem.users`, а не в отдельной
-таблице ролей: требование
-ставит ровно одну ручную пометку «администратор», и заводить полноценную систему ролей под одну булеву характеристику —
-это нарушение принципа «строй только то, что просили». Назначение администратора выполняется вручную в базе одним
-запросом, например `UPDATE mem.users SET is_admin = true WHERE external_id = '<id>';`.
+With these two tables the total number of tables in the schema is nineteen (including the domain directory
+`mem.agent_domains` and the message external references table `mem.message_external_refs`, see
+[05-data-schema.md](05-data-schema.md)). The `is_admin` column intentionally lives in `mem.users` rather than in a
+separate roles table: the requirement calls for exactly one manual "admin" flag, and building a full role system for
+a single boolean attribute would violate the "build only what was asked for" principle. Assigning an admin is done
+manually in the database with a single query, for example
+`UPDATE mem.users SET is_admin = true WHERE external_id = '<id>';`.
 
-Та же миграция засевает набор базовых глобальных фактов о самом боте и общих утверждений, заданных создателем. Засев
-идемпотентен: каждый факт вставляется только при отсутствии записи с тем же текстом (`INSERT ... SELECT ... WHERE NOT
-EXISTS`), поэтому повторный прогон миграции дублей не создаёт. Конкретный набор засеваемых фактов — часть реализации
-проекта, а не обязательная часть спецификации: переносимая система должна лишь предусматривать механизм засева, а его
-содержимое каждый проект задаёт под себя.
+The same migration seeds a set of baseline global facts about the bot itself and general statements defined by the
+creator. The seed is idempotent: each fact is inserted only when no record with the same text already exists
+(`INSERT ... SELECT ... WHERE NOT EXISTS`), so running the migration again does not create duplicates. The specific
+set of seeded facts is part of the project implementation, not a mandatory part of the specification: a portable
+system only needs to provide a seeding mechanism; the content is defined per project.
 
 ---
 
-## [GLOB-4] Модуль `src/pipeline/global-memory.js`
+## [GLOB-4] The `src/pipeline/global-memory.js` Module
 
-Весь доступ к глобальной памяти собран в одном модуле, по аналогии с `src/pipeline/admin.js` для личной памяти
-(см. [06-memory.md](06-memory.md), раздел `MEM-7`). Модуль даёт функции чтения (выборку активных фактов и поиск по базе
-знаний) и функции изменения (добавление, удаление, включение/выключение). Функции изменения сами по себе прав не
-проверяют — проверку прав делает вызывающий слой (инструменты агента и интерактивные команды), чтобы держать проверку
-доступа в одном месте.
+All access to global memory is concentrated in a single module, analogous to `src/pipeline/admin.js` for personal
+memory (see [06-memory.md](06-memory.md), section `MEM-7`). The module exposes read functions (fetching active
+facts and searching the knowledge base) and write functions (adding, deleting, enabling/disabling). The write
+functions do not check permissions themselves — permission checking is done by the calling layer (agent tools and
+interactive commands) so that access control stays in one place.
 
 ```js
-// --- Глобальные факты (always-on) ---
-// Действующие сейчас: enabled = true и (domain_id текущего домена ИЛИ domain_id IS NULL). По priority, под лимит.
+// --- Global facts (always-on) ---
+// Currently active: enabled = true AND (domain_id matches current domain OR domain_id IS NULL). Sorted by priority, trimmed to limit.
 export async function getActiveGlobalFacts({ domainKey, limit }) { /* ... */ }
-export async function listGlobalFacts({ includeDisabled = true } = {}) { /* для админ-команд: показать id и текст */ }
+export async function listGlobalFacts({ includeDisabled = true } = {}) { /* for admin commands: show id and text */ }
 export async function addGlobalFact({ factText, domainKey, priority, createdBy }) { /* ... */ }
-export async function deleteGlobalFact(id) { /* удаление либо enabled = false по политике проекта */ }
+export async function deleteGlobalFact(id) { /* hard delete or enabled = false per project policy */ }
 export async function setGlobalFactEnabled(id, enabled) { /* ... */ }
 
-// --- Общая база знаний (RAG) ---
-// Поиск по смыслу и полнотексту: вектор плюс полнотекст, ранжирование, жёсткий лимит. Доступен всем на чтение.
+// --- Shared knowledge base (RAG) ---
+// Semantic and full-text search: vector plus full-text, ranking, hard limit. Readable by everyone.
 export async function searchGlobalKnowledge({ domainKey, query: userQuery, limit }) { /* ... */ }
 export async function addGlobalKnowledge({ title, content, domainKey, tags, importance, source, createdBy }) { /* ... */ }
-export async function deleteGlobalKnowledge(id) { /* мягкое удаление: status = 'deleted' */ }
+export async function deleteGlobalKnowledge(id) { /* soft delete: status = 'deleted' */ }
 ```
 
-Выборка `getActiveGlobalFacts` и поиск `searchGlobalKnowledge` всегда учитывают домен: берутся записи текущего домена и
-записи без домена (`domain_id IS NULL`), то есть общие для всех специализаций. Поиск по базе знаний устроен так же, как
-личная выборка в `src/pipeline/retrieve.js`: сначала смысловая близость через эмбеддинги (если доступны), затем
-полнотекстовое совпадение как дополняющий и запасной сигнал, затем отбор нескольких лучших под лимит. Добавление знания
-считает эмбеддинг текста через ту же функцию `embed` из `src/llm.js`; если эмбеддинги недоступны, запись всё равно
-создаётся и остаётся найденной полнотекстовым поиском.
+Both `getActiveGlobalFacts` and `searchGlobalKnowledge` always respect the domain: they return records for the
+current domain and records without a domain (`domain_id IS NULL`), i.e. those shared across all specialisations.
+Knowledge-base search works the same way as personal retrieval in `src/pipeline/retrieve.js`: first semantic
+similarity via embeddings (when available), then full-text matching as a complementary and fallback signal, then
+selection of the top results within the limit. Adding a knowledge entry computes the text embedding via the same
+`embed` function from `src/llm.js`; if embeddings are unavailable the record is still created and remains
+discoverable through full-text search.
 
 ---
 
-## [GLOB-5] Проверка прав администратора
+## [GLOB-5] Admin Permission Check
 
-Признак администратора читается из колонки `mem.users.is_admin` и кладётся в контекст обработки `ctx`. Небольшая функция
-проверки размещается рядом с управлением личной памятью, в `src/pipeline/admin.js`:
+The admin flag is read from the `mem.users.is_admin` column and placed on the processing context `ctx`. A small
+check function lives alongside personal memory management, in `src/pipeline/admin.js`:
 
 ```js
-// Является ли пользователь администратором (ручная пометка в БД).
+// Returns true if the user is an admin (manual flag in the database).
 export async function isAdmin(userId) {
   const { rows } = await query('SELECT is_admin FROM mem.users WHERE id = $1', [userId]);
   return rows[0]?.is_admin === true;
 }
 ```
 
-В пайплайне `handleMessage` (см. [04-architecture.md](04-architecture.md)) признак заполняется один раз сразу после
-`ensureUser`, потому что объект пользователя уже содержит поле `is_admin`, и кладётся в `ctx.isAdmin`. Дальше этим
-признаком пользуется обёртка вызова инструментов, закрывая записывающие инструменты для не-администраторов.
+In the `handleMessage` pipeline (see [04-architecture.md](04-architecture.md)) the flag is populated once,
+immediately after `ensureUser`, because the user object already contains the `is_admin` field, and is stored in
+`ctx.isAdmin`. The tool execution wrapper then uses this flag to block write tools for non-admin users.
 
 ---
 
-## [GLOB-6] Подмешивание в контур ответа
+## [GLOB-6] Injection into the Response Pipeline
 
-Сборка сообщений в `handleMessage` включает два system-блока — `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE`. В отличие
-от `MEMORY_CONTEXT`, их **не** нужно оборачивать в защиту от вредных записей (prompt injection): личная память наполняется
-автоматически из диалога и потому может содержать подсунутый пользователем текст, а глобальную память (и факты, и базу
-знаний) задаёт только администратор вручную (см. `GLOB-3`, `GLOB-7`). Источник доверенный, поэтому глобальная память
-подаётся как авторитетные общие сведения и политика, которым бот следует.
+Message assembly in `handleMessage` includes two system blocks — `GLOBAL_FACTS` and `GLOBAL_KNOWLEDGE`. Unlike
+`MEMORY_CONTEXT`, these do **not** need to be wrapped in prompt-injection protection: personal memory is populated
+automatically from the dialogue and may therefore contain text injected by the user, whereas global memory (both
+facts and the knowledge base) is managed only by an admin manually (see `GLOB-3`, `GLOB-7`). The source is
+trusted, so global memory is provided as authoritative shared information and policy that the bot follows.
 
-Глобальные факты собираются всегда, при любом сообщении, даже когда классификатор решил, что личная память не нужна
-(`needs_memory = false`). Блок ставится близко к стабильному началу промпта — сразу после стабильного `MAIN_SYSTEM`. Так
-максимизируется общий кэшируемый префикс между пользователями: `MAIN_SYSTEM` одинаков для всех, глобальные факты тоже
-одинаковы и меняются редко. Фрагменты базы знаний, наоборот, зависят от запроса, поэтому отбираются на этапе выборки
-памяти и ставятся рядом с `MEMORY_CONTEXT`, ниже кэшируемого префикса. Всегда-включённый блок `CURRENT_DATETIME` остаётся
-в самом конце, в динамической зоне (см. `GLOB-1`).
+Global facts are assembled for every message, regardless of what the classifier decided about personal memory
+(`needs_memory = false`). The block is placed close to the stable beginning of the prompt — immediately after the
+stable `MAIN_SYSTEM`. This maximises the shared cacheable prefix across users: `MAIN_SYSTEM` is identical for
+everyone, and global facts are also identical and change rarely. Knowledge-base fragments, on the other hand,
+depend on the query, so they are selected during the memory retrieval stage and placed alongside `MEMORY_CONTEXT`,
+below the cacheable prefix. The always-on `CURRENT_DATETIME` block remains at the very end, in the dynamic zone
+(see `GLOB-1`).
 
 ```text
-GLOBAL_FACTS (общие сведения и политика для всех пользователей)
+GLOBAL_FACTS (shared information and policy for all users)
 
-- Компания работает с 9:00 до 21:00 по московскому времени
-- При жалобе всегда предлагай оформить обращение в поддержку
+- The company operates from 09:00 to 21:00 Moscow time
+- When a complaint is raised, always offer to file a support ticket
 
-GLOBAL_KNOWLEDGE (релевантные фрагменты общей базы знаний)
+GLOBAL_KNOWLEDGE (relevant excerpts from the shared knowledge base)
 
-- Возврат товара возможен в течение 14 дней при сохранении упаковки
-- Доставка по городу занимает один рабочий день
+- Returns are accepted within 14 days provided the original packaging is intact
+- City delivery takes one business day
 ```
 
-Рекомендуемый порядок system-сообщений в массиве `messages`:
+Recommended order of system messages in the `messages` array:
 
 ```js
 const messages = [
-  { role: 'system', content: MAIN_SYSTEM },                       // стабильный префикс (кэшируется)
+  { role: 'system', content: MAIN_SYSTEM },                       // stable prefix (cached)
   ...(globalFactsBlock ? [{ role: 'system', content: globalFactsBlock }] : []),     // config.globalMemory.factsEnabled
-  { role: 'system', content: memoryContext },                     // индивидуальная память пользователя
+  { role: 'system', content: memoryContext },                     // user's personal memory
   ...(globalKnowledgeBlock ? [{ role: 'system', content: globalKnowledgeBlock }] : []), // config.globalMemory.ragEnabled
   ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
-  ...extraSystem,                                                  // companion-блок, если включён
-  dateTimeSystem,                                                  // CURRENT_DATETIME — динамическая зона, всегда последним
+  ...extraSystem,                                                  // companion block, if enabled
+  dateTimeSystem,                                                  // CURRENT_DATETIME — dynamic zone, always last
   ...history.map(/* ... */),
   { role: 'user', content: userMessage },
 ];
 ```
 
-При выключенном соответствующем флаге сборка блока возвращает пустую строку, и поведение совпадает с базовым. Поиск по
-базе знаний выполняется только при `config.globalMemory.ragEnabled`, чтобы не делать лишних запросов к базе и эмбеддингам, когда RAG
-отключён.
+When the corresponding flag is disabled, block assembly returns an empty string and behaviour matches the baseline.
+Knowledge-base search is only performed when `config.globalMemory.ragEnabled` is set, to avoid unnecessary
+database and embedding requests when RAG is turned off.
 
 ---
 
-## [GLOB-7] Инструменты агента: чтение базы знаний всем, запись только администратору
+## [GLOB-7] Agent Tools: Knowledge-Base Search for Everyone, Writes for Admins Only
 
-Каждый инструмент глобальной памяти находится в отдельном модуле каталога `src/pipeline/agent-tools/`: модуль содержит
-`name`, пользовательский `title`, OpenAI function definition и `handler` (см. [10-operations.md](10-operations.md),
-раздел `OPS-4`). Инструмент поиска по базе знаний доступен любому пользователю, инструменты изменения — только
-администратору. Проверка прав делается в единой обёртке `executeTool`, чтобы нельзя было обойти её, добавив новый
-инструмент мимо проверки. Набор инструментов зависит от флагов: инструменты фактов регистрируются при
-`config.globalMemory.factsEnabled`, инструменты базы знаний — при `config.globalMemory.ragEnabled`.
+Each global-memory tool lives in its own module inside `src/pipeline/agent-tools/`: the module exposes `name`, a
+user-facing `title`, an OpenAI function definition, and a `handler` (see [10-operations.md](10-operations.md),
+section `OPS-4`). The knowledge-base search tool is available to any user; the write tools are restricted to
+admins. Permission checking is done in the shared `executeTool` wrapper so that it cannot be bypassed by adding a
+new tool outside the check. Which tools are registered depends on the flags: fact tools are registered when
+`config.globalMemory.factsEnabled` is set, knowledge-base tools when `config.globalMemory.ragEnabled` is set.
 
-| Инструмент | Назначение | Флаг | Кто может вызвать |
-|------------|------------|------|------------------|
-| `global_fact_add` | добавить глобальный факт (always-on) | `config.globalMemory.factsEnabled` | только администратор |
-| `global_fact_delete` | удалить или выключить глобальный факт по идентификатору | `config.globalMemory.factsEnabled` | только администратор |
-| `global_fact_list` | показать глобальные факты с идентификаторами | `config.globalMemory.factsEnabled` | только администратор |
-| `global_knowledge_search` | поиск релевантных текстов в общей базе знаний | `config.globalMemory.ragEnabled` | все пользователи |
-| `global_knowledge_add` | добавить текст в общую базу знаний | `config.globalMemory.ragEnabled` | только администратор |
-| `global_knowledge_delete` | удалить текст из базы знаний по идентификатору | `config.globalMemory.ragEnabled` | только администратор |
+| Tool | Purpose | Flag | Who can call it |
+|------|---------|------|-----------------|
+| `global_fact_add` | add a global fact (always-on) | `config.globalMemory.factsEnabled` | admin only |
+| `global_fact_delete` | delete or disable a global fact by ID | `config.globalMemory.factsEnabled` | admin only |
+| `global_fact_list` | list global facts with their IDs | `config.globalMemory.factsEnabled` | admin only |
+| `global_knowledge_search` | search relevant texts in the shared knowledge base | `config.globalMemory.ragEnabled` | all users |
+| `global_knowledge_add` | add a text to the shared knowledge base | `config.globalMemory.ragEnabled` | admin only |
+| `global_knowledge_delete` | delete a text from the knowledge base by ID | `config.globalMemory.ragEnabled` | admin only |
 
-Административные инструменты помечены в своих модулях полем `requiresAdmin`, и обёртка `executeTool` отклоняет их вызов
-от не-администратора, фиксируя отказ в журнале `tool_calls` со статусом `blocked` (этот статус уже предусмотрен схемой
-журнала, см. [05-data-schema.md](05-data-schema.md)):
+Admin tools are marked in their modules with the `requiresAdmin` field, and the `executeTool` wrapper rejects
+calls from non-admin users, recording the refusal in the `tool_calls` log with status `blocked` (this status is
+already provided for in the log schema, see [05-data-schema.md](05-data-schema.md)):
 
 ```js
 export async function executeTool(ctx, name, args) {
@@ -212,116 +215,123 @@ export async function executeTool(ctx, name, args) {
   if (tool.requiresAdmin && !ctx.isAdmin) {
     await logToolCall({ conversationId: ctx.conversationId, userId: ctx.userId, toolName: name,
                         input: args, status: 'blocked', latencyMs: Date.now() - started,
-                        error: 'Требуются права администратора' });
-    return { error: 'Это действие доступно только администратору.' };
+                        error: 'Admin privileges required' });
+    return { error: 'This action is available to admins only.' };
   }
   const output = await tool.handler(ctx, args);
-  // далее — единое журналирование успеха или ошибки
+  // followed by unified success/error logging
 }
 ```
 
-Дополнительно описания административных инструментов можно вообще не показывать модели, когда пользователь не
-администратор: тогда массив `toolDefs` собирается с учётом `ctx.isAdmin` и активных флагов и не содержит лишних
-инструментов. Это уменьшает соблазн модели их вызывать и экономит токены, но проверка в `executeTool` остаётся
-обязательной как последний рубеж — на случай, если вызов всё же придёт.
+Additionally, admin tool definitions can be omitted from the model entirely when the user is not an admin: the
+`toolDefs` array is then assembled with `ctx.isAdmin` and the active flags in mind, and does not include
+unnecessary tools. This reduces the model's temptation to call them and saves tokens, but the check in
+`executeTool` remains mandatory as the last line of defence — in case a call arrives anyway.
 
 ---
 
-## [GLOB-8] Минимизация: лимиты и место в общем бюджете
+## [GLOB-8] Minimisation: Limits and Share of the Overall Budget
 
-Глобальная память подчиняется тому же правилу минимизации, что и личная. Глобальных фактов в запросе должно быть мало
-(по умолчанию не более пяти, параметр `config.globalMemory.factsLimit`), потому что они занимают место в каждом запросе.
-Фрагментов базы знаний тоже немного (по умолчанию не более пяти, параметр `config.globalMemory.ragLimit`), и они
-отбираются по релевантности.
-Эти лимиты складываются с лимитами личной памяти, поэтому общий объём справочного контекста надо держать в рамках
-главного принципа — ориентировочно от десяти до тридцати фактов и от пятисот до полутора тысяч слов. Если на практике
-глобальные блоки начинают вытеснять личную память, лимиты глобального слоя следует снижать в первую очередь, поскольку
-личная память обычно точнее отвечает на конкретный запрос пользователя.
+Global memory follows the same minimisation rule as personal memory. There should be few global facts per request
+(at most five by default, controlled by `config.globalMemory.factsLimit`), because they occupy space in every
+request. The number of knowledge-base fragments is also small (at most five by default, controlled by
+`config.globalMemory.ragLimit`), and they are selected by relevance. These limits add up to the personal memory
+limits, so the total volume of reference context must be kept within the main guideline — roughly ten to thirty
+facts and five hundred to fifteen hundred words. If in practice the global blocks start crowding out personal
+memory, the global layer limits should be reduced first, because personal memory typically answers the user's
+specific request more accurately.
 
 ---
 
-## [GLOB-9] Конфигурация и флаги
+## [GLOB-9] Configuration and Flags
 
-Слой управляется двумя независимыми флагами, оба по умолчанию включены. Ветвь
-`config.globalMemory` живёт в общем объекте `config` (см. [08-prompts-and-models.md](08-prompts-and-models.md)), а
-значения по умолчанию заданы в `config/default.yaml`:
+The layer is controlled by two independent flags, both enabled by default. The `config.globalMemory` branch lives
+in the shared `config` object (see [08-prompts-and-models.md](08-prompts-and-models.md)), and the default values
+are defined in `config/default.yaml`:
 
 ```yaml
 # config/default.yaml
 globalMemory:
-  factsEnabled: true      # всегда-включённые глобальные факты и их инструменты
+  factsEnabled: true      # always-on global facts and their tools
   factsLimit: 5
-  ragEnabled: true        # общая база знаний (RAG) и её инструменты
+  ragEnabled: true        # shared knowledge base (RAG) and its tools
   ragLimit: 5
-  ragMinRelevance: 0.3    # порог отсечения слабых совпадений базы знаний
+  ragMinRelevance: 0.3    # threshold for cutting off weak knowledge-base matches
 ```
 
-| Путь в `config` | Назначение | По умолчанию |
-|-----------------|------------|--------------|
-| `globalMemory.factsEnabled` | всегда-включённые глобальные факты и их инструменты | `true` |
-| `globalMemory.factsLimit` | сколько глобальных фактов подмешивать в каждый запрос | `5` |
-| `globalMemory.ragEnabled` | общая база знаний (RAG) и её инструменты | `true` |
-| `globalMemory.ragLimit` | сколько фрагментов базы знаний подмешивать по релевантности | `5` |
-| `globalMemory.ragMinRelevance` | порог релевантности: фрагменты слабее порога в контекст не идут | `0.3` |
+| Config path | Purpose | Default |
+|-------------|---------|---------|
+| `globalMemory.factsEnabled` | always-on global facts and their tools | `true` |
+| `globalMemory.factsLimit` | how many global facts to mix into each request | `5` |
+| `globalMemory.ragEnabled` | shared knowledge base (RAG) and its tools | `true` |
+| `globalMemory.ragLimit` | how many knowledge-base fragments to mix in by relevance | `5` |
+| `globalMemory.ragMinRelevance` | relevance threshold: fragments below it are excluded from context | `0.3` |
 
-Для интерактивного чата (см. [03-quickstart.md](03-quickstart.md)) есть набор команд, доступных только
-администратору. Команды фактов (при `config.globalMemory.factsEnabled`): `/fact-add <текст>` добавляет факт, `/fact-list`
-показывает факты с идентификаторами, `/fact-del <id>` удаляет факт. Команды базы знаний (при
-`config.globalMemory.ragEnabled`): `/kb-add <текст>`
-добавляет текст в базу, `/kb-find <запрос>` ищет по базе, `/kb-del <id>` удаляет текст. Команды — лишь удобная оболочка
-над функциями модуля `global-memory.js`; ту же работу модель может выполнить инструментами из раздела `GLOB-7`, когда об
-этом просит администратор в обычном разговоре.
-
----
-
-## [GLOB-10] Критерии готовности слоя
-
-Готовность слоя проверяется тремя критериями из [02-criteria.md](02-criteria.md). Каждый работает под своим флагом и без
-влияния на базовое поведение при выключенном флаге.
-
-| ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
-|---------|----------|-------------------------------|----------------|
-| CRIT-19 | Глобальные факты подмешиваются в каждый запрос, ограничены по числу | `mem.global_facts` + сборка `GLOBAL_FACTS` в `src/agent.js` | `config.globalMemory.factsEnabled` |
-| CRIT-20 | Общая база знаний (RAG): тексты видны всем, подмешиваются по релевантности, ищутся и удаляются по идентификатору | `mem.global_knowledge` + `src/pipeline/global-memory.js` | `config.globalMemory.ragEnabled` |
-| CRIT-21 | Наполнять и чистить глобальную память может только администратор (ручная пометка `is_admin`) | проверка в `executeTool` + `isAdmin` в `src/pipeline/admin.js` | оба флага |
+For the interactive chat (see [03-quickstart.md](03-quickstart.md)) there is a set of commands available to admins
+only. Fact commands (when `config.globalMemory.factsEnabled` is set): `/fact-add <text>` adds a fact,
+`/fact-list` shows facts with their IDs, `/fact-del <id>` deletes a fact. Knowledge-base commands (when
+`config.globalMemory.ragEnabled` is set): `/kb-add <text>` adds a text to the base, `/kb-find <query>` searches
+the base, `/kb-del <id>` deletes a text. The commands are simply a convenient wrapper around the functions in the
+`global-memory.js` module; the model can perform the same operations using the tools from section `GLOB-7` when
+requested by an admin in an ordinary conversation.
 
 ---
 
-## [GLOB-11] Слой проверок `layerGlobalMemory`
+## [GLOB-10] Layer Readiness Criteria
 
-Проверки слоя вынесены в отдельный слой `layerGlobalMemory` в `tests/run.js` (см. [10-operations.md](10-operations.md)),
-включаются флагами `config.globalMemory.factsEnabled` и `config.globalMemory.ragEnabled` и не влияют на базовый прогон. Как и везде в наборе, проверки идут на
-реальной базе и реальных моделях, проверяют структуру до поведения и завершаются ненулевым кодом при провале. Проверки
-фактов и базы знаний включаются независимо, по своему флагу.
+Layer readiness is verified by three criteria from [02-criteria.md](02-criteria.md). Each operates under its own
+flag and has no effect on baseline behaviour when the flag is disabled.
 
-1. **Структура.** Таблицы `global_facts` и `global_knowledge` созданы; есть колонка `mem.users.is_admin`; присутствуют
-   индекс активных фактов, полнотекстовый GIN-индекс и векторный HNSW-индекс базы знаний; проходит минимальный цикл
-   создания и чтения.
-2. **Глобальные факты всегда в контексте** (при `config.globalMemory.factsEnabled`). Включённый факт появляется в блоке
-   `GLOBAL_FACTS` даже при сообщении, для которого личная память не нужна (`needs_memory = false`); выключенный факт не
-   появляется; лимит числа фактов соблюдается; учитывается домен и общие записи без домена.
-3. **База знаний и поиск по релевантности** (при `config.globalMemory.ragEnabled`). Добавленный администратором текст находится по
-   близкому запросу и не возвращается по постороннему; удаление по идентификатору убирает текст из выдачи; учитывается
-   домен и общие записи без домена; лимит фрагментов соблюдается.
-4. **Права администратора.** Не-администратор получает отказ при попытке добавить или удалить запись (и факт, и текст
-   базы знаний), и отказ фиксируется в `tool_calls` со статусом `blocked`; администратор выполняет те же действия успешно.
-5. **Приватность.** В глобальную память не попадают секреты пользователей: чувствительные данные остаются в личной
-   защищённой памяти (см. [07-secure-privacy.md](07-secure-privacy.md)) и в общий слой не переносятся.
+| ID | Criterion | Reference module (recommendation) | Enabling flag |
+|----|-----------|-----------------------------------|---------------|
+| CRIT-19 | Global facts are mixed into every request and are bounded by a count limit | `mem.global_facts` + `GLOBAL_FACTS` assembly in `src/agent.js` | `config.globalMemory.factsEnabled` |
+| CRIT-20 | Shared knowledge base (RAG): texts visible to all, mixed in by relevance, searchable and deletable by ID | `mem.global_knowledge` + `src/pipeline/global-memory.js` | `config.globalMemory.ragEnabled` |
+| CRIT-21 | Only an admin can populate and clean global memory (manual `is_admin` flag) | check in `executeTool` + `isAdmin` in `src/pipeline/admin.js` | both flags |
 
 ---
 
-## [GLOB-12] Порядок реализации
+## [GLOB-11] The `layerGlobalMemory` Test Layer
 
-1. **Схема.** Добавить в единую инициализацию `001_init.sql` таблицы `global_facts` и `global_knowledge`, колонку
-   `is_admin`, индексы и идемпотентный засев базовых фактов, прогнать миграцию и проверить структуру.
-2. **Модуль доступа.** Реализовать `src/pipeline/global-memory.js` (факты и база знаний: выборка, поиск, добавление,
-   удаление) и функцию `isAdmin` в `src/pipeline/admin.js`.
-3. **Инструменты и проверка прав.** Добавить по модулю на каждый инструмент в `src/pipeline/agent-tools/` и проверку
-   администратора в обёртке `executeTool`.
-4. **Подмешивание в ответ.** Заполнить `ctx.isAdmin` и собрать блоки `GLOBAL_FACTS` (при `config.globalMemory.factsEnabled`, сразу
-   после `MAIN_SYSTEM`) и `GLOBAL_KNOWLEDGE` (при `config.globalMemory.ragEnabled`, рядом с `MEMORY_CONTEXT`) в `src/agent.js`.
-5. **Конфигурация и команды.** Добавить раздел `globalMemory` в `src/config.js` и административные команды в чат.
-6. **Проверки.** Реализовать слой `layerGlobalMemory` в `tests/run.js` и зафиксировать число проходящих проверок.
+The layer's tests are extracted into a dedicated test layer `layerGlobalMemory` in `tests/run.js` (see
+[10-operations.md](10-operations.md)), enabled by the flags `config.globalMemory.factsEnabled` and
+`config.globalMemory.ragEnabled`, and have no effect on the baseline run. As everywhere in the test suite, the
+checks run against a real database and real models, verify structure before behaviour, and exit with a non-zero
+code on failure. Fact tests and knowledge-base tests are enabled independently, each by its own flag.
+
+1. **Structure.** The tables `global_facts` and `global_knowledge` have been created; the `mem.users.is_admin`
+   column exists; the active-facts index, the full-text GIN index, and the vector HNSW index for the knowledge
+   base are all present; a minimal create-and-read cycle completes successfully.
+2. **Global facts always in context** (when `config.globalMemory.factsEnabled` is set). An enabled fact appears in
+   the `GLOBAL_FACTS` block even for a message for which personal memory is not needed (`needs_memory = false`);
+   a disabled fact does not appear; the fact count limit is respected; domain and domain-agnostic records are both
+   taken into account.
+3. **Knowledge base and relevance-based search** (when `config.globalMemory.ragEnabled` is set). A text added by
+   an admin is found by a closely related query and is not returned for an unrelated query; deleting by ID removes
+   the text from results; domain and domain-agnostic records are both taken into account; the fragment count limit
+   is respected.
+4. **Admin permissions.** A non-admin receives a rejection when attempting to add or delete a record (both facts
+   and knowledge-base texts), and the rejection is recorded in `tool_calls` with status `blocked`; an admin
+   performs the same actions successfully.
+5. **Privacy.** User secrets do not end up in global memory: sensitive data remains in personal protected memory
+   (see [07-secure-privacy.md](07-secure-privacy.md)) and is not transferred to the shared layer.
+
+---
+
+## [GLOB-12] Implementation Order
+
+1. **Schema.** Add the `global_facts` and `global_knowledge` tables, the `is_admin` column, the indexes, and an
+   idempotent seed of baseline facts to the single initialisation script `001_init.sql`, run the migration, and
+   verify the structure.
+2. **Access module.** Implement `src/pipeline/global-memory.js` (facts and knowledge base: retrieval, search,
+   add, delete) and the `isAdmin` function in `src/pipeline/admin.js`.
+3. **Tools and permission check.** Add one module per tool in `src/pipeline/agent-tools/` and the admin check in
+   the `executeTool` wrapper.
+4. **Injection into the response.** Populate `ctx.isAdmin` and assemble the `GLOBAL_FACTS` block (when
+   `config.globalMemory.factsEnabled` is set, immediately after `MAIN_SYSTEM`) and the `GLOBAL_KNOWLEDGE` block
+   (when `config.globalMemory.ragEnabled` is set, alongside `MEMORY_CONTEXT`) in `src/agent.js`.
+5. **Configuration and commands.** Add the `globalMemory` section to `src/config.js` and the admin commands to
+   the chat interface.
+6. **Tests.** Implement the `layerGlobalMemory` layer in `tests/run.js` and record the number of passing checks.
 
 ---
 

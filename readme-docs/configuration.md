@@ -1,219 +1,219 @@
-# Конфигурация
+# Configuration
 
-Конфигурация проекта строится пакетом `node-config` из каталога `config/`. Пакет собирает единое дерево настроек,
-объединяя несколько YAML-файлов в строгом порядке приоритета — каждый следующий слой переопределяет значения
-предыдущего:
+The project configuration is built by `node-config` from the `config/` directory. The package assembles a single
+settings tree by merging several YAML files in strict priority order — each subsequent layer overrides values from
+the previous one:
 
-1. `config/default.yaml` — полная структура конфигурации и значения по умолчанию (с поясняющими комментариями). Этот
-   файл задаёт форму всего дерева: именно здесь перечислены все доступные ключи.
-2. `config/development.yaml`, `config/production.yaml`, `config/test.yaml` — переопределения для конкретного окружения.
-   Нужный файл выбирается переменной окружения `NODE_ENV` (переменная окружения — именованное значение, которое процесс
-   получает от операционной системы): при `NODE_ENV=production` подхватывается `production.yaml`, при любом другом
-   значении (или когда переменная не задана) — `development.yaml`; набор тестов запускается с `NODE_ENV=test` и берёт
-   `test.yaml`.
-3. `config/local.yaml` — локальные секреты и личные переопределения разработчика. Этот файл перечислен в `.gitignore` и
-   не попадает в систему контроля версий. За образец возьмите шаблон `config/local.example.yaml`.
-4. `config/custom-environment-variables.yaml` — карта соответствий вида «путь в дереве конфигурации соответствует имени
-   переменной окружения». Любая заданная переменная окружения переопределяет значение из файлов. При этом файл `.env`
-   по-прежнему поддерживается как совместимый мост: пакет `dotenv` загружает его содержимое в окружение процесса, после
-   чего карта переменных подставляет эти значения в дерево конфигурации (за образец возьмите `.env.example`).
+1. `config/default.yaml` — complete configuration structure and default values (with explanatory comments). This file
+   defines the shape of the entire tree: all available keys are declared here.
+2. `config/development.yaml`, `config/production.yaml`, `config/test.yaml` — environment-specific overrides.
+   The file to load is selected by the `NODE_ENV` environment variable (an environment variable is a named value
+   that a process receives from the operating system): when `NODE_ENV=production` the file `production.yaml` is
+   picked up; for any other value (or when the variable is not set) `development.yaml` is used; the test suite
+   runs with `NODE_ENV=test` and reads `test.yaml`.
+3. `config/local.yaml` — local secrets and personal developer overrides. This file is listed in `.gitignore` and
+   never enters version control. Use `config/local.example.yaml` as a template.
+4. `config/custom-environment-variables.yaml` — a mapping of the form "config-tree path corresponds to an
+   environment variable name". Any set environment variable overrides the value from the YAML files. The `.env`
+   file is still supported as a compatibility bridge: the `dotenv` package loads its contents into the process
+   environment, after which the variable map substitutes those values into the configuration tree (use `.env.example`
+   as a template).
 
-В коде доступ к настройкам даёт модуль `src/config.js`. Он отдаёт объект `config` — готовый снимок собранного дерева,
-к ветвям которого обращаются по пути: например, `config.llm.mainModel` (основная модель), `config.proactive.enabled`
-(включена ли проактивность), `config.db.postgres.dbs.main.host` (адрес сервера рабочей базы данных). Секреты
-(ключи доступа, пароли) хранятся в `config/local.yaml` или передаются через переменные окружения, а не записываются в
-файлы, попадающие в систему контроля версий.
+In code, settings are accessed through the `src/config.js` module. It exposes a `config` object — a ready snapshot
+of the assembled tree — whose branches are accessed by path, for example `config.llm.mainModel` (main model),
+`config.proactive.enabled` (whether proactivity is on), `config.db.postgres.dbs.main.host` (address of the
+production database server). Secrets (API keys, passwords) are stored in `config/local.yaml` or passed via
+environment variables, and are never written to files that enter version control.
 
-В таблицах ниже для каждой настройки указаны: путь в дереве `config`, имя переменной окружения, которой её можно
-переопределить, назначение и значение по умолчанию. Везде, где значение — логический флаг, оно принимает вид `true`
-(включено) или `false` (выключено).
+The tables below list for each setting: the path in the `config` tree, the environment variable that can override it,
+its purpose, and the default value. Wherever a value is a boolean flag it takes the form `true` (enabled) or
+`false` (disabled).
 
-## Модели и языковая модель (LLM)
+## Models and the Language Model (LLM)
 
-LLM (large language model, большая языковая модель) — это модель, которая порождает ответы и вызывает инструменты.
-Клиент совместим с программным интерфейсом OpenAI и может работать как напрямую, так и через OpenAI-совместимый прокси
-(промежуточный сервер, перенаправляющий запросы к моделям).
+LLM (large language model) is the model that generates responses and calls tools. The client is compatible with the
+OpenAI API and can work either directly or through an OpenAI-compatible proxy (an intermediate server that forwards
+requests to the models).
 
-| Путь в `config`    | Переменная окружения | Назначение                                                                           | По умолчанию             |
-|--------------------|----------------------|--------------------------------------------------------------------------------------|--------------------------|
-| `llm.apiKey`       | `OPENAI_API_KEY`     | Ключ доступа к языковой модели.                                                       | —                        |
-| `llm.baseURL`      | `OPENAI_BASE_URL`    | Адрес OpenAI-совместимого прокси (например, LiteLLM); если пусто — прямой OpenAI API. | пусто                    |
-| `llm.mainModel`    | `MAIN_MODEL`         | Основной агент: отвечает пользователю и вызывает инструменты.                         | `gpt-5.4-mini`           |
-| `llm.auxModel`     | `AUX_MODEL`          | Быстрая вспомогательная модель: классификация входящих сообщений.                     | `gpt-5.4-nano`           |
-| `llm.extractModel` | `EXTRACT_MODEL`      | Модель извлечения фактов в память.                                                    | `gpt-5.4-mini`           |
-| `llm.embedModel`   | `EMBED_MODEL`        | Модель эмбеддингов для смыслового поиска.                                             | `text-embedding-3-small` |
+| `config` path      | Environment variable | Purpose                                                                               | Default                  |
+|--------------------|----------------------|---------------------------------------------------------------------------------------|--------------------------|
+| `llm.apiKey`       | `OPENAI_API_KEY`     | Access key for the language model.                                                    | —                        |
+| `llm.baseURL`      | `OPENAI_BASE_URL`    | Address of an OpenAI-compatible proxy (e.g. LiteLLM); if empty — direct OpenAI API.  | empty                    |
+| `llm.mainModel`    | `MAIN_MODEL`         | Main agent: responds to the user and calls tools.                                     | `gpt-5.4-mini`           |
+| `llm.auxModel`     | `AUX_MODEL`          | Fast auxiliary model: classifies incoming messages.                                   | `gpt-5.4-nano`           |
+| `llm.extractModel` | `EXTRACT_MODEL`      | Model for extracting facts into memory.                                               | `gpt-5.4-mini`           |
+| `llm.embedModel`   | `EMBED_MODEL`        | Embeddings model for semantic search.                                                 | `text-embedding-3-small` |
 
-Размерность эмбеддингов `config.llm.embedDim` равна `1536` и задана как константа: это не переменная окружения, менять
-её нельзя. Модели проверяются скриптом `npm run check:llm` на OpenAI-совместимом прокси. Семейство `gpt-5.4-*`
-отвечает примерно за 5–10 секунд; если нужен максимально быстрый отклик, задайте для `config.llm.mainModel`,
-`config.llm.auxModel` и `config.llm.extractModel` значение `gpt-4o-mini`.
+The embedding dimensionality `config.llm.embedDim` is `1536` and is defined as a constant: it is not an environment
+variable and cannot be changed. Models are verified by the `npm run check:llm` script against an OpenAI-compatible
+proxy. The `gpt-5.4-*` family responds in approximately 5–10 seconds; if you need the fastest possible response,
+set `config.llm.mainModel`, `config.llm.auxModel`, and `config.llm.extractModel` to `gpt-4o-mini`.
 
-## База данных
+## Database
 
-Доступ к PostgreSQL идёт через пакет `af-db-ts` — он читает параметры подключения из дерева конфигурации по пути
-`config.db.postgres.dbs.<идентификатор>`. Рабочая база данных доступна под алиасом (кратким именем подключения) `main`.
-Служебное подключение под алиасом `bootstrap` указывает на системную базу `postgres` и используется только для команды
-`CREATE DATABASE` при первичной инициализации в `src/migrate.js`.
+PostgreSQL access goes through the `af-db-ts` package, which reads connection parameters from the configuration
+tree at `config.db.postgres.dbs.<identifier>`. The production database is available under the alias (short
+connection name) `main`. The service connection under the alias `bootstrap` points to the system database
+`postgres` and is used only for the `CREATE DATABASE` command during initial setup in `src/migrate.js`.
 
-| Путь в `config`                   | Переменная окружения | Назначение                                          | По умолчанию |
-|-----------------------------------|----------------------|-----------------------------------------------------|--------------|
-| `db.postgres.dbs.main.host`       | `DB_HOST`            | Адрес сервера рабочей базы. Пустое значение отключает БД. | `localhost`  |
-| `db.postgres.dbs.main.port`       | `DB_PORT`            | Порт сервера базы данных.                            | `5432`       |
-| `db.postgres.dbs.main.database`   | `DB_NAME`            | Имя рабочей базы данных памяти.                      | `mem_bot`  |
-| `db.postgres.dbs.main.user`       | `DB_USER`            | Имя пользователя базы данных (секрет).               | —            |
-| `db.postgres.dbs.main.password`   | `DB_PASSWORD`        | Пароль пользователя базы данных (секрет).            | —            |
+| `config` path                     | Environment variable | Purpose                                                          | Default     |
+|-----------------------------------|----------------------|------------------------------------------------------------------|-------------|
+| `db.postgres.dbs.main.host`       | `DB_HOST`            | Address of the production database server. An empty value disables the DB. | `localhost` |
+| `db.postgres.dbs.main.port`       | `DB_PORT`            | Port of the database server.                                     | `5432`      |
+| `db.postgres.dbs.main.database`   | `DB_NAME`            | Name of the production memory database.                          | `mem_bot`   |
+| `db.postgres.dbs.main.user`       | `DB_USER`            | Database user name (secret).                                     | —           |
+| `db.postgres.dbs.main.password`   | `DB_PASSWORD`        | Database user password (secret).                                 | —           |
 
-## Лимиты памяти
+## Memory Limits
 
-Сколько фактов каждой области попадает в запрос к модели. Список ранжируется по релевантности и обрезается до этих
-значений.
+Controls how many facts from each domain are included in the model request. The list is ranked by relevance and
+truncated to these values.
 
-| Путь в `config`         | Переменная окружения  | Назначение                                          | По умолчанию |
-|-------------------------|-----------------------|-----------------------------------------------------|--------------|
-| `memoryLimits.total`    | `MEMORY_LIMIT_TOTAL`  | Общий потолок числа фактов в промпте.               | `30`         |
-| `memoryLimits.profile`  | `PROFILE`             | Устойчивые факты о пользователе и стиле общения.    | `7`          |
-| `memoryLimits.dialog`   | `DIALOG`              | Факты текущего диалога.                              | `5`          |
-| `memoryLimits.domain`   | `DOMAIN`              | Факты предметной области.                            | `12`         |
-| `memoryLimits.reminder` | `REMINDER`            | Активные напоминания.                               | `3`          |
-| `memoryLimits.secure`   | `SECURE`              | Обезличенные резюме защищённых данных.              | `3`          |
+| `config` path           | Environment variable  | Purpose                                                        | Default |
+|-------------------------|-----------------------|----------------------------------------------------------------|---------|
+| `memoryLimits.total`    | `MEMORY_LIMIT_TOTAL`  | Overall cap on the number of facts in the prompt.              | `30`    |
+| `memoryLimits.profile`  | `PROFILE`             | Persistent facts about the user and their communication style. | `7`     |
+| `memoryLimits.dialog`   | `DIALOG`              | Facts from the current dialogue.                               | `5`     |
+| `memoryLimits.domain`   | `DOMAIN`              | Domain-area facts.                                             | `12`    |
+| `memoryLimits.reminder` | `REMINDER`            | Active reminders.                                              | `3`     |
+| `memoryLimits.secure`   | `SECURE`              | Anonymised summaries of protected data.                        | `3`     |
 
-## Безопасность и часовой пояс
+## Security and Timezone
 
-| Путь в `config` | Переменная окружения | Назначение                                                                | По умолчанию      |
-|-----------------|----------------------|---------------------------------------------------------------------------|-------------------|
-| `authSecret`    | `AUTH_SECRET`        | Ключ шифрования защищённой памяти (AES-256-GCM). Обязательно смените в продакшене. | `dev-insecure-secret-change-me` |
-| `timezone`      | `TZ_DEFAULT`         | Часовой пояс по умолчанию для логики дат и времени.                        | `Europe/Moscow`   |
-| `debug`         | `DEBUG`              | Список категорий отладочного вывода через запятую (`*` — все категории).   | пусто             |
+| `config` path | Environment variable | Purpose                                                                             | Default                         |
+|---------------|----------------------|-------------------------------------------------------------------------------------|----------------------------------|
+| `authSecret`  | `AUTH_SECRET`        | Encryption key for secure memory (AES-256-GCM). Must be changed in production.     | `dev-insecure-secret-change-me` |
+| `timezone`    | `TZ_DEFAULT`         | Default timezone for date and time logic.                                           | `Europe/Moscow`                 |
+| `debug`       | `DEBUG`              | Comma-separated list of debug output categories (`*` enables all categories).       | empty                           |
 
-## Голосовой ввод (распознавание речи)
+## Voice Input (Speech Recognition)
 
-| Путь в `config`          | Переменная окружения     | Назначение                                                         | По умолчанию                   |
-|--------------------------|--------------------------|--------------------------------------------------------------------|--------------------------------|
-| `voiceInput.enabled`     | `VOICE_INPUT_ENABLED`    | Распознавание голосовых сообщений.                                 | `false`                        |
-| `voiceInput.provider`    | `VOICE_INPUT_PROVIDER`   | Распознаватель речи из реестра `src/voice/transcribe.js`.          | `groq-whisper-large-v3-turbo`  |
-| `voiceInput.language`    | `VOICE_INPUT_LANG`       | Код языка-подсказки для распознавателя.                            | `ru`                           |
-| `voiceInput.maxSeconds`  | `VOICE_INPUT_MAX_SECONDS`| Предел длительности входящего аудио (секунды).                     | `300`                          |
-| `voiceInput.maxBytes`    | `VOICE_INPUT_MAX_BYTES`  | Предел размера, когда длительность неизвестна (байты).             | `25000000`                     |
+| `config` path            | Environment variable      | Purpose                                                          | Default                        |
+|--------------------------|---------------------------|------------------------------------------------------------------|--------------------------------|
+| `voiceInput.enabled`     | `VOICE_INPUT_ENABLED`     | Recognition of voice messages.                                   | `false`                        |
+| `voiceInput.provider`    | `VOICE_INPUT_PROVIDER`    | Speech recogniser from the `src/voice/transcribe.js` registry.  | `groq-whisper-large-v3-turbo`  |
+| `voiceInput.language`    | `VOICE_INPUT_LANG`        | Language hint code for the recogniser.                           | `ru`                           |
+| `voiceInput.maxSeconds`  | `VOICE_INPUT_MAX_SECONDS` | Maximum duration of incoming audio (seconds).                    | `300`                          |
+| `voiceInput.maxBytes`    | `VOICE_INPUT_MAX_BYTES`   | Size limit when duration is unknown (bytes).                     | `25000000`                     |
 
-## Голосовой вывод (синтез речи)
+## Voice Output (Text-to-Speech)
 
-| Путь в `config`                | Переменная окружения           | Назначение                                                              | По умолчанию       |
-|--------------------------------|--------------------------------|-------------------------------------------------------------------------|--------------------|
-| `voiceOutput.enabled`          | `VOICE_OUTPUT_ENABLED`         | Синтез голосового ответа.                                               | `false`            |
-| `voiceOutput.model`            | `VOICE_OUTPUT_MODEL`           | Модель синтеза речи (TTS) для выбранного адреса API.                    | `gpt-4o-mini-tts`  |
-| `voiceOutput.voice`            | `VOICE_OUTPUT_VOICE`           | Тембр голоса (например, `ash`, `nova`).                              | `ash`            |
-| `voiceOutput.format`           | `VOICE_OUTPUT_FORMAT`          | Формат аудио (`opus` — прямая отправка в Telegram).                    | `opus`             |
-| `voiceOutput.maxChars`         | `VOICE_OUTPUT_MAX_CHARS`       | Жёсткий предел длины озвучиваемого текста (символы); больше — резюме.   | `500`              |
-| `voiceOutput.summaryMaxChars`  | `VOICE_OUTPUT_SUMMARY_MAX_CHARS`| Предел длины самого резюме.                                            | `500`              |
-| `voiceOutput.summaryModel`     | `VOICE_OUTPUT_SUMMARY_MODEL`   | Модель построения резюме для длинных ответов.                          | `gpt-5.4-nano`     |
+| `config` path                  | Environment variable             | Purpose                                                               | Default           |
+|--------------------------------|----------------------------------|-----------------------------------------------------------------------|-------------------|
+| `voiceOutput.enabled`          | `VOICE_OUTPUT_ENABLED`           | Synthesis of a voice response.                                        | `false`           |
+| `voiceOutput.model`            | `VOICE_OUTPUT_MODEL`             | Text-to-speech (TTS) model for the configured API address.            | `gpt-4o-mini-tts` |
+| `voiceOutput.voice`            | `VOICE_OUTPUT_VOICE`             | Voice timbre (e.g. `ash`, `nova`).                                    | `ash`             |
+| `voiceOutput.format`           | `VOICE_OUTPUT_FORMAT`            | Audio format (`opus` — send directly to Telegram).                   | `opus`            |
+| `voiceOutput.maxChars`         | `VOICE_OUTPUT_MAX_CHARS`         | Hard limit on the length of text to be spoken (characters); longer responses are summarised. | `500` |
+| `voiceOutput.summaryMaxChars`  | `VOICE_OUTPUT_SUMMARY_MAX_CHARS` | Length limit for the summary itself.                                  | `500`             |
+| `voiceOutput.summaryModel`     | `VOICE_OUTPUT_SUMMARY_MODEL`     | Model used to build summaries of long responses.                      | `gpt-5.4-nano`    |
 
-## Навыки и предметные схемы
+## Skills and Domain Schemas
 
-| Путь в `config`             | Переменная окружения          | Назначение                                                                | По умолчанию |
-|-----------------------------|-------------------------------|---------------------------------------------------------------------------|--------------|
-| `skills.dir`                | `SKILLS_DIR`                  | Каталог с навыками.                                                        | `skills`     |
-| `skills.switchThreshold`    | `SKILLS_SWITCH_THRESHOLD`     | Порог уверенности классификатора для переключения на другой навык.        | `0.65`       |
-| `skills.referenceMaxBytes`  | `SKILL_REFERENCE_MAX_BYTES`   | Предел размера одного справочника навыка (байты).                         | `50000`      |
-| `skills.authoring.enabled`  | `SKILL_AUTHORING_ENABLED`     | Инструментарий создания и редактирования навыков моделью (только админу). | `false`      |
-| `skills.authoring.model`    | `SKILL_AUTHORING_MODEL`       | Модель для редактирования навыков; пусто (`null`) — берётся `config.llm.mainModel`. | `null` |
-| `schema.keyEmbedThreshold`  | `SCHEMA_KEY_EMBED_THRESHOLD`  | Порог косинусной близости при канонизации ключа предметной сущности.      | `0.82`       |
+| `config` path               | Environment variable          | Purpose                                                                            | Default  |
+|-----------------------------|-------------------------------|------------------------------------------------------------------------------------|----------|
+| `skills.dir`                | `SKILLS_DIR`                  | Directory containing skills.                                                       | `skills` |
+| `skills.switchThreshold`    | `SKILLS_SWITCH_THRESHOLD`     | Classifier confidence threshold for switching to a different skill.                | `0.65`   |
+| `skills.referenceMaxBytes`  | `SKILL_REFERENCE_MAX_BYTES`   | Maximum size of a single skill reference file (bytes).                             | `50000`  |
+| `skills.authoring.enabled`  | `SKILL_AUTHORING_ENABLED`     | Tooling for the model to create and edit skills (admin only).                      | `false`  |
+| `skills.authoring.model`    | `SKILL_AUTHORING_MODEL`       | Model used for skill editing; empty (`null`) falls back to `config.llm.mainModel`. | `null`   |
+| `schema.keyEmbedThreshold`  | `SCHEMA_KEY_EMBED_THRESHOLD`  | Cosine similarity threshold for canonicalising a domain entity key.                | `0.82`   |
 
-## Глобальная память и база знаний
+## Global Memory and Knowledge Base
 
-| Путь в `config`               | Переменная окружения       | Назначение                                                  | По умолчанию |
-|-------------------------------|----------------------------|-------------------------------------------------------------|--------------|
-| `globalMemory.factsEnabled`   | `GLOBAL_MEMORY_ENABLED`    | Общие для всех пользователей факты и их инструменты.        | `false`      |
-| `globalMemory.factsLimit`     | `GLOBAL_FACTS_LIMIT`       | Сколько глобальных фактов подмешивать в каждый запрос.      | `5`          |
-| `globalMemory.ragEnabled`     | `GLOBAL_RAG_ENABLED`       | Общая база знаний (RAG) и её инструменты.                  | `false`      |
-| `globalMemory.ragLimit`       | `GLOBAL_RAG_LIMIT`         | Сколько фрагментов базы знаний подмешивать по релевантности.| `5`          |
-| `globalMemory.ragMinRelevance`| `GLOBAL_RAG_MIN_RELEVANCE` | Порог отсечения слабых совпадений базы знаний.             | `0.3`        |
+| `config` path                 | Environment variable       | Purpose                                                           | Default |
+|-------------------------------|----------------------------|-------------------------------------------------------------------|---------|
+| `globalMemory.factsEnabled`   | `GLOBAL_MEMORY_ENABLED`    | Facts shared across all users, together with their tools.         | `false` |
+| `globalMemory.factsLimit`     | `GLOBAL_FACTS_LIMIT`       | Number of global facts to inject into each request.               | `5`     |
+| `globalMemory.ragEnabled`     | `GLOBAL_RAG_ENABLED`       | Shared knowledge base (RAG) and its tools.                        | `false` |
+| `globalMemory.ragLimit`       | `GLOBAL_RAG_LIMIT`         | Number of knowledge-base chunks to inject by relevance.           | `5`     |
+| `globalMemory.ragMinRelevance`| `GLOBAL_RAG_MIN_RELEVANCE` | Cutoff threshold for weak knowledge-base matches.                 | `0.3`   |
 
-## Режим собеседника и проактивность
+## Companion Mode and Proactivity
 
-| Путь в `config`                                | Переменная окружения                          | Назначение                                                       | По умолчанию |
-|------------------------------------------------|-----------------------------------------------|------------------------------------------------------------------|--------------|
-| `companion.enabled`                            | `COMPANION_MODE`                              | Режим собеседника: темпоральный и тематический контекст плюс извлечение тем. | `false` |
-| `proactive.enabled`                            | `PROACTIVE_ENABLED`                           | Проактивный контур: бот пишет первым по триггерам.               | `false`      |
-| `proactive.events.enabled`                     | `PROACTIVE_EVENTS_ENABLED`                    | Контур внешних событий (требует `config.proactive.enabled`).    | `false`      |
-| `proactive.events.relevanceThreshold`          | `NEWS_RELEVANCE_THRESHOLD`                    | Порог релевантности внешнего события для уведомления.           | `0.6`        |
-| `proactive.intervalMs`                         | `PROACTIVE_INTERVAL_MS`                       | Как часто воркер проверяет триггеры (миллисекунды).             | `300000`     |
-| `proactive.inactivityMinutes`                  | `PROACTIVE_INACTIVITY_MIN`                    | Порог молчания для напоминания о себе (минуты).                 | `1440`       |
-| `proactive.checkinHour`                        | `PROACTIVE_CHECKIN_HOUR`                      | Час утреннего приветствия.                                       | `10`         |
-| `proactive.goalIntervalMinutes`                | `PROACTIVE_GOAL_INTERVAL_MIN`                 | Интервал между сообщениями по движению к цели (минуты).         | `2880`       |
-| `proactive.welcomeBackGapMinutes`              | `PROACTIVE_WELCOME_GAP_MIN`                   | Пауза перед приветствием вернувшегося собеседника (минуты).     | `60`         |
-| `proactive.contactPolicy.softDailyLimit`       | `PROACTIVE_SOFT_DAILY_LIMIT`                  | Суточный лимит инициативных сообщений.                          | `1`          |
-| `proactive.contactPolicy.softWeeklyLimit`      | `PROACTIVE_SOFT_WEEKLY_LIMIT`                 | Недельный лимит инициативных сообщений.                         | `3`          |
-| `proactive.contactPolicy.requestedReminderDailyLimit` | `PROACTIVE_REQUESTED_REMINDER_DAILY_LIMIT` | Суточный лимит запрошенных пользователем напоминаний.        | `2`          |
-| `proactive.contactPolicy.minSoftPauseMinutes`  | `PROACTIVE_MIN_SOFT_PAUSE_MIN`                | Минимальная пауза между инициативными сообщениями (минуты).    | `360`        |
-| `proactive.contactPolicy.quietAfterUnanswered` | `PROACTIVE_QUIET_AFTER_UNANSWERED`            | Сколько неотвеченных сообщений переводят бота в тишину.         | `2`          |
-| `proactive.contactPolicy.quietHoursAfterIgnores`| `PROACTIVE_QUIET_HOURS_AFTER_IGNORES`        | Сколько часов молчать после игнорирования (часы).              | `24`         |
+| `config` path                                   | Environment variable                           | Purpose                                                                   | Default |
+|-------------------------------------------------|------------------------------------------------|---------------------------------------------------------------------------|---------|
+| `companion.enabled`                             | `COMPANION_MODE`                               | Companion mode: temporal and thematic context plus topic extraction.      | `false` |
+| `proactive.enabled`                             | `PROACTIVE_ENABLED`                            | Proactive loop: the bot initiates messages based on triggers.             | `false` |
+| `proactive.events.enabled`                      | `PROACTIVE_EVENTS_ENABLED`                     | External-events loop (requires `config.proactive.enabled`).               | `false` |
+| `proactive.events.relevanceThreshold`           | `NEWS_RELEVANCE_THRESHOLD`                     | Relevance threshold for notifying the user about an external event.       | `0.6`   |
+| `proactive.intervalMs`                          | `PROACTIVE_INTERVAL_MS`                        | How often the worker checks for triggers (milliseconds).                  | `300000`|
+| `proactive.inactivityMinutes`                   | `PROACTIVE_INACTIVITY_MIN`                     | Silence threshold before a check-in message is sent (minutes).            | `1440`  |
+| `proactive.checkinHour`                         | `PROACTIVE_CHECKIN_HOUR`                       | Hour of the morning greeting.                                             | `10`    |
+| `proactive.goalIntervalMinutes`                 | `PROACTIVE_GOAL_INTERVAL_MIN`                  | Interval between goal-progress messages (minutes).                        | `2880`  |
+| `proactive.welcomeBackGapMinutes`               | `PROACTIVE_WELCOME_GAP_MIN`                    | Pause before greeting a returning user (minutes).                         | `60`    |
+| `proactive.contactPolicy.softDailyLimit`        | `PROACTIVE_SOFT_DAILY_LIMIT`                   | Daily limit for bot-initiated messages.                                   | `1`     |
+| `proactive.contactPolicy.softWeeklyLimit`       | `PROACTIVE_SOFT_WEEKLY_LIMIT`                  | Weekly limit for bot-initiated messages.                                  | `3`     |
+| `proactive.contactPolicy.requestedReminderDailyLimit` | `PROACTIVE_REQUESTED_REMINDER_DAILY_LIMIT` | Daily limit for user-requested reminders.                           | `2`     |
+| `proactive.contactPolicy.minSoftPauseMinutes`   | `PROACTIVE_MIN_SOFT_PAUSE_MIN`                 | Minimum pause between bot-initiated messages (minutes).                   | `360`   |
+| `proactive.contactPolicy.quietAfterUnanswered`  | `PROACTIVE_QUIET_AFTER_UNANSWERED`             | Number of unanswered messages that put the bot into silence mode.         | `2`     |
+| `proactive.contactPolicy.quietHoursAfterIgnores`| `PROACTIVE_QUIET_HOURS_AFTER_IGNORES`          | How many hours to stay silent after being ignored (hours).                | `24`    |
 
-## Поджатие истории
+## History Compression
 
-Последние `config.historyCompression.hotWindow` сообщений всегда передаются дословно; всё, что старше, сжимается в
-дайджест (краткое связное изложение).
+The most recent `config.historyCompression.hotWindow` messages are always passed verbatim; everything older is
+compressed into a digest (a concise coherent summary).
 
-| Путь в `config`                       | Переменная окружения           | Назначение                                                         | По умолчанию          |
-|---------------------------------------|--------------------------------|--------------------------------------------------------------------|-----------------------|
-| `historyCompression.enabled`          | `HISTORY_COMPRESSION_ENABLED`  | Сжатие старой части истории диалога.                               | `false`               |
-| `historyCompression.hotWindow`        | `HISTORY_HOT_WINDOW`           | Сколько последних сообщений не сжимать вообще.                     | `8`                   |
-| `historyCompression.maxTokens`        | `HISTORY_MAX_TOKENS`           | Порог запуска сжатия холодной зоны (токены).                      | `2000`                |
-| `historyCompression.shrinkTokens`     | `HISTORY_SHRINK_TOKENS`        | Целевой максимум размера дайджеста (меньше `config.historyCompression.maxTokens`). | `800`     |
-| `historyCompression.minCompressGain`  | `HISTORY_MIN_COMPRESS_GAIN`    | Минимальный выигрыш сжатия, иначе дайджест не перезаписывается.    | `0.35`                |
-| `historyCompression.model`            | `HISTORY_SUMMARY_MODEL`        | Модель построения дайджеста.                                       | `gpt-5.4-nano`        |
-| `historyCompression.zoneWeights`      | `HISTORY_ZONE_WEIGHTS`         | Веса ближней, средней и дальней зон истории.                      | `[0.55, 0.30, 0.15]`  |
+| `config` path                       | Environment variable           | Purpose                                                                      | Default              |
+|-------------------------------------|--------------------------------|------------------------------------------------------------------------------|----------------------|
+| `historyCompression.enabled`        | `HISTORY_COMPRESSION_ENABLED`  | Compression of the older portion of the dialogue history.                    | `false`              |
+| `historyCompression.hotWindow`      | `HISTORY_HOT_WINDOW`           | How many recent messages to leave uncompressed.                              | `8`                  |
+| `historyCompression.maxTokens`      | `HISTORY_MAX_TOKENS`           | Token threshold that triggers compression of the cold zone.                  | `2000`               |
+| `historyCompression.shrinkTokens`   | `HISTORY_SHRINK_TOKENS`        | Target maximum size of the digest (must be less than `config.historyCompression.maxTokens`). | `800` |
+| `historyCompression.minCompressGain`| `HISTORY_MIN_COMPRESS_GAIN`    | Minimum compression gain required; otherwise the digest is not rewritten.   | `0.35`               |
+| `historyCompression.model`          | `HISTORY_SUMMARY_MODEL`        | Model used to build the digest.                                              | `gpt-5.4-nano`       |
+| `historyCompression.zoneWeights`    | `HISTORY_ZONE_WEIGHTS`         | Weights for the near, mid, and far history zones.                            | `[0.55, 0.30, 0.15]` |
 
-В YAML-файлах значение `config.historyCompression.zoneWeights` записывается массивом, например `[0.55, 0.30, 0.15]`. При
-переопределении через переменную окружения `HISTORY_ZONE_WEIGHTS` передаётся строка с JSON-массивом, например
-`[0.55,0.30,0.15]`.
+In YAML files `config.historyCompression.zoneWeights` is written as an array, e.g. `[0.55, 0.30, 0.15]`. When
+overriding via the environment variable `HISTORY_ZONE_WEIGHTS`, pass a JSON-array string, e.g. `[0.55,0.30,0.15]`.
 
-## Внешние провайдеры
+## External Providers
 
-| Путь в `config`               | Переменная окружения  | Назначение                                                     | По умолчанию |
-|-------------------------------|-----------------------|----------------------------------------------------------------|--------------|
-| `providers.assemblyaiApiKey`  | `ASSEMBLYAI_API_KEY`  | Ключ доступа к AssemblyAI (альтернативный распознаватель речи).| —            |
-| `providers.groqApiKey`        | `GROQ_API_KEY`        | Ключ доступа к Groq (модели и распознавание речи Whisper).     | —            |
-| `providers.groqBaseURL`       | `GROQ_BASE_URL`       | Адрес API Groq; если пусто — стандартный адрес Groq.          | пусто        |
-| `providers.tavilyApiKey`      | `TAVILY_API_KEY`      | Ключ доступа к поиску Tavily (источник внешних событий).       | —            |
+| `config` path                 | Environment variable  | Purpose                                                              | Default |
+|-------------------------------|-----------------------|----------------------------------------------------------------------|---------|
+| `providers.assemblyaiApiKey`  | `ASSEMBLYAI_API_KEY`  | API key for AssemblyAI (alternative speech recogniser).              | —       |
+| `providers.groqApiKey`        | `GROQ_API_KEY`        | API key for Groq (models and Whisper speech recognition).            | —       |
+| `providers.groqBaseURL`       | `GROQ_BASE_URL`       | Groq API address; if empty — the default Groq endpoint is used.      | empty   |
+| `providers.tavilyApiKey`      | `TAVILY_API_KEY`      | API key for Tavily search (source of external events).               | —       |
 
-## Ядро потокового вывода
+## Core Streaming
 
-Потоковый вывод (streaming) — это передача ответа модели по частям, по мере его порождения. Параметр в этом разделе
-канал-независим: он управляет потоковым вызовом модели в ядре агента и не относится к отображению ответа в конкретном
-мессенджере.
+Streaming is the delivery of a model response in chunks as it is generated. The setting in this section is
+channel-agnostic: it controls the streaming call to the model in the agent core and has nothing to do with how
+responses are displayed in a particular messenger.
 
-| Путь в `config`      | Переменная окружения | Назначение                                  | По умолчанию |
-|----------------------|----------------------|---------------------------------------------|--------------|
-| `streaming.enabled`  | `STREAMING_ENABLED`  | Потоковый вызов модели в ядре агента.        | `true`       |
+| `config` path       | Environment variable | Purpose                                       | Default |
+|---------------------|----------------------|-----------------------------------------------|---------|
+| `streaming.enabled` | `STREAMING_ENABLED`  | Streaming model call in the agent core.       | `true`  |
 
-## Планировщик фоновых задач
+## Background Task Scheduler
 
-| Путь в `config`           | Переменная окружения      | Назначение                                          | По умолчанию  |
-|---------------------------|---------------------------|-----------------------------------------------------|---------------|
-| `scheduler.minSleepMs`    | `SCHEDULER_MIN_SLEEP_MS`  | Минимальная пауза цикла планировщика (миллисекунды).| `250`         |
-| `scheduler.maxSleepMs`    | `SCHEDULER_MAX_SLEEP_MS`  | Максимальная пауза цикла планировщика (миллисекунды).| `30000`      |
-| `scheduler.workerId`      | `SCHEDULER_WORKER_ID`     | Идентификатор воркера планировщика.                 | `scheduler-1` |
+| `config` path          | Environment variable      | Purpose                                                     | Default       |
+|------------------------|---------------------------|-------------------------------------------------------------|---------------|
+| `scheduler.minSleepMs` | `SCHEDULER_MIN_SLEEP_MS`  | Minimum pause in the scheduler loop (milliseconds).         | `250`         |
+| `scheduler.maxSleepMs` | `SCHEDULER_MAX_SLEEP_MS`  | Maximum pause in the scheduler loop (milliseconds).         | `30000`       |
+| `scheduler.workerId`   | `SCHEDULER_WORKER_ID`     | Scheduler worker identifier.                                | `scheduler-1` |
 
-## Протокол MCP и веб-песочница
+## MCP Protocol and Web Sandbox
 
-MCP (Model Context Protocol) — протокол подключения внешних инструментов к модели.
+MCP (Model Context Protocol) is the protocol for connecting external tools to the model.
 
-| Путь в `config`  | Переменная окружения | Назначение                                                                 | По умолчанию |
-|------------------|----------------------|----------------------------------------------------------------------------|--------------|
-| `mcp.configPath` | `MCP_CONFIG_PATH`    | Путь к файлу со списком серверов MCP (резолвится относительно рабочего каталога). | `.mcp.json` |
-| `sandbox.port`   | `SANDBOX_PORT`       | Порт веб-песочницы.                                                         | `3000`       |
+| `config` path    | Environment variable | Purpose                                                                                    | Default     |
+|------------------|----------------------|--------------------------------------------------------------------------------------------|-------------|
+| `mcp.configPath` | `MCP_CONFIG_PATH`    | Path to the file listing MCP servers (resolved relative to the working directory).         | `.mcp.json` |
+| `sandbox.port`   | `SANDBOX_PORT`       | Port of the web sandbox.                                                                   | `3000`      |
 
-## Telegram-адаптер
+## Telegram Adapter
 
-Параметры канала Telegram. Они нужны только при запуске бота в Telegram и не влияют на работу ядра.
+Telegram channel parameters. These are only needed when running the bot in Telegram and do not affect the core.
 
-| Путь в `config`                            | Переменная окружения                       | Назначение                                                       | По умолчанию |
-|--------------------------------------------|--------------------------------------------|------------------------------------------------------------------|--------------|
-| `telegram.apiKey`                          | `TELEGRAM_API_KEY`                         | Токен бота Telegram; нужен только для канала Telegram.           | —            |
-| `telegram.maxConcurrency`                  | `TELEGRAM_MAX_CONCURRENCY`                 | Предел одновременной обработки сообщений.                        | `5`          |
-| `telegram.outboxSafetyIntervalMs`          | `TELEGRAM_OUTBOX_SAFETY_INTERVAL_MS`       | Интервал контрольного прохода по таблице исходящих (миллисекунды).| `30000`     |
-| `telegram.streaming.enabled`               | `TELEGRAM_STREAMING_ENABLED`               | Редактируемый черновик потокового ответа в Telegram.            | `true`       |
-| `telegram.streaming.editIntervalMs`        | `TELEGRAM_STREAMING_EDIT_INTERVAL_MS`      | Не чаще одного редактирования черновика за это время (миллисекунды). | `500`    |
-| `telegram.streaming.minEditChars`          | `TELEGRAM_STREAMING_MIN_EDIT_CHARS`        | Минимум накопленных новых символов между редактированиями.      | `20`         |
-| `telegram.streaming.minFirstDraftChars`    | `TELEGRAM_STREAMING_MIN_FIRST_DRAFT_CHARS` | Порог объёма текста до появления первого черновика.             | `50`         |
-| `telegram.streaming.toolStatuses`          | `TELEGRAM_STREAMING_TOOL_STATUSES`         | Показывать ли статус вызова инструмента.                        | `true`       |
+| `config` path                              | Environment variable                       | Purpose                                                              | Default |
+|--------------------------------------------|--------------------------------------------|----------------------------------------------------------------------|---------|
+| `telegram.apiKey`                          | `TELEGRAM_API_KEY`                         | Telegram bot token; required only for the Telegram channel.          | —       |
+| `telegram.maxConcurrency`                  | `TELEGRAM_MAX_CONCURRENCY`                 | Maximum number of messages processed concurrently.                   | `5`     |
+| `telegram.outboxSafetyIntervalMs`          | `TELEGRAM_OUTBOX_SAFETY_INTERVAL_MS`       | Interval for the outbox table control pass (milliseconds).           | `30000` |
+| `telegram.streaming.enabled`               | `TELEGRAM_STREAMING_ENABLED`               | Editable streaming-response draft in Telegram.                       | `true`  |
+| `telegram.streaming.editIntervalMs`        | `TELEGRAM_STREAMING_EDIT_INTERVAL_MS`      | Minimum time between draft edits (milliseconds).                     | `500`   |
+| `telegram.streaming.minEditChars`          | `TELEGRAM_STREAMING_MIN_EDIT_CHARS`        | Minimum number of new characters accumulated before an edit.         | `20`    |
+| `telegram.streaming.minFirstDraftChars`    | `TELEGRAM_STREAMING_MIN_FIRST_DRAFT_CHARS` | Text volume threshold before the first draft appears.                | `50`    |
+| `telegram.streaming.toolStatuses`          | `TELEGRAM_STREAMING_TOOL_STATUSES`         | Whether to show tool-call status messages.                           | `true`  |

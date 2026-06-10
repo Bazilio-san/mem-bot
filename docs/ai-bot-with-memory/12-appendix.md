@@ -1,12 +1,12 @@
-# 12. Источники и раскладка кода
+# 12. References and Code Layout
 
-## Внешняя документация
+## External Documentation
 
-- OpenAI API (модели, function-calling, structured outputs, embeddings):  
+- OpenAI API (models, function-calling, structured outputs, embeddings):  
   https://developers.openai.com
 - Model Context Protocol (MCP):  
   https://modelcontextprotocol.io
 
-## Рекомендуемая раскладка кода
+## Recommended Code Layout
 
 `src/`, `migrations/`, `skills/`, `tests/`

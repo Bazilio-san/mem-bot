@@ -1,32 +1,32 @@
-# 00. Принцип ведения документации телеграм-бота
+# 00. Documentation Principles for the Telegram Bot
 
-Этот документ задаёт правила, по которым ведётся документация телеграм-бота в каталоге `docs/telegram/`. Он первичен по
-отношению к остальным документам каталога: при любом их изменении или дополнении эти правила обязательны к соблюдению.
+This document establishes the rules for maintaining the Telegram bot documentation in the `docs/telegram/` directory.
+It takes precedence over all other documents in that directory: whenever any of them are changed or extended, these
+rules must be followed.
 
-## Единое действующее состояние
+## Single Authoritative State
 
-Документация телеграм-бота описывает **состояние действующей реализации** — то, как адаптер устроен сейчас, когда весь
-его функционал готов. Документы написаны в настоящем времени и от лица единственного актуального состояния, как если бы
-адаптер всегда был устроен именно так.
+The Telegram bot documentation describes **the state of the current implementation** — how the adapter is structured
+right now, with all its functionality in place. Documents are written in the present tense and from the perspective
+of the one and only current state, as if the adapter had always been built this way.
 
-## Без отсылок к прошлым состояниям
+## No References to Past States
 
-В документах **не должно быть отсылок к прошлым состояниям**: никаких «раньше было так, а теперь иначе», «добавлено в
-такой-то версии», «временно сделано упрощённо» и тому подобных исторических заметок. История изменений живёт в системе
-контроля версий, а не в самой документации.
+Documents **must not contain references to past states**: no "it used to work like this, now it works like that",
+no "added in version X", no "temporarily simplified", and no other historical notes of that kind. Change history
+belongs in version control, not in the documentation itself.
 
-## Новый функционал — как единственное состояние
+## New Functionality as the Only State
 
-Когда меняется или добавляется функционал телеграм-бота, его нельзя описывать как «новинку» или «изменение». Нужно найти
-подходящие места в документах и вписать его туда **как единственное действующее состояние** — так, будто адаптер всегда
-работал именно так.
+When Telegram bot functionality changes or is added, it must not be described as "new" or as a "change". Instead,
+find the appropriate places in the existing documents and integrate it there **as the sole current state** — as if
+the adapter had always worked that way.
 
-## Привязка к Telegram и граница со спецификацией
+## Telegram-Specific Scope and Boundary with the Specification
 
-В отличие от спецификации ИИ-бота (каталог `docs/ai-bot-with-memory/`), которая переносима и не привязана к каналу, **эта
-документация намеренно привязана к Telegram**: здесь и только здесь живут конкретные команды, меню, кнопки, коды нажатий
-и обработчики телеграм-адаптера. Бизнес-логику она не дублирует, а лишь показывает, как действия пользователя в Telegram
-отображаются на функции программного API ИИ-бота. Если какое-то поведение относится к ядру бота, а не к каналу, его
-место — в спецификации, а здесь остаётся только отображение в Telegram. Правила ведения самой спецификации — в
-`docs/ai-bot-with-memory/00-documentation-principles.md`.
-
+Unlike the AI bot specification (in `docs/ai-bot-with-memory/`), which is channel-agnostic and portable, **this
+documentation is intentionally Telegram-specific**: the concrete commands, menus, buttons, press codes, and
+Telegram adapter handlers live here and nowhere else. It does not duplicate business logic; it only shows how
+user actions in Telegram map onto the programmatic API of the AI bot. If a behaviour belongs to the bot core
+rather than to the channel, its place is in the specification — only the Telegram-level mapping stays here. The
+rules for maintaining the specification itself are in `docs/ai-bot-with-memory/00-documentation-principles.md`.

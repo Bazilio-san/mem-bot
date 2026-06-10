@@ -1,84 +1,81 @@
-# 02. Критерии готовности
+# 02. Readiness Criteria
 
-## Двенадцать базовых критериев
+## Twelve Core Criteria
 
-| ID | Критерий | Опорный модуль (рекомендация) |
+| ID | Criterion | Reference Module (recommendation) |
 |--------|----------|-------------------------------|
-| CRIT-1 | Пять видов памяти, каждый в своей логике | таблицы схемы `mem.*` в `migrations/001_init.sql` |
-| CRIT-2 | Не сохраняет мусор (важный факт не равен случайной фразе) | порог `passesAutoSave` в `src/pipeline/merge.js` |
-| CRIT-3 | Не раздувает промпт (10–30 фактов) | жёсткие лимиты `LIMITS` в `src/pipeline/retrieve.js` |
-| CRIT-4 | Новое сообщение важнее старой памяти | правило в системном промпте `MAIN_SYSTEM` (`src/agent.js`) |
-| CRIT-5 | Обновляет факт без дублей | `dedupe_key`, `decideDedupe`, обновление и архивирование в `merge.js` |
-| CRIT-6 | Различает факт, намерение и задачу | поля `scope` / `memory_kind` плюс отдельный планировщик |
-| CRIT-7 | Чувствительные данные — только с подтверждением | `src/pipeline/secure.js` (шифрование, согласие) |
-| CRIT-8 | Не раскрывает лишние данные | в промпт идёт только `redacted_summary` |
-| CRIT-9 | Вызывает инструменты (встроенные и внешние по MCP) | модули `src/pipeline/agent-tools/*`, внешние MCP-серверы из `.mcp.json` (`src/mcp/*`) и цикл инструментов в `agent.js` |
-| CRIT-10 | Работает с планировщиком | `src/pipeline/scheduler.js` (захват, повторы, перепланирование) |
-| CRIT-11 | Устойчив к вредным инструкциям в памяти | блок `MEMORY_CONTEXT` подаётся как справка, а не команды |
-| CRIT-12 | Быстрый | классификация, быстрая выборка, ответ, асинхронная запись фактов |
+| CRIT-1 | Five memory types, each with its own logic | `mem.*` schema tables in `migrations/001_init.sql` |
+| CRIT-2 | Does not save noise (an important fact is not the same as a random phrase) | `passesAutoSave` threshold in `src/pipeline/merge.js` |
+| CRIT-3 | Does not bloat the prompt (10–30 facts) | hard `LIMITS` in `src/pipeline/retrieve.js` |
+| CRIT-4 | A new message takes precedence over old memory | rule in the `MAIN_SYSTEM` system prompt (`src/agent.js`) |
+| CRIT-5 | Updates a fact without duplicates | `dedupe_key`, `decideDedupe`, update and archival in `merge.js` |
+| CRIT-6 | Distinguishes a fact, an intention, and a task | `scope` / `memory_kind` fields plus a dedicated scheduler |
+| CRIT-7 | Sensitive data — only with confirmation | `src/pipeline/secure.js` (encryption, consent) |
+| CRIT-8 | Does not expose unnecessary data | only `redacted_summary` is included in the prompt |
+| CRIT-9 | Calls tools (built-in and external via MCP) | `src/pipeline/agent-tools/*` modules, external MCP servers from `.mcp.json` (`src/mcp/*`), and the tool loop in `agent.js` |
+| CRIT-10 | Works with the scheduler | `src/pipeline/scheduler.js` (capture, retries, rescheduling) |
+| CRIT-11 | Resistant to harmful instructions in memory | the `MEMORY_CONTEXT` block is supplied as reference material, not as commands |
+| CRIT-12 | Fast | classification, quick retrieval, response, asynchronous fact writing |
 
-Дополнительно пользователь может удалить свою память: опорный модуль `src/pipeline/admin.js` должен давать мягкое удаление
-одной записи и полное забывание. Каждый из двенадцати базовых критериев и удаление памяти ДОЛЖНЫ покрываться
-обязательным тестом.
+Additionally, the user must be able to delete their own memory: the reference module `src/pipeline/admin.js` must
+provide soft deletion of a single record and full forgetting. Each of the twelve core criteria and memory deletion
+MUST be covered by a mandatory test.
 
 ---
 
-## Пять новых критериев проактивности
+## Five New Proactivity Criteria
 
-| ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
+| ID | Criterion | Reference Module (recommendation) | Enable Flag |
 |---------|----------|-------------------------------|----------------|
-| CRIT-13 | Бот не зацикливается на темах (тематический трекинг) | `mem.topic_mentions` + `src/pipeline/topics.js` | `config.companion.enabled` |
-| CRIT-14 | Ответы уместны по времени (темпоральный контекст) | `src/utils/temporal.js` | дата/время/пояс — всегда; настрой момента — `config.companion.enabled` |
-| CRIT-15 | Бот пишет первым по уместному поводу, учитывая молчание пользователя | `mem.proactive_triggers` + `mem.proactive_contact_state` + `src/pipeline/proactiveContactPolicy.js` | `config.proactive.enabled` |
-| CRIT-16 | Тёплая встреча возврата и единый стиль коммуникатора | входящий `welcome_back`-сигнал в `src/agent.js` + `src/pipeline/proactiveMessage.js` | `config.proactive.enabled` |
-| CRIT-17 | Внешние события превращаются в персональные поводы | `src/pipeline/events.js` + `mem.event_deliveries` | `config.proactive.events.enabled` |
+| CRIT-13 | The bot does not loop on topics (topic tracking) | `mem.topic_mentions` + `src/pipeline/topics.js` | `config.companion.enabled` |
+| CRIT-14 | Responses are appropriate in time (temporal context) | `src/utils/temporal.js` | date/time/timezone — always; mood of the moment — `config.companion.enabled` |
+| CRIT-15 | The bot initiates contact on an appropriate occasion, respecting the user's silence | `mem.proactive_triggers` + `mem.proactive_contact_state` + `src/pipeline/proactiveContactPolicy.js` | `config.proactive.enabled` |
+| CRIT-16 | Warm return greeting and a consistent communicator style | incoming `welcome_back` signal in `src/agent.js` + `src/pipeline/proactiveMessage.js` | `config.proactive.enabled` |
+| CRIT-17 | External events are turned into personal occasions | `src/pipeline/events.js` + `mem.event_deliveries` | `config.proactive.events.enabled` |
 
-всех пяти — в [09-proactivity.md](09-proactivity.md).
+Details for all five are in [09-proactivity.md](09-proactivity.md).
 
 ---
 
-## Критерий поджатия истории диалога
+## History Compression Criterion
 
-| ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
+| ID | Criterion | Reference Module (recommendation) | Enable Flag |
 |---------|----------|-------------------------------|----------------|
-| CRIT-18 | Сжатая история: горячее окно дословно, холодная зона в дайджест, без дублей с памятью | `mem.conversation_summaries` + `src/pipeline/history-context.js` и `history-compress.js` | `config.historyCompression.enabled` |
+| CRIT-18 | Compressed history: the hot window verbatim, the cold zone as a digest, no duplicates with memory | `mem.conversation_summaries` + `src/pipeline/history-context.js` and `history-compress.js` | `config.historyCompression.enabled` |
 
-Критерий считается выполненным, когда последние `N` сообщений всегда уходят дословно, старая история сворачивается в
-`HISTORY_CONTEXT` заданного размера с градиентом «ближнее подробнее дальнего», история не повторяет факты из
-`MEMORY_CONTEXT`, секреты не попадают в открытую сводку, а при выключенном флаге поведение остаётся базовым. Проверки — слой
-`layerHistory` в
-[10-operations.md](10-operations.md).
+The criterion is considered met when the last `N` messages are always passed verbatim, older history is folded into a
+`HISTORY_CONTEXT` of a defined size with a "recent is more detailed than distant" gradient, history does not repeat
+facts from `MEMORY_CONTEXT`, secrets do not appear in the open summary, and when the flag is off behavior remains
+baseline. Tests are in the `layerHistory` layer in [10-operations.md](10-operations.md).
 
 ---
 
-## Три критерия глобальной памяти
+## Three Global Memory Criteria
 
-| ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
+| ID | Criterion | Reference Module (recommendation) | Enable Flag |
 |---------|----------|-------------------------------|----------------|
-| CRIT-19 | Глобальные факты подмешиваются в каждый запрос, ограничены по числу | `mem.global_facts` + сборка `GLOBAL_FACTS` в `src/agent.js` | `config.globalMemory.factsEnabled` |
-| CRIT-20 | Общая база знаний (RAG): тексты видны всем, подмешиваются по релевантности, ищутся и удаляются по идентификатору | `mem.global_knowledge` + `src/pipeline/global-memory.js` | `config.globalMemory.ragEnabled` |
-| CRIT-21 | Наполнять и чистить глобальную память может только администратор (пометка `is_admin`) | проверка в `executeTool` + `isAdmin` в `src/pipeline/admin.js` | оба флага |
+| CRIT-19 | Global facts are injected into every request, limited in count | `mem.global_facts` + `GLOBAL_FACTS` assembly in `src/agent.js` | `config.globalMemory.factsEnabled` |
+| CRIT-20 | Shared knowledge base (RAG): texts are visible to all, injected by relevance, searched and deleted by identifier | `mem.global_knowledge` + `src/pipeline/global-memory.js` | `config.globalMemory.ragEnabled` |
+| CRIT-21 | Only an administrator (flagged `is_admin`) can populate and clean global memory | check in `executeTool` + `isAdmin` in `src/pipeline/admin.js` | both flags |
 
-Глобальная память общая для всех пользователей: глобальные факты присутствуют в каждом ответе, фрагменты базы знаний
-подмешиваются по релевантности запросу, а запись закрыта правами администратора. Каждый критерий включается флагом и при
-проверки — слой `layerGlobalMemory` в [10-operations.md](10-operations.md).
+Global memory is shared across all users: global facts are present in every response, knowledge-base fragments are
+injected by relevance to the request, and writing is restricted by administrator permissions. Each criterion is
+enabled by a flag, and tests are in the `layerGlobalMemory` layer in [10-operations.md](10-operations.md).
 
 ---
 
-## Критерий потоковой обратной связи
+## Streaming Feedback Criterion
 
-| ID | Критерий | Опорный модуль (рекомендация) | Флаг включения |
+| ID | Criterion | Reference Module (recommendation) | Enable Flag |
 |---------|----------|-------------------------------|----------------|
-| CRIT-22 | Потоковая выдача финального текста и абстрактные события хода обработки через `onEvent` | `chatStream` в `src/llm.js` + контур событий в `src/agent.js` | `config.streaming.enabled` (по умолчанию `true`) |
+| CRIT-22 | Streaming delivery of the final text and abstract processing-progress events via `onEvent` | `chatStream` in `src/llm.js` + event loop in `src/agent.js` | `config.streaming.enabled` (default `true`) |
 
-Критерий считается выполненным, когда `chatStream` собирает из потоковых дельт такой же финальный объект сообщения (с
-полями `content` и `tool_calls`), какой даёт непотоковый `chat`; ядро испускает события `assistant.delta`,
-`assistant.completed`, `tool.started`, `tool.completed`, `agent.completed` и `agent.failed` с гарантиями порядка из
-[ARCH-7] в [04-architecture.md](04-architecture.md); человеческое имя инструмента в событиях берётся из
-`toolTitle(name)` и не содержит аргументов; при выключенном флаге финальный `answer`, сохранение истории и
-`toolsUsed` совпадают по смыслу с потоковым режимом. Проверки — модульные тесты сборки и слой покрытия имён в
-[10-operations.md](10-operations.md).
+The criterion is considered met when `chatStream` assembles from streaming deltas the same final message object
+(with `content` and `tool_calls` fields) as the non-streaming `chat` produces; the core emits `assistant.delta`,
+`assistant.completed`, `tool.started`, `tool.completed`, `agent.completed`, and `agent.failed` events with the
+ordering guarantees from [ARCH-7] in [04-architecture.md](04-architecture.md); the human-readable tool name in
+events is taken from `toolTitle(name)` and contains no arguments; when the flag is off the final `answer`, history
+saving, and `toolsUsed` match the streaming mode semantically. Tests are the unit tests for assembly and the name
+coverage layer in [10-operations.md](10-operations.md).
 
 ---
-
-

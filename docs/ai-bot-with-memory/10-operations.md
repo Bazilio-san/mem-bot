@@ -1,14 +1,16 @@
-# 10. Операции: планировщик, инструменты, логирование, тесты
+# 10. Operations: Scheduler, Tools, Logging, Tests
 
-## [OPS-1] Планировщик напоминаний и фоновых задач
+## [OPS-1] Reminder and Background Task Scheduler
 
-Планировщик (`src/pipeline/scheduler.js`) умеет создавать задачу, безопасно захватывать просроченные задачи несколькими
-воркерами, выполнять разовую задачу ровно один раз, перепланировать регулярные и не терять ошибки. Сами задачи создаёт
-модель основного диалога через инструмент `scheduler_create_task`; отдельного шага извлечения задачи из сообщения нет.
+The scheduler (`src/pipeline/scheduler.js`) can create tasks, safely claim overdue tasks across multiple workers,
+execute a one-time task exactly once, reschedule recurring tasks, and never lose errors. Tasks themselves are created
+by the main dialogue model via the `scheduler_create_task` tool; there is no separate step for extracting a task from
+a message.
 
-### [OPS-2] Безопасный захват задач
+### [OPS-2] Safe Task Claiming
 
-Несколько воркеров не возьмут одну задачу благодаря приёму `FOR UPDATE SKIP LOCKED` и временной блокировке `locked_until`.
+Multiple workers will never pick up the same task, thanks to the `FOR UPDATE SKIP LOCKED` technique combined with a
+temporary `locked_until` lock.
 
 ```sql
 WITH due AS (
@@ -25,119 +27,120 @@ FROM due WHERE t.id = due.id
 RETURNING t.*;
 ```
 
-### [OPS-3] Выполнение, перепланирование, устойчивость к ошибкам
+### [OPS-3] Execution, Rescheduling, and Error Resilience
 
-Задача-напоминание кладёт сообщение в `notification_outbox` и создаёт запись запуска. Текстом сообщения служит поле
-`instruction` задачи: оно доставляется пользователю дословно, без какого-либо переформулирования. Поэтому при создании
-задачи инструментом `scheduler_create_task` модель обязана писать `instruction` как живую человеческую речь от первого
-лица с обращением на «ты» — например «Напоминаю, ты хотел позвонить маме», а не как служебную инструкцию в третьем лице
-вроде «Напомнить пользователю позвонить маме». Разовая после успеха
-переходит в `completed`, регулярная получает новое `next_run_at` и снова становится активной (счётчик попыток
-обнуляется). Если
-выполнение упало, ошибка не теряется: счётчик попыток растёт, запуск помечается `failed`, назначается повтор через
-тридцать секунд, а при исчерпании `max_attempts` задача переходит в `failed`.
+A reminder task places a message into `notification_outbox` and creates an execution record. The message text is the
+task's `instruction` field, delivered to the user verbatim without any rephrasing. Therefore, when creating a task
+with the `scheduler_create_task` tool, the model must write `instruction` as natural, first-person speech addressed
+directly to the user — for example "Reminder: you wanted to call your mom", not a third-person service instruction
+like "Remind the user to call their mom". A one-time task transitions to `completed` after success; a recurring task
+receives a new `next_run_at` and becomes active again (the attempt counter resets). If execution fails, the error is
+not lost: the attempt counter increments, the run is marked `failed`, a retry is scheduled in thirty seconds, and
+once `max_attempts` is exhausted the task transitions to `failed`.
 
-Воркер запускается отдельным процессом `src/scheduler-run.js` (`npm run scheduler`). Он не опрашивает базу через
-фиксированный интервал, а спит ровно до момента ближайшей запланированной задачи (адаптивный сон) и просыпается
-немедленно, как только создаётся новая задача. Мгновенное пробуждение построено на штатном механизме асинхронных
-уведомлений PostgreSQL: после вставки задачи функция `createTask` шлёт уведомление по каналу `scheduler_wake`
-(операция `NOTIFY`), а воркер подписан на этот канал выделенным соединением (операция `LISTEN`). Время до ближайшего
-запуска воркер получает функцией `msUntilDueTask`: она берёт минимальный `next_run_at` среди свободных активных
-задач по индексу `idx_tasks_due` и потому почти бесплатна. Длительность сна зажата двумя границами,
-`config.scheduler.minSleepMs` и `config.scheduler.maxSleepMs` (по умолчанию 250 и 30000 миллисекунд): нижняя не даёт воркеру
-частить, когда задачи идут вплотную, а верхняя гарантирует периодическую перепроверку базы и соблюдение интервала
-проактивности даже при полном отсутствии задач. Благодаря этому задержка срабатывания приближается к нулю, а в
-простое база и процессор почти не нагружаются: пустых опросов нет, пока нет работы. Этот же воркер при включённых
-флагах выполняет контуры проактивности — см. [09-proactivity.md](09-proactivity.md).
+The worker runs as a separate process `src/scheduler-run.js` (`npm run scheduler`). It does not poll the database on
+a fixed interval; instead it sleeps precisely until the next scheduled task is due (adaptive sleep) and wakes up
+immediately whenever a new task is created. This instant wake-up is built on PostgreSQL's native asynchronous
+notification mechanism: after inserting a task, the `createTask` function sends a notification on the
+`scheduler_wake` channel (the `NOTIFY` command), and the worker listens on that channel via a dedicated connection
+(the `LISTEN` command). The time until the next due task is computed by the `msUntilDueTask` function: it reads the
+minimum `next_run_at` among free active tasks using the `idx_tasks_due` index and is therefore nearly free. Sleep
+duration is clamped between two bounds, `config.scheduler.minSleepMs` and `config.scheduler.maxSleepMs` (defaults
+250 and 30 000 milliseconds): the lower bound prevents the worker from spinning when tasks arrive back-to-back, and
+the upper bound guarantees periodic database re-checks and adherence to the proactivity interval even when there are
+no tasks at all. As a result, firing latency approaches zero, and the database and CPU are barely loaded during
+idle periods — there are no empty polls while there is no work to do. This same worker, when the relevant flags are
+enabled, runs the proactivity loops — see [09-proactivity.md](09-proactivity.md).
 
-Точный расчёт следующего запуска поддержан для всех видов расписания. `one_time` берёт абсолютный `run_at` и после
-успешного выполнения завершает задачу. `interval` считает следующий запуск от момента перепланирования, а не от старого
-`next_run_at`. `cron` использует `cron_expr` через `cron-parser` и учитывает `timezone`: выражение `0 9 * * 1-5`
-означает 09:00 по локальному времени пользователя в будние дни. `rrule` использует реальные iCalendar RRULE-строки через
-`rrule`; для правил без `DTSTART` код явно задаёт опорный старт, чтобы результат не зависел от дефолта библиотеки.
+Precise next-run calculation is supported for all schedule types. `one_time` uses an absolute `run_at` and completes
+the task after successful execution. `interval` calculates the next run from the moment of rescheduling, not from
+the old `next_run_at`. `cron` uses `cron_expr` via `cron-parser` and respects `timezone`: the expression
+`0 9 * * 1-5` means 09:00 in the user's local time on weekdays. `rrule` uses real iCalendar RRULE strings via the
+`rrule` library; for rules without `DTSTART`, the code explicitly sets an anchor start so the result does not depend
+on the library's default.
 
-Некорректный или пустой IANA timezone не роняет воркер: планировщик нормализует его через `Intl.DateTimeFormat` и
-переходит на `config.timezone` или `Europe/Moscow`. Невалидные `cron_expr` и `rrule` не заменяются суточным шагом:
-создание такой задачи отклоняется с понятной ошибкой, а ошибка перепланирования уже существующей задачи переводит её в
-`failed` и пишет причину в `mem.scheduled_task_runs.error_text`.
+An invalid or empty IANA timezone does not crash the worker: the scheduler normalises it via `Intl.DateTimeFormat`
+and falls back to `config.timezone` or `Europe/Moscow`. Invalid `cron_expr` and `rrule` values are not replaced with
+a daily fallback: creating such a task is rejected with a clear error, and a rescheduling error on an already
+existing task transitions it to `failed` and writes the reason to `mem.scheduled_task_runs.error_text`.
 
-Результат `scheduler_create_task` сохраняет прежнее машинное поле `next_run_at` в UTC и дополнительно возвращает
-`timezone`, `next_run_at_local`, `schedule_kind`, `cron_expr` и `rrule`. Поэтому модель может подтвердить пользователю
-регулярное расписание в локальном времени задачи, не вычисляя его из UTC самостоятельно.
+The result of `scheduler_create_task` preserves the machine-readable `next_run_at` field in UTC and additionally
+returns `timezone`, `next_run_at_local`, `schedule_kind`, `cron_expr`, and `rrule`. This allows the model to confirm
+a recurring schedule to the user in the task's local time without computing it from UTC manually.
 
-Фоновые задачи памяти выполняются тем же планировщиком. `memory_cleanup` архивирует активные записи с истёкшим
-`expires_at`; `memory_dedupe_cleanup` запускает смысловую дедупликацию пользователя, выбирает канонические строки,
-архивирует дубли и пишет аудит в `metadata.dedupe`. Обе задачи идемпотентны: повторный запуск не трогает уже
-архивированные строки.
+Background memory tasks run on the same scheduler. `memory_cleanup` archives active records whose `expires_at` has
+passed; `memory_dedupe_cleanup` runs semantic deduplication for a user, selects canonical rows, archives duplicates,
+and writes an audit entry to `metadata.dedupe`. Both tasks are idempotent: a repeated run does not touch already
+archived rows.
 
 ---
 
-## [OPS-4] Инструменты агента
+## [OPS-4] Agent Tools
 
-Каждый инструмент агента живёт в собственном модуле каталога `src/pipeline/agent-tools/`. В одном файле инструмента
-находятся четыре части его контракта: техническое имя `name`, короткий пользовательский `title`, OpenAI function
-definition `definition` и реальный обработчик `handler`. Центральный модуль `src/pipeline/tools.js` не содержит логики
-отдельных инструментов: он импортирует реестр, собирает definitions для модели, возвращает `toolTitle(name)`, проверяет
-права, вызывает нужный `handler` и журналирует результат.
+Each agent tool lives in its own module inside the `src/pipeline/agent-tools/` directory. A single tool file
+contains four parts of its contract: the technical `name`, a short human-readable `title`, the OpenAI function
+definition `definition`, and the actual `handler`. The central module `src/pipeline/tools.js` contains no per-tool
+logic: it imports the registry, assembles definitions for the model, returns `toolTitle(name)`, checks permissions,
+invokes the appropriate `handler`, and logs the result.
 
-Связанные инструменты сгруппированы по тематическим подпапкам внутри `agent-tools/`, чтобы каталог оставался обозримым:
-`global-fact/` — три инструмента глобальных фактов (`global_fact_add`, `global_fact_delete`, `global_fact_list`);
-`global-knowledge/` — три инструмента общей базы знаний (`global_knowledge_add`, `global_knowledge_delete`,
-`global_knowledge_search`); `memory/` — четыре инструмента личной памяти (`memory_search`, `memory_list`,
-`memory_forget_entity`, `memory_forget_all`); `voice/` — два инструмента голосового вывода (`voice_or_text`,
-`voice_set_preference`). Одиночные инструменты, не образующие группы (`scheduler_create_task`, `secure_record_get`),
-остаются файлами в корне каталога. Реестр `index.js` собирает все модули независимо от расположения, поэтому подпапки не
-влияют ни на сборку набора инструментов, ни на их имена.
+Related tools are grouped into thematic subdirectories within `agent-tools/` to keep the directory navigable:
+`global-fact/` — three global facts tools (`global_fact_add`, `global_fact_delete`, `global_fact_list`);
+`global-knowledge/` — three shared knowledge base tools (`global_knowledge_add`, `global_knowledge_delete`,
+`global_knowledge_search`); `memory/` — four personal memory tools (`memory_search`, `memory_list`,
+`memory_forget_entity`, `memory_forget_all`); `voice/` — two voice output tools (`voice_or_text`,
+`voice_set_preference`). Singular tools that do not form a group (`scheduler_create_task`, `secure_record_get`)
+remain as files in the root of the directory. The `index.js` registry collects all modules regardless of location,
+so subdirectories have no effect on tool set assembly or on tool names.
 
-Описания для модели пишутся на английском языке: это относится к `function.description` и ко всем `description` внутри
-JSON Schema параметров. `title` не передаётся модели как инструкция; это безопасное короткое имя для клиентских статусов,
-логов наблюдаемости и UI-событий вида «вызывается инструмент». Именно `toolTitle(name)` подставляется в поле `toolTitle`
-событий `tool.started` и `tool.completed`, которые ядро испускает вокруг каждого вызова инструмента (см. [ARCH-7] в
-[04-architecture.md](04-architecture.md)). Аргументы и результаты инструмента в пользовательские статусы и события не
-выводятся. Покрытие обязательно: каждое имя, попадающее в `buildToolDefs(ctx)` при любой комбинации прав и флагов,
-должно иметь непустой `title` (то есть `toolTitle(name)` не равен самому имени); это проверяется тестом реестра
-инструментов.
+Descriptions for the model are written in English: this applies to `function.description` and to all `description`
+fields within the JSON Schema parameters. `title` is not passed to the model as an instruction; it is a safe short
+name for client-side statuses, observability logs, and UI events of the form "tool is being called". It is
+`toolTitle(name)` that is substituted into the `toolTitle` field of the `tool.started` and `tool.completed` events
+that the core emits around each tool call (see [ARCH-7] in [04-architecture.md](04-architecture.md)). Tool arguments
+and results are not exposed in user-facing statuses or events. Coverage is mandatory: every name that appears in
+`buildToolDefs(ctx)` under any combination of permissions and flags must have a non-empty `title` (i.e.
+`toolTitle(name)` must not equal the name itself); this is verified by the tool registry test.
 
-Каждый вызов действительно меняет состояние базы или выполняет чтение из реального источника и записывается в журнал
-`tool_calls` с входом, выходом, статусом и задержкой.
+Every call either genuinely mutates database state or reads from a real source, and is recorded in the `tool_calls`
+log with input, output, status, and latency.
 
-| Инструмент | Title | Назначение |
-|------------|-------|------------|
-| `memory_search` | Ищу в личной памяти... | поиск релевантных фактов в памяти (вектор или полнотекст) |
-| `scheduler_create_task` | Создаю напоминание... | создать напоминание, регулярную задачу или проверку |
-| `secure_record_get` | Получаю защищённую запись... | получить полное защищённое значение строго по цели и согласию |
-| `memory_list` | Показываю личную память... | показать пользователю сохранённые факты его личной памяти |
-| `memory_forget_entity` | Удаляю факт из личной памяти... | мягко удалить конкретную сущность личной памяти |
-| `memory_forget_all` | Выполняю полное удаление личной памяти... | удалить всю активную личную память после явного подтверждения |
-| `global_fact_add` | Добавляю глобальный факт... | добавить глобальный факт (только администратор, флаг `config.globalMemory.factsEnabled`) |
-| `global_fact_delete` | Удаляю глобальный факт... | удалить глобальный факт (только администратор, флаг `config.globalMemory.factsEnabled`) |
-| `global_fact_list` | Показываю глобальные факты... | показать глобальные факты (только администратор, флаг `config.globalMemory.factsEnabled`) |
-| `global_knowledge_search` | Ищу в базе знаний... | поиск по общей базе знаний (всем; флаг `config.globalMemory.ragEnabled`) |
-| `global_knowledge_add` | Добавляю в базу знаний... | добавить текст в общую базу знаний (только администратор, флаг `config.globalMemory.ragEnabled`) |
-| `global_knowledge_delete` | Удаляю из базы знаний... | удалить текст общей базы знаний (только администратор, флаг `config.globalMemory.ragEnabled`) |
-| `voice_or_text` | Настраиваю формат ответа... | переключить форму ответа текст↔голос (флаг `VOICE_OUTPUT_ENABLED`) |
-| `voice_set_preference` | Настраиваю голос ответа... | сохранить пользовательский тембр голосового ответа (флаг `VOICE_OUTPUT_ENABLED`) |
+| Tool | Title | Purpose |
+|------|-------|---------|
+| `memory_search` | Searching personal memory... | search for relevant facts in memory (vector or full-text) |
+| `scheduler_create_task` | Creating reminder... | create a reminder, recurring task, or follow-up check |
+| `secure_record_get` | Fetching secure record... | retrieve a full protected value strictly by purpose and consent |
+| `memory_list` | Showing personal memory... | show the user their saved personal memory facts |
+| `memory_forget_entity` | Deleting fact from personal memory... | soft-delete a specific personal memory entity |
+| `memory_forget_all` | Performing full personal memory deletion... | delete all active personal memory after explicit confirmation |
+| `global_fact_add` | Adding global fact... | add a global fact (admin only, flag `config.globalMemory.factsEnabled`) |
+| `global_fact_delete` | Deleting global fact... | delete a global fact (admin only, flag `config.globalMemory.factsEnabled`) |
+| `global_fact_list` | Showing global facts... | show global facts (admin only, flag `config.globalMemory.factsEnabled`) |
+| `global_knowledge_search` | Searching knowledge base... | search the shared knowledge base (all users; flag `config.globalMemory.ragEnabled`) |
+| `global_knowledge_add` | Adding to knowledge base... | add text to the shared knowledge base (admin only, flag `config.globalMemory.ragEnabled`) |
+| `global_knowledge_delete` | Deleting from knowledge base... | delete text from the shared knowledge base (admin only, flag `config.globalMemory.ragEnabled`) |
+| `voice_or_text` | Configuring reply format... | toggle reply format between text and voice (flag `VOICE_OUTPUT_ENABLED`) |
+| `voice_set_preference` | Configuring reply voice... | save the user's preferred voice output timbre (flag `VOICE_OUTPUT_ENABLED`) |
 
-Набор инструментов собирается под конкретный запрос функцией `buildToolDefs(ctx)`: инструменты глобальной памяти
-подключаются только при включённых флагах, а административные — только администратору. Проверка прав дублируется в
-обёртке `executeTool`: вызов административного инструмента от не-администратора отклоняется и пишется в журнал
+The tool set is assembled per-request by `buildToolDefs(ctx)`: global memory tools are included only when their
+flags are enabled, and administrative tools only for administrators. The permission check is duplicated in the
+`executeTool` wrapper: a call to an administrative tool by a non-administrator is rejected and logged.
 
+The tool registry is the authoritative source of actions that the model can promise and perform. The skills registry
+is not such a source on its own: a skill selects context, memory, and domain schema, and restricts the available
+domain tools via its `tools.allowed` list, but it does not become a public capability without a corresponding tool.
+In responses about capabilities, the list of domains is not passed to the model; the bot derives actions from tool
+definitions and the RAG editorial article.
 
-Реестр инструментов является источником реальных действий, которые модель может обещать и выполнять. Реестр skills
-таким источником сам по себе не является: skill выбирает контекст, память и схему домена и ограничивает доступные
-предметные инструменты своим списком `tools.allowed`, но не превращается в публичную возможность без соответствующего
-инструмента. В ответах о возможностях список доменов не передаётся модели; бот выводит действия из tool definitions и
-редакционной статьи RAG.
+A separate group is the skill-editing tools (`skill_author_*`): creating a skill from a description, reading and
+validating it, editing fields, prompt blocks, domain schema and lookup tables, enabling, disabling, deleting, and
+reloading the registry. They are available only to administrators and only when the `SKILL_AUTHORING_ENABLED` flag is
+enabled; the model manages them through the `skill-author` editor skill (see
+[11-per-domain-schema.md](11-per-domain-schema.md)). Generative tools return a preview by default and write to disk
+only after confirmation; writes and deletions are restricted to the skills directory. Every operation passes through
+`executeTool` and is therefore logged in `tool_calls`.
 
-Отдельная группа — инструменты редактирования навыков (`skill_author_*`): создание навыка по описанию, чтение и
-проверка, правка полей, prompt-блоков, схемы домена и справочников, включение, выключение, удаление и перезагрузка
-реестра. Они доступны только администратору и только при включённом флаге `SKILL_AUTHORING_ENABLED`; модель управляет
-ими через навык-редактор `skill-author` (см. [11-per-domain-schema.md](11-per-domain-schema.md)). Порождающие
-инструменты по умолчанию возвращают предпросмотр и пишут на диск только после подтверждения; запись и удаление
-ограничены каталогом навыков. Каждая операция проходит через `executeTool` и потому журналируется в `tool_calls`.
-
-Журналирование и обработка ошибок — в единой обёртке `executeTool`: успех и ошибка одинаково попадают в `tool_calls`, а
-наверх возвращается либо результат, либо объект с полем `error`.
+Logging and error handling live in a single `executeTool` wrapper: both success and failure are recorded in
+`tool_calls`, and the return value is either the result or an object with an `error` field.
 
 ```js
 export async function executeTool(ctx, name, args) {
@@ -164,216 +167,226 @@ export async function executeTool(ctx, name, args) {
 }
 ```
 
-Сознательное решение: инструмент записи памяти основному агенту напрямую не даётся — запись идёт через отдельный контур
-после ответа (см. [06-memory.md](06-memory.md)).
+A deliberate design decision: the memory write tool is not given directly to the main agent — writes happen through
+a separate loop after the response (see [06-memory.md](06-memory.md)).
 
 ---
 
-## [OPS-4a] Внешние источники инструментов (MCP)
+## [OPS-4a] External Tool Sources (MCP)
 
-Кроме встроенных модулей `agent-tools/*`, инструменты агенту дают внешние серверы, работающие по протоколу
-**MCP (Model Context Protocol — открытый стандарт, по которому отдельный процесс предоставляет языковой модели набор
-инструментов)**. Их инструменты попадают в тот же реестр и видны модели наравне со встроенными, поэтому цикл
-инструментов из [04-architecture.md](04-architecture.md) их не различает.
+In addition to the built-in `agent-tools/*` modules, tools are also provided to the agent by external servers
+running the **MCP (Model Context Protocol — an open standard by which a separate process exposes a set of tools to a
+language model)**. Their tools are added to the same registry and are visible to the model on equal footing with
+built-in tools, so the tool loop from [04-architecture.md](04-architecture.md) makes no distinction between them.
 
-Список подключаемых серверов читается из файла `.mcp.json` в формате MCP-клиента: объект `mcpServers`, где ключ — это
-короткое имя сервера (его `alias`), а значение — описание сервера. Файл вынесен из-под контроля версий: у каждого
-окружения он свой и может содержать секреты. Путь к файлу можно переопределить переменной окружения `MCP_CONFIG_PATH`.
-Рекомендованные модули реализации — `src/mcp/config.js` (чтение и разбор файла) и `src/mcp/client.js` (подключение,
-обёртка инструментов, переподключение).
+The list of servers to connect is read from the `.mcp.json` file in the MCP-client format: an `mcpServers` object
+where the key is the server's short name (its `alias`) and the value is the server description. This file is kept
+out of version control: each environment has its own copy and it may contain secrets. The path to the file can be
+overridden with the `MCP_CONFIG_PATH` environment variable. The recommended implementation modules are
+`src/mcp/config.js` (reading and parsing the file) and `src/mcp/client.js` (connecting, wrapping tools,
+reconnecting).
 
-Поля записи сервера:
+Server record fields:
 
-| Поле | Назначение |
-|------|------------|
-| `type` | транспорт: поддерживаются `http` и `sse` (потоковый HTTP) |
-| `url` | адрес сервера; обязателен |
-| `headers` | заголовки транспорта — место для токена авторизации (необязательно) |
-| `title` | человекочитаемое имя сервера для журналов и статусов (необязательно) |
-| `requiresAdmin` | если `true`, инструменты сервера доступны только администратору (необязательно) |
-| `disabled` | если `true`, сервер пропускается без удаления записи (необязательно) |
+| Field | Purpose |
+|-------|---------|
+| `type` | transport: `http` and `sse` (streaming HTTP) are supported |
+| `url` | server address; required |
+| `headers` | transport headers — the place for an authorization token (optional) |
+| `title` | human-readable server name for logs and statuses (optional) |
+| `requiresAdmin` | if `true`, the server's tools are available to administrators only (optional) |
+| `disabled` | if `true`, the server is skipped without removing the record (optional) |
 
-Каждый инструмент сервера регистрируется под именем `<alias>__<исходное_имя>`: префикс существует только на стороне
-модели, а на сам сервер вызов уходит под исходным именем. Описание и JSON Schema параметров берутся из ответа сервера,
-поэтому обёртка не дублирует контракт инструмента. Человекочитаемое имя для статусов и журнала строится как
-`<title сервера>: <имя инструмента>`, чтобы `toolTitle(name)` не возвращал техническое имя `<alias>__…`.
+Each server tool is registered under the name `<alias>__<original_name>`: the prefix exists only on the model side,
+while the call to the server itself uses the original name. The description and JSON Schema for parameters are taken
+from the server's response, so the wrapper does not duplicate the tool contract. The human-readable name for
+statuses and the log is built as `<server title>: <tool name>`, so that `toolTitle(name)` does not return the
+technical `<alias>__…` form.
 
-Подключение **ленивое и одноразовое**: реестр дополняется инструментами MCP при первом сообщении и переиспользуется
-дальше (функция инициализации `initTools`, см. [04-architecture.md](04-architecture.md)). Признаки `requiresAdmin` и
-`disabled` из конфигурации сервера отдельного кода разграничения доступа не требуют — они пробрасываются в обёртку
-инструмента и закрываются теми же механизмами `requiresAdmin`/`isEnabled`, что и встроенные инструменты, а проверка
-прав, журналирование и обработка ошибок наследуются от единой обёртки `executeTool`.
+The connection is **lazy and one-time**: the registry is augmented with MCP tools on the first message and reused
+afterwards (the `initTools` initialisation function, see [04-architecture.md](04-architecture.md)). The
+`requiresAdmin` and `disabled` attributes from the server configuration require no separate access-control code —
+they are forwarded to the tool wrapper and handled by the same `requiresAdmin`/`isEnabled` mechanisms as built-in
+tools, while permission checking, logging, and error handling are inherited from the shared `executeTool` wrapper.
 
-Устойчивость к отказам обязательна на двух уровнях. Отсутствие файла `.mcp.json`, повреждённый JSON или неверная
-структура не роняют процесс: список серверов оказывается пустым, причина пишется в журнал, агент работает на встроенных
-инструментах. Недоступный при старте сервер логируется и пропускается, не мешая остальным. Вызов инструмента идёт с
-тайм-аутом 90 секунд, чтобы зависший сервер не блокировал цепочку рассуждений; при ошибке, похожей на разрыв связи,
-выполняется одна попытка переподключения и повторный вызов.
+Fault tolerance is required at two levels. A missing `.mcp.json` file, malformed JSON, or an invalid structure do
+not crash the process: the server list becomes empty, the reason is written to the log, and the agent operates on
+built-in tools. A server that is unavailable at startup is logged and skipped without blocking the others. A tool
+call carries a 90-second timeout so that a hung server cannot block the reasoning chain; on an error that looks like
+a connection drop, one reconnection attempt is made followed by a retry.
 
-Для отладки взаимодействия с сервером каждый вызов инструмента MCP трассируется: в `stderr` печатаются запрос (имя
-инструмента и аргументы) и ответ (содержимое и признак ошибки), а также факт переподключения при разрыве связи.
-Трассировка включается категорией `mcp:tool` в переменной `DEBUG` (например, `DEBUG=mcp:tool` или `DEBUG=*`) и по
-умолчанию выключена; общий механизм отладочных категорий описан в разделе [OPS-5].
-
----
-
-## [OPS-5] Логирование
-
-- **Аудит инструментов.** Каждый вызов попадает в `mem.tool_calls` с аргументами, результатом, статусом, задержкой и
-  ошибкой. Инструмент, меняющий состояние, без записи в журнал считается дефектом.
-- **Журнал обращений к модели.** Каждое обращение к языковой модели и к смежным сервисам (эмбеддинги, распознавание
-  и синтез речи) записывается в схему `log` (таблицы `log.llm_request` и `log.llm_usage`, см.
-  [05-data-schema.md](05-data-schema.md), раздел [DATA-12]). Запись устроена так, чтобы не задерживать ответ
-  пользователю и никогда не ронять основной поток: единый эмиттер (`src/pipeline/llm-log.js`) копит записи в буфере, а
-  фоновый таймер раз в `config.llmLog.flushIntervalMs` забирает пакет размером до `config.llmLog.batchSize` и одним
-  многострочным `INSERT` пишет его в `log.llm_request`; триггер базы сам заполняет узкую таблицу `log.llm_usage`. Любая
-  ошибка подготовки или вставки гасится внутри эмиттера. Текст запроса и ответа сохраняется в `payload` целиком, но
-  усекается до `config.llmLog.maxPayloadChars` (тогда выставляется `payload_truncated`); для бинарных данных (аудио)
-  сохраняются только метаданные файла. Тип каждого обращения задаётся полем `request_kind`: для эмбеддингов,
-  распознавания и синтеза речи он выводится по конечной точке, а для `chat.completions` обязан передаваться вызывающим
-  кодом явно — пропуск помечается типом `untyped` и выводит предупреждение в журнал. При штатной остановке процесса
-  остаток буфера дописывается принудительной выгрузкой (`flushLlmLog`), чтобы не потерять хвост журнала. Стоимость
-  обращения рассчитывается по прайс-листу моделей (`src/pipeline/llm-pricing.js`): имя модели нормализуется к ключу
-  прайс-листа, входящие и исходящие токены тарифицируются по своей цене за миллион, а кэшированные входящие токены —
-  по половинной; если модель в прайс-листе не найдена, стоимость остаётся пустой и об этом один раз предупреждается.
-  Быстрые агрегаты затрат (сумма за период, разбивка по типам запросов и по пользователю) считаются поверх узкой
-  таблицы модулем `src/pipeline/llm-usage-stats.js`. Логирование включается флагом `config.llmLog.enabled`; при
-  `false` эмиттер становится пустышкой и ничего не пишет.
-- **Запуски планировщика.** Каждый запуск фиксируется в `mem.scheduled_task_runs`. Ошибки задач не теряются.
-- **Отладочная трассировка.** Включается переменной `DEBUG` со списком категорий через запятую; категория `llm` печатает
-  в `stderr` запрос к модели, её ответ и вызовы инструментов; категория `mcp:tool` печатает запросы к инструментам
-  внешних MCP-серверов и их ответы (см. [OPS-4a]); `*` включает все. Трассировка идёт в `stderr`, чтобы не
-  смешиваться с пользовательским выводом, и по умолчанию выключена.
-- **Приватность в логах.** Полное значение защищённых данных в логи не попадает — только тип записи и факт доступа с целью.
-- **Развёрнутый русский для пользователя.** Сообщения, адресованные пользователю (консоль чата, вывод миграций и тестов),
-  пишутся понятными полными предложениями, а не телеграфным стилем.
+For debugging server interactions, every MCP tool call is traced: the request (tool name and arguments) and the
+response (content and error flag) are printed to `stderr`, as is any reconnection event. Tracing is enabled by the
+`mcp:tool` category in the `DEBUG` environment variable (e.g. `DEBUG=mcp:tool` or `DEBUG=*`) and is off by default;
+the general debug-category mechanism is described in section [OPS-5].
 
 ---
 
-## [OPS-6] Тесты и схема проверки
+## [OPS-5] Logging
 
-Главное требование: модель не должна «посмотреть код и сказать, что всё нормально». Проверка идёт по слоям на реальной
-PostgreSQL и реальных моделях через прокси (`tests/run.js`, `npm test`) и завершается ненулевым кодом при любом провале.
-Базовый слой даёт фиксированный набор проверок; при включённом `config.proactive.enabled` добавляется слой проверок
-проактивности.
+- **Tool audit.** Every call is recorded in `mem.tool_calls` with arguments, result, status, latency, and error. A
+  tool that mutates state without a log entry is considered a defect.
+- **Model request log.** Every call to the language model and to related services (embeddings, speech recognition
+  and synthesis) is recorded in the `log` schema (tables `log.llm_request` and `log.llm_usage`, see
+  [05-data-schema.md](05-data-schema.md), section [DATA-12]). Recording is designed to not delay the user response
+  and to never crash the main flow: a single emitter (`src/pipeline/llm-log.js`) accumulates records in a buffer,
+  and a background timer every `config.llmLog.flushIntervalMs` picks up a batch of up to `config.llmLog.batchSize`
+  entries and writes them to `log.llm_request` with a single multi-row `INSERT`; a database trigger then populates
+  the narrow `log.llm_usage` table. Any preparation or insertion error is suppressed inside the emitter. The full
+  request and response text is stored in `payload`, but truncated to `config.llmLog.maxPayloadChars` (in which case
+  `payload_truncated` is set); for binary data (audio), only file metadata is stored. The type of each call is set
+  by the `request_kind` field: for embeddings, speech recognition, and synthesis it is derived from the endpoint,
+  while for `chat.completions` it must be passed explicitly by the calling code — an omission is marked with the
+  type `untyped` and emits a warning to the log. On graceful process shutdown, the remaining buffer is flushed
+  (`flushLlmLog`) so that no tail of the log is lost. Call cost is computed from a model price list
+  (`src/pipeline/llm-pricing.js`): the model name is normalised to a price-list key, input and output tokens are
+  billed at their respective per-million rates, and cached input tokens are billed at half price; if a model is not
+  found in the price list the cost is left empty and a one-time warning is emitted. Fast cost aggregates (total for
+  a period, breakdown by request type and by user) are computed on top of the narrow table by
+  `src/pipeline/llm-usage-stats.js`. Logging is enabled by the `config.llmLog.enabled` flag; when set to `false`,
+  the emitter becomes a no-op and writes nothing.
+- **Scheduler runs.** Every execution is recorded in `mem.scheduled_task_runs`. Task errors are never lost.
+- **Debug tracing.** Enabled by the `DEBUG` environment variable with a comma-separated list of categories: the
+  `llm` category prints the model request, its response, and tool calls to `stderr`; the `mcp:tool` category prints
+  requests to external MCP-server tools and their responses (see [OPS-4a]); `*` enables all categories. Tracing
+  goes to `stderr` to avoid mixing with user output, and is off by default.
+- **Privacy in logs.** The full value of protected data never appears in logs — only the record type and the fact
+  of access with its stated purpose.
 
-### [OPS-7] Слои проверки
+---
 
-1. **Структура базы.** Базовые таблицы созданы; есть индексы по `user_id`, `status`, `expires_at`, векторный
-   HNSW и полнотекстовый GIN; присутствуют внешние ключи; чувствительные данные — в отдельной шифрованной таблице;
-   проходит минимальный CRUD-цикл.
-2. **Извлечение фактов** на наборе `tests/memory_cases.json`: устойчивые предпочтения сохраняются, мусор — нет, паспорт и
-   телефон распознаются как чувствительные. Порог — 80% верных кейсов (допустимая вариативность модели).
-3. **Двенадцать обязательных тестов** (см. ниже).
-4. **Приватность защищённых данных**: резюме без полного значения; отказ без согласия; успех после согласия и с целью;
-   отказ без указания цели.
-5. **Полный сценарий диалога с репетитором**: сохранены тема и стиль, создано напоминание, при возврате память
-   подтягивается выборкой.
-6. **Проактивность и режим собеседника** (только при `config.proactive.enabled`): отдельный слой, не влияющий на базовый прогон.
-7. **Поджатие истории диалога** (только при `config.historyCompression.enabled`): слой `layerHistory`, не влияющий на базовый
-   прогон. Проверяются порог, горячее окно, размер дайджеста, градиент, дедупликация с памятью, конфликт, секреты,
-   гистерезис, отключение флага и контур `facts_to_memory` — см. [13-history-compression.md](13-history-compression.md).
-8. **Глобальная память** (только при `config.globalMemory.factsEnabled` или `config.globalMemory.ragEnabled`): слой `layerGlobalMemory`, не
-   влияющий на базовый прогон. Проверяются структура, always-on факты, поиск по базе знаний, права администратора и
-   приватность — см. [14-global-memory.md](14-global-memory.md).
-9. **Покрытие человеческих имён инструментов.** Перебираются все комбинации прав пользователя и флагов глобальной памяти
-   и голосового вывода; для каждого имени, попадающего в `buildToolDefs(ctx)`, проверяется, что `toolTitle(name)` не
-   равен самому имени, то есть человеческое имя задано.
-10. **Сборка потокового ответа.** Отдельные модульные тесты без сети (`tests/streaming.test.mjs`) проверяют чистые
-    функции аккумулятора: накопление текста, сборку одного вызова инструмента из фрагментов, сборку двух вызовов по
-    разным индексам и отсутствие поля `tool_calls`, когда инструментов не было. Реальную потоковую отдачу прокси
-    (текст частями и потоковые дельты вызовов инструментов) подтверждает `tests/check-streaming.js`
-    (`npm run check:streaming`).
-11. **Реестр навыков и инструментарий редактирования.** Модульные тесты без сети: `tests/skills.test.mjs` проверяет
-    разбор файлов навыков, выбор по доменному ключу и фильтрацию инструментов; `tests/skill-authoring.test.mjs`
-    проверяет сборку `SKILL.md` из частей и обратный разбор, правила валидации навыка перед записью и ограничение
-    записи и удаления каталогом навыков.
+## [OPS-6] Tests and Verification Scheme
 
-### [OPS-8] Двенадцать обязательных тестов
+The core requirement is that the model must not "look at the code and say everything is fine". Verification proceeds
+in layers against a real PostgreSQL instance and real models via a proxy (`tests/run.js`, `npm test`) and exits with
+a non-zero code on any failure. The base layer provides a fixed set of checks; when `config.proactive.enabled` is
+set, a proactivity check layer is added.
+
+### [OPS-7] Verification Layers
+
+1. **Database structure.** Base tables are created; indexes exist on `user_id`, `status`, `expires_at`, a vector
+   HNSW index, and a full-text GIN index; foreign keys are present; sensitive data lives in a separate encrypted
+   table; a minimal CRUD cycle passes.
+2. **Fact extraction** against the `tests/memory_cases.json` dataset: stable preferences are saved, noise is not,
+   passport and phone number are recognised as sensitive. Threshold — 80% correct cases (permissible model
+   variability).
+3. **Twelve mandatory tests** (see below).
+4. **Protected data privacy**: summary without the full value; refusal without consent; success with consent and
+   purpose; refusal without a stated purpose.
+5. **Full tutor dialogue scenario**: topic and style are saved, a reminder is created, memory is retrieved by
+   selection on return.
+6. **Proactivity and companion mode** (only when `config.proactive.enabled`): a separate layer that does not
+   affect the base run.
+7. **Dialogue history compression** (only when `config.historyCompression.enabled`): the `layerHistory` layer,
+   which does not affect the base run. Verifies the threshold, hot window, digest size, gradient, deduplication
+   against memory, conflicts, secrets, hysteresis, flag disabling, and the `facts_to_memory` loop — see
+   [13-history-compression.md](13-history-compression.md).
+8. **Global memory** (only when `config.globalMemory.factsEnabled` or `config.globalMemory.ragEnabled`): the
+   `layerGlobalMemory` layer, which does not affect the base run. Verifies structure, always-on facts, knowledge
+   base search, administrator permissions, and privacy — see [14-global-memory.md](14-global-memory.md).
+9. **Tool human-name coverage.** All combinations of user permissions and global-memory and voice-output flags are
+   iterated; for every name appearing in `buildToolDefs(ctx)`, it is verified that `toolTitle(name)` does not equal
+   the name itself, meaning a human-readable name has been defined.
+10. **Streaming response assembly.** Standalone unit tests without network (`tests/streaming.test.mjs`) verify the
+    pure accumulator functions: text accumulation, assembling a single tool call from fragments, assembling two
+    calls with different indexes, and the absence of a `tool_calls` field when no tools were used. Real streaming
+    output from the proxy (text in chunks and streaming tool-call deltas) is verified by
+    `tests/check-streaming.js` (`npm run check:streaming`).
+11. **Skill registry and authoring tooling.** Unit tests without network: `tests/skills.test.mjs` verifies skill
+    file parsing, selection by domain key, and tool filtering; `tests/skill-authoring.test.mjs` verifies building
+    `SKILL.md` from parts and reverse parsing, skill validation rules before writing, and the restriction of writes
+    and deletions to the skills directory.
+
+### [OPS-8] Twelve Mandatory Tests
 
 ```text
-1.  Сохраняет устойчивое предпочтение.
-2.  Не сохраняет мусорную фразу.
-3.  Чувствительные данные требуют подтверждения и не сохраняются как обычный факт.
-4.  Обновляет старый факт (Москва → Казань), а не плодит дубли.
-4b. Смысловой дедуп стиля не оставляет активные дубли в разных `scope`.
-4c. Feature request не размножается между `goal`, `reminder` и `constraint`.
-4d. Контекст одной поездки не размножается между `dialog open_loop`, `domain goal` и `progress`.
-4e. Maintenance-dedup в dry-run ничего не меняет, а apply архивирует дубли с `metadata.dedupe`.
-5.  Достаёт только релевантную предметную память другого домена и не достаёт секреты.
-6.  Не раздувает промпт: профиль ≤ 7, домен ≤ 12, всего ≤ 30, нет полного номера паспорта.
-7.  Текущий запрос (Казань) важнее старой памяти (Москва).
-8.  Создаёт напоминание реальной записью в scheduled_tasks; заодно через `onEvent` проверяется контракт событий:
-    `agent.started` идёт первым, `tool.started` — до вызова инструмента и до `assistant.completed`, у события вызова
-    есть человеческое имя инструмента, в конце присутствует `agent.completed`.
-9.  Планировщик выполняет разовую задачу ровно один раз; 9b — регулярная перепланируется; 9c — ошибка фиксируется;
-    9d/9e — cron/RRULE, timezone, ошибки расписания и сохранение cron-задачи через tool.
-10. Инструмент вызывается реально, а не имитируется текстом.
-11. Вредная запись в памяти не выполняется как инструкция (паспорт не раскрыт).
-12. Пользователь может удалить одну запись и забыть всё.
+1.  Saves a stable preference.
+2.  Does not save a throwaway phrase.
+3.  Sensitive data requires confirmation and is not saved as a regular fact.
+4.  Updates an old fact (Moscow → Kazan) rather than creating duplicates.
+4b. Semantic style deduplication leaves no active duplicates across different `scope` values.
+4c. A feature request is not duplicated across `goal`, `reminder`, and `constraint`.
+4d. A single-trip context is not duplicated across `dialog open_loop`, `domain goal`, and `progress`.
+4e. Maintenance-dedup in dry-run changes nothing, while apply archives duplicates with `metadata.dedupe`.
+5.  Retrieves only relevant subject-matter memory from another domain and does not expose secrets.
+6.  Does not bloat the prompt: profile ≤ 7, domain ≤ 12, total ≤ 30, no full passport number.
+7.  The current request (Kazan) takes priority over older memory (Moscow).
+8.  Creates a reminder as a real row in scheduled_tasks; at the same time the event contract is verified via
+    `onEvent`: `agent.started` comes first, `tool.started` comes before the tool call and before
+    `assistant.completed`, the tool call event has a human-readable tool name, and `agent.completed` is present at
+    the end.
+9.  The scheduler executes a one-time task exactly once; 9b — a recurring task is rescheduled; 9c — an error is
+    recorded; 9d/9e — cron/RRULE, timezone, schedule errors, and saving a cron task via the tool.
+10. The tool is actually called, not simulated with text.
+11. A harmful entry in memory is not executed as an instruction (passport not disclosed).
+12. The user can delete a single record and forget everything.
 ```
 
-### Слой 6: проверки проактивности
+### Layer 6: Proactivity Checks
 
-Запускается только при `config.proactive.enabled` (`layerProactivity` в `tests/run.js`) и добавляет проверки проактивности:
+Runs only when `config.proactive.enabled` is set (`layerProactivity` in `tests/run.js`) and adds the following
+proactivity checks:
 
-- **Структура.** Таблицы `topic_mentions`, `proactive_triggers`, `proactive_contact_state`, `event_deliveries` созданы
-  и имеют индексы.
-- **Темпоральный контекст.** Корректные время суток и тип дня; пауза три часа форматируется как часы.
-- **Тематический трекинг.** Повторный `upsertTopicMentions` увеличивает счётчик до двух и сглаживает вовлечённость;
-  `getTopicContext` относит тему к высокововлечённым и распознаёт выгоревшую при пяти упоминаниях с низкой вовлечённостью.
-- **Contact policy.** Чистая проверка разрешает мягкую инициативу в активном режиме, блокирует новую мягкую инициативу
-  без ответа, разрешает высоковажный follow-up после большой паузы, переводит пользователя в тишину после повторного
-  молчания и запрещает фоновые социальные сообщения.
-- **Состояние контакта.** `recordProactiveSent` увеличивает `unanswered_proactive_count`; повторная мягкая инициатива
-  переводит состояние в `quiet`; входящее сообщение сбрасывает счётчик и `quiet_until` и даёт `welcome_back`-сигнал после
-  длинной паузы.
-- **Триггеры и анти-спам.** `ensureDefaultTriggers` создаёт ровно четыре триггера идемпотентно и по умолчанию
-  выключенными; `welcome_back` не срабатывает от фонового молчания; `inactivity` готов сработать при паузе больше
-  порога; после `fire` повторная проверка `shouldFire` возвращает `false`.
-- **Доставка.** Текст генерируется, попадает в `notification_outbox` с `payload.kind = 'proactive'` и появляется в истории
-  диалога.
-- **Защита от повтора события.** Ограничение уникальности `event_deliveries` не допускает двойной доставки; проход
-  `processEvents` отрабатывает без ошибок.
+- **Structure.** The tables `topic_mentions`, `proactive_triggers`, `proactive_contact_state`, and
+  `event_deliveries` are created and have indexes.
+- **Temporal context.** Correct time-of-day and day-type values; a three-hour pause is formatted in hours.
+- **Topic tracking.** A repeated `upsertTopicMentions` increments the counter to two and smooths engagement;
+  `getTopicContext` classifies the topic as highly engaged and recognises a burned-out topic after five mentions
+  with low engagement.
+- **Contact policy.** A clean check permits a soft initiative in active mode, blocks a new soft initiative without
+  a reply, permits a high-importance follow-up after a long pause, transitions the user to silence after repeated
+  non-response, and prohibits background social messages.
+- **Contact state.** `recordProactiveSent` increments `unanswered_proactive_count`; a repeated soft initiative
+  transitions state to `quiet`; an incoming message resets the counter and `quiet_until` and produces a
+  `welcome_back` signal after a long pause.
+- **Triggers and anti-spam.** `ensureDefaultTriggers` creates exactly four triggers idempotently and with all of
+  them disabled by default; `welcome_back` does not fire from background silence; `inactivity` is ready to fire
+  when the pause exceeds the threshold; after `fire`, a subsequent `shouldFire` check returns `false`.
+- **Delivery.** Text is generated, placed into `notification_outbox` with `payload.kind = 'proactive'`, and appears
+  in the dialogue history.
+- **Duplicate event protection.** The uniqueness constraint on `event_deliveries` prevents double delivery; a
+  `processEvents` pass completes without errors.
 
-### Слой 8: проверки глобальной памяти
+### Layer 8: Global Memory Checks
 
-Запускается при `config.globalMemory.factsEnabled` или `config.globalMemory.ragEnabled` (`layerGlobalMemory` в `tests/run.js`). Проверки
-фактов и базы знаний включаются независимо по своему флагу:
+Runs when `config.globalMemory.factsEnabled` or `config.globalMemory.ragEnabled` is set (`layerGlobalMemory` in
+`tests/run.js`). Facts and knowledge base checks are enabled independently by their respective flag:
 
-- **Структура.** Таблицы `global_facts` и `global_knowledge` созданы; есть колонка `mem.users.is_admin`, индекс активных
-  фактов, полнотекстовый GIN-индекс и векторный HNSW-индекс базы знаний; в глобальных таблицах нет `user_id` и
-  шифрованных секретов.
-- **Глобальные факты** (при `config.globalMemory.factsEnabled`). Засеянный факт о создателе виден в блоке `GLOBAL_FACTS`; лимит
-  числа фактов соблюдается; выключенный факт не подмешивается; доменный факт виден в своём домене и не виден в чужом.
-- **Общая база знаний** (при `config.globalMemory.ragEnabled`). Текст находится по близкому запросу и не возвращается по
-  постороннему; удаление по идентификатору убирает фрагмент из выдачи; лимит фрагментов соблюдается.
-- **Права администратора.** Не-администратор получает отказ при записи (отказ фиксируется как `blocked`); администратор
-  выполняет ту же запись успешно.
+- **Structure.** The tables `global_facts` and `global_knowledge` are created; the column `mem.users.is_admin`
+  exists; there is an active-facts index, a full-text GIN index, and a vector HNSW index for the knowledge base;
+  the global tables have no `user_id` column and no encrypted secrets.
+- **Global facts** (when `config.globalMemory.factsEnabled`). A seeded creator fact appears in the `GLOBAL_FACTS`
+  block; the fact count limit is respected; a disabled fact is not injected; a domain fact is visible in its own
+  domain and not visible in another.
+- **Shared knowledge base** (when `config.globalMemory.ragEnabled`). Text is found by a close query and not
+  returned for an unrelated one; deleting by identifier removes the fragment from results; the fragment count limit
+  is respected.
+- **Administrator permissions.** A non-administrator receives a refusal on write (refusal is recorded as
+  `blocked`); an administrator performs the same write successfully.
 
-### Слой 9: проверки голосового вывода
+### Layer 9: Voice Output Checks
 
-Запускается при `VOICE_OUTPUT_ENABLED` (`layerVoiceOutput` в `tests/run.js`). Проверяется ядровая часть голосового
-контракта:
+Runs when `VOICE_OUTPUT_ENABLED` is set (`layerVoiceOutput` in `tests/run.js`). Verifies the core of the voice
+output contract:
 
-- **Структура.** В `mem.users` есть `reply_mode` со значением по умолчанию `text` и nullable-колонка
-  `voice_output_voice`; новый пользователь создаётся без выбранного тембра.
-- **Форма ответа.** `voice_or_text` сохраняет `voice` или `text`, помечает `ctx.replyMode` и возвращает
-  сохранённое значение.
-- **Тембр голоса.** `voice_set_preference` валидирует выбор, сохраняет `voice_output_voice`, помечает
-  `ctx.voiceOutputVoice`, а неизвестные значения возвращает ошибкой без записи.
-- **Контракт результата.** `handleMessage` возвращает `replyMode` и `voiceOutputVoice`, чтобы канал доставки мог принять
-  решение без дополнительного чтения базы.
+- **Structure.** `mem.users` has a `reply_mode` column with a default value of `text` and a nullable
+  `voice_output_voice` column; a new user is created without a selected voice timbre.
+- **Reply format.** `voice_or_text` saves `voice` or `text`, marks `ctx.replyMode`, and returns the saved value.
+- **Voice timbre.** `voice_set_preference` validates the selection, saves `voice_output_voice`, marks
+  `ctx.voiceOutputVoice`, and returns an error for unknown values without writing.
+- **Result contract.** `handleMessage` returns `replyMode` and `voiceOutputVoice` so that the delivery channel can
+  make its decision without an additional database read.
 
-### [OPS-9] Правила тестирования
+### [OPS-9] Testing Rules
 
-Тесты используют реальную базу и реальные модели (не моки), создают чистого пользователя на случай, проверяют структуру до
-поведения, допускают ограниченную вариативность модели по доле верных кейсов и завершаются ненулевым кодом при провале.
-Запрещено отключать, комментировать или пропускать падающие тесты ради зелёного прогона: ищется и устраняется корневая
-причина. При выключенных флагах базовый слой проверок остаётся неизменным. Слой `layerHistory` подключается отдельным
-флагом `config.historyCompression.enabled` и так же не влияет на базовый прогон; перед доработкой нужно зафиксировать
-фактическое число проходящих проверок и проследить, чтобы после неё оно не уменьшилось. Слой `layerGlobalMemory`
-подключается флагами `config.globalMemory.factsEnabled` и `config.globalMemory.ragEnabled` и так же не влияет на базовый прогон.
+Tests use a real database and real models (no mocks), create a fresh user per case, check structure before
+behaviour, allow limited model variability expressed as a fraction of correct cases, and exit with a non-zero code
+on failure. Disabling, commenting out, or skipping failing tests to get a green run is prohibited: the root cause
+must be found and fixed. When flags are disabled, the base check layer remains unchanged. The `layerHistory` layer
+is activated by the separate `config.historyCompression.enabled` flag and likewise does not affect the base run;
+before making changes, the current number of passing checks must be recorded and must not decrease afterwards. The
+`layerGlobalMemory` layer is activated by the `config.globalMemory.factsEnabled` and
+`config.globalMemory.ragEnabled` flags and likewise does not affect the base run.
 
 ---
 

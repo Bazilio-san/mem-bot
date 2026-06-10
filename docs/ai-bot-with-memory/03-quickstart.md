@@ -1,213 +1,219 @@
-# 03. Быстрый старт и структура проекта
+# 03. Quick Start and Project Structure
 
-## [QS-1] Требования окружения
+## [QS-1] Environment Requirements
 
-- Node.js 22 и новее, тип модулей ESM (`"type": "module"` в `package.json`).
-- PostgreSQL 16 с расширениями `pgvector` (смысловой поиск по эмбеддингам) и `pgcrypto` (генерация UUID и хеши).
-- Заполненный `config/local.yaml`: параметры подключения к базе (`config.db.postgres.dbs.main.*`), ключ доступа к
-  модели `config.llm.apiKey` и секрет шифрования `config.authSecret`. Значение `config.llm.baseURL` задаётся только если
-  нужен OpenAI-совместимый прокси; без него используется прямой OpenAI API. Опционально — переопределение моделей и
-  параметров базы. Конфигурация строится пакетом `node-config` из каталога `config/`: `config/default.yaml` задаёт
-  значения по умолчанию, файл окружения (выбирается по `NODE_ENV`) их переопределяет, а локальные секреты лежат в
-  `config/local.yaml`; любое значение можно переопределить и одноимённой переменной окружения.
+- Node.js 22 or later, ESM module type (`"type": "module"` in `package.json`).
+- PostgreSQL 16 with the `pgvector` extension (semantic search over embeddings) and `pgcrypto` (UUID generation and
+  hashing).
+- A populated `config/local.yaml`: database connection parameters (`config.db.postgres.dbs.main.*`), the model access
+  key `config.llm.apiKey`, and the encryption secret `config.authSecret`. `config.llm.baseURL` is set only when an
+  OpenAI-compatible proxy is needed; without it the direct OpenAI API is used. Optionally, you can override models and
+  database parameters. Configuration is built by the `node-config` package from the `config/` directory:
+  `config/default.yaml` sets defaults, the environment file (selected by `NODE_ENV`) overrides them, and local secrets
+  live in `config/local.yaml`; any value can also be overridden by an environment variable of the same name.
 
 ---
 
-## [QS-2] Команды
+## [QS-2] Commands
 
 ```bash
-npm install            # установка зависимостей: openai, pg, config, af-db-ts, dotenv
-npm run migrate        # создаёт базу, расширения pgcrypto и vector, схемы mem и log, все таблицы и индексы (идемпотентно)
-npm run chat           # интерактивный чат в терминале
-npm run scheduler      # воркер планировщика напоминаний и проактивности
-npm test               # полный прогон проверок
-npm run check:llm      # проверка моделей через выбранный OpenAI-compatible endpoint
-npm run check:streaming # проверка потоковой отдачи endpoint (текст частями и дельты вызовов инструментов)
+npm install            # install dependencies: openai, pg, config, af-db-ts, dotenv
+npm run migrate        # creates the database, pgcrypto and vector extensions, mem and log schemas, all tables and indexes (idempotent)
+npm run chat           # interactive terminal chat
+npm run scheduler      # reminders and proactivity scheduler worker
+npm test               # full test suite
+npm run check:llm      # verify models via the selected OpenAI-compatible endpoint
+npm run check:streaming # verify streaming output from the endpoint (text chunks and tool-call deltas)
 ```
 
-Потоковый ответ модели включён по умолчанию: ядро выдаёт финальный текст по частям и испускает абстрактные события хода
-обработки через callback `onEvent` (см. [ARCH-7] в [04-architecture.md](04-architecture.md)). Выключатель —
-`config.streaming.enabled` (по умолчанию `true`); при значении `false` ядро работает тем же контуром без потоковой
-обратной связи.
+Streaming model responses are enabled by default: the core delivers the final text in chunks and emits abstract
+progress events via the `onEvent` callback (see [ARCH-7] in [04-architecture.md](04-architecture.md)). The toggle is
+`config.streaming.enabled` (default `true`); when set to `false` the core runs the same pipeline without streaming
+feedback.
 
-Управление skills (см. [11-per-domain-schema.md](11-per-domain-schema.md)): новый домен добавляется каталогом
-`skills/<name>/` с файлом `SKILL.md` и при необходимости `domain-schema.json`. Команда `npm run skills:validate`
-проверяет все skills; `npm run skills:list` показывает их домены, инструменты и наличие схемы; `npm run skills:sync`
-заводит в справочнике `mem.agent_domains` строки соответствия `domain_key` → `domain_id` для новых доменов. Кроме
-ручного редактирования файлов, навыки создаёт и правит администратор прямо в диалоге через инструментарий
-редактирования навыков; он включается флагом `config.skills.authoring.enabled` и доступен только администраторам.
+Skills management (see [11-per-domain-schema.md](11-per-domain-schema.md)): a new domain is added by creating a
+`skills/<name>/` directory containing a `SKILL.md` file and, if needed, `domain-schema.json`. The command
+`npm run skills:validate` validates all skills; `npm run skills:list` shows their domains, tools, and schema
+presence; `npm run skills:sync` creates `domain_key` → `domain_id` mapping rows for new domains in the
+`mem.agent_domains` reference table. In addition to manual file editing, skills can be created and updated by an
+administrator directly in conversation via the skill-authoring toolset, which is enabled by the flag
+`config.skills.authoring.enabled` and is available to administrators only.
 
-В интерактивном чате доступны команды: `/domain <ключ>` — сменить специализацию. Базовым доменом служит `general`, а
-домены вроде `flight_search` и `math_tutor` приведены лишь как иллюстративные примеры специализаций: конкретный набор
-skills задаётся самим проектом и не является обязательной частью требования. Далее доступны команды
-`/tick` — прогнать планировщик вручную; `/exit` — выход.
-Администратору доступны команды глобальной памяти: `/fact-add <текст>`,
-`/fact-list`, `/fact-del <id>` для глобальных фактов и `/kb-add <текст>`, `/kb-find <запрос>`, `/kb-del <id>` для общей
-базы знаний (поиск `/kb-find` доступен всем пользователям).
+The interactive chat supports the following commands: `/domain <key>` — switch the specialization domain. The
+base domain is `general`; domains such as `flight_search` and `math_tutor` are illustrative examples of
+specializations only — the actual set of skills is defined by the project itself and is not a mandatory
+requirement. Additional commands: `/tick` — run the scheduler manually; `/exit` — quit.
+Administrators have access to global-memory commands: `/fact-add <text>`, `/fact-list`, `/fact-del <id>` for
+global facts, and `/kb-add <text>`, `/kb-find <query>`, `/kb-del <id>` for the shared knowledge base
+(`/kb-find` is available to all users).
 
-Включение проактивности у пользователя и выбор поводов выполняются через программный API (`setUserProactivity`,
-`setTrigger`, `getProactivityState`), который проект-потребитель отображает в команды и меню своего канала доставки.
+Enabling proactivity for a user and choosing triggers is done through the programmatic API
+(`setUserProactivity`, `setTrigger`, `getProactivityState`), which the consuming project maps to commands and
+menus in its own delivery channel.
 
 ---
 
-## [QS-3] Флаги проактивности и режима собеседника
+## [QS-3] Proactivity and Companion Mode Flags
 
-| Путь в `config` | Назначение | По умолчанию |
-|-----------------|------------|--------------|
-| `companion.enabled` | стабильный prompt живого собеседника, настрой момента, тематический контекст, извлечение тем и companion-памяти; дата/время/часовой пояс передаются всегда независимо от флага | `true` |
-| `proactive.enabled` | глобальный выключатель проактивного контура (триггеры, анти-спам, доставка); сверх него каждый пользователь включает проактивность сам через программный API (`setUserProactivity`) | `true` |
-| `proactive.events.enabled` | контур внешних событий (требует `proactive.enabled`) | `false` |
-| `proactive.intervalMs` | как часто воркер проверяет триггеры | `300000` (5 минут) |
-| `proactive.inactivityMinutes` | порог молчания для триггера `inactivity` | `1440` |
-| `proactive.checkinHour` | час ежедневного приветствия | `10` |
-| `proactive.goalIntervalMinutes` | интервал напоминания о целях | `2880` |
-| `proactive.welcomeBackGapMinutes` | пауза, после которой пользователь считается вернувшимся | `60` |
-| `proactive.events.relevanceThreshold` | порог релевантности внешнего события | `0.6` |
+| `config` path | Purpose | Default |
+|---------------|---------|---------|
+| `companion.enabled` | stable live-companion prompt, moment tone, topic context, topic and companion-memory extraction; date/time/timezone are always passed regardless of this flag | `true` |
+| `proactive.enabled` | global switch for the proactive pipeline (triggers, anti-spam, delivery); on top of this each user enables proactivity individually via the programmatic API (`setUserProactivity`) | `true` |
+| `proactive.events.enabled` | external events pipeline (requires `proactive.enabled`) | `false` |
+| `proactive.intervalMs` | how often the worker checks triggers | `300000` (5 minutes) |
+| `proactive.inactivityMinutes` | silence threshold for the `inactivity` trigger | `1440` |
+| `proactive.checkinHour` | hour of the daily greeting | `10` |
+| `proactive.goalIntervalMinutes` | goal-reminder interval | `2880` |
+| `proactive.welcomeBackGapMinutes` | gap after which the user is considered to have returned | `60` |
+| `proactive.events.relevanceThreshold` | relevance threshold for an external event | `0.6` |
 
-Режим собеседника `companion.enabled` и проактивный контур `proactive.enabled` включены по умолчанию
-(`config/default.yaml`). Переопределить их для конкретного окружения — например, выключить — можно в
-`config/development.yaml`, `config/local.yaml` или одноимёнными переменными окружения при запуске воркера планировщика.
-Контур внешних событий `proactive.events.enabled` по умолчанию выключен и включается отдельно:
+The companion mode `companion.enabled` and the proactive pipeline `proactive.enabled` are on by default
+(`config/default.yaml`). To override them for a specific environment — for example, to disable them — use
+`config/development.yaml`, `config/local.yaml`, or the corresponding environment variables when starting the
+scheduler worker. The external events pipeline `proactive.events.enabled` is off by default and must be
+enabled separately:
 
 ```bash
-# выключить собеседника и проактивность для этого запуска
+# disable companion mode and proactivity for this run
 COMPANION_MODE=false PROACTIVE_ENABLED=false npm run scheduler
-# включить контур внешних событий
+# enable the external events pipeline
 PROACTIVE_EVENTS_ENABLED=true npm run scheduler
 ```
 
 ---
 
-## [QS-4] Флаги поджатия истории (по умолчанию включено)
+## [QS-4] History Compression Flags (enabled by default)
 
-| Путь в `config` | Назначение | По умолчанию |
-|-----------------|------------|--------------|
-| `historyCompression.enabled` | слой сжатой истории диалога (`HISTORY_CONTEXT` поверх горячего окна) | `true` |
-| `historyCompression.hotWindow` | сколько последних сообщений уходит в запрос дословно | `8` |
-| `historyCompression.maxTokens` | порог размера холодной зоны, при превышении запускается сжатие | `2000` |
-| `historyCompression.shrinkTokens` | целевой размер дайджеста после сжатия (должен быть меньше `historyCompression.maxTokens`) | `800` |
-| `historyCompression.zoneWeights` | доли бюджета дайджеста на ближнюю, среднюю и дальнюю зоны | `[0.55, 0.30, 0.15]` |
-| `historyCompression.model` | модель суммаризатора истории (по умолчанию совпадает с `config.llm.auxModel`) | `gpt-5.4-nano` |
-| `historyCompression.minCompressGain` | минимальный выигрыш сжатия, ниже которого пересжатие не выполняется | `0.35` |
+| `config` path | Purpose | Default |
+|---------------|---------|---------|
+| `historyCompression.enabled` | compressed history layer (`HISTORY_CONTEXT` on top of the hot window) | `true` |
+| `historyCompression.hotWindow` | number of recent messages sent verbatim in the request | `8` |
+| `historyCompression.maxTokens` | cold-zone size threshold above which compression is triggered | `2000` |
+| `historyCompression.shrinkTokens` | target digest size after compression (must be less than `historyCompression.maxTokens`) | `800` |
+| `historyCompression.zoneWeights` | digest budget shares for the near, middle, and far zones | `[0.55, 0.30, 0.15]` |
+| `historyCompression.model` | history summarizer model (defaults to `config.llm.auxModel`) | `gpt-5.4-nano` |
+| `historyCompression.minCompressGain` | minimum compression gain below which re-compression is skipped | `0.35` |
 
-
----
-
-## [QS-4a] Флаги глобальной памяти (по умолчанию включено)
-
-| Путь в `config` | Назначение | По умолчанию |
-|-----------------|------------|--------------|
-| `globalMemory.factsEnabled` | всегда-включённые глобальные факты (блок `GLOBAL_FACTS`) и их инструменты | `true` |
-| `globalMemory.factsLimit` | сколько глобальных фактов подмешивать в каждый запрос | `5` |
-| `globalMemory.ragEnabled` | общая база знаний (блок `GLOBAL_KNOWLEDGE`) и её инструменты | `true` |
-| `globalMemory.ragLimit` | сколько фрагментов базы знаний подмешивать по релевантности | `5` |
-| `globalMemory.ragMinRelevance` | порог релевантности: фрагменты слабее порога в контекст не идут | `0.3` |
-
-Флаги независимы: можно включить только постоянные факты, только базу знаний, оба сразу или ничего. Запись в глобальную
-[14-global-memory.md](14-global-memory.md).
 
 ---
 
-## [QS-4b] Флаги журнала обращений к модели (по умолчанию включено)
+## [QS-4a] Global Memory Flags (enabled by default)
 
-| Путь в `config` | Назначение | По умолчанию |
-|-----------------|------------|--------------|
-| `llmLog.enabled` | запись обращений к модели в схему `log`; при `false` эмиттер становится пустышкой и ничего не пишет | `true` |
-| `llmLog.batchSize` | размер пакета фоновой выгрузки буфера в базу (число записей за один `INSERT`) | `200` |
-| `llmLog.flushIntervalMs` | период фоновой выгрузки буфера в базу (миллисекунды) | `1000` |
-| `llmLog.maxPayloadChars` | предельная длина сериализованного `payload`; сверх неё — усечение и `payload_truncated = true` | `100000` |
+| `config` path | Purpose | Default |
+|---------------|---------|---------|
+| `globalMemory.factsEnabled` | always-on global facts (`GLOBAL_FACTS` block) and their tools | `true` |
+| `globalMemory.factsLimit` | number of global facts injected into each request | `5` |
+| `globalMemory.ragEnabled` | shared knowledge base (`GLOBAL_KNOWLEDGE` block) and its tools | `true` |
+| `globalMemory.ragLimit` | number of knowledge-base fragments injected by relevance | `5` |
+| `globalMemory.ragMinRelevance` | relevance threshold: fragments below this value are not included in context | `0.3` |
 
-Журнал устроен и работает так, как описано в [10-operations.md](10-operations.md), раздел [OPS-5]; схема таблиц — в
-[05-data-schema.md](05-data-schema.md), раздел [DATA-12].
+The flags are independent: you can enable only permanent facts, only the knowledge base, both, or neither.
+Writing to the global memory is described in [14-global-memory.md](14-global-memory.md).
 
 ---
 
-## [QS-5] Структура каталогов
+## [QS-4b] LLM Request Log Flags (enabled by default)
+
+| `config` path | Purpose | Default |
+|---------------|---------|---------|
+| `llmLog.enabled` | write model requests to the `log` schema; when `false` the emitter becomes a no-op and writes nothing | `true` |
+| `llmLog.batchSize` | background buffer-flush batch size (number of records per `INSERT`) | `200` |
+| `llmLog.flushIntervalMs` | background buffer-flush interval (milliseconds) | `1000` |
+| `llmLog.maxPayloadChars` | maximum length of the serialized `payload`; beyond this the payload is truncated and `payload_truncated = true` is set | `100000` |
+
+The log is structured and operates as described in [10-operations.md](10-operations.md), section [OPS-5]; the
+table schema is in [05-data-schema.md](05-data-schema.md), section [DATA-12].
+
+---
+
+## [QS-5] Directory Structure
 
 ```text
-migrations/001_init.sql      единая инициализация: схемы mem и log, все таблицы, типы, индексы, триггеры, базовые домены
-skills/                      реестр skills: по каталогу на домен (SKILL.md, domain-schema.json, references/)
-config/                      дерево конфигурации node-config: default.yaml, файлы окружения, local.yaml, карта переменных
-src/config.js                снимок дерева config (node-config): выбор моделей, флаги и параметры подключения к БД
-src/db.js                    доступ к PostgreSQL через af-db-ts плюс помощник vectorToSql
-src/llm.js                   клиент LLM: чат, строгий JSON (chatJSON), эмбеддинги
-src/migrate.js               бутстрап базы и применение миграций
-src/repo.js                  пользователи, домены, диалоги, сообщения, журнал инструментов, помощники проактивности
-src/agent.js                 главный пайплайн ответа (handleMessage) с ветками собеседника под флагами
-src/cli.js                   интерактивный чат в терминале
-src/scheduler-run.js         воркер планировщика и проактивности
-src/utils/temporal.js        темпоральный контекст (критерий 14)
-src/pipeline/classify.js     этап 1: классификация запроса (выбор skill)
-src/pipeline/skills/parse.js     разбор SKILL.md на фронтматтер и markdown-блоки
-src/pipeline/skills/registry.js  реестр skills: загрузка, валидация, доступ к prompt, схеме, справочникам
-src/pipeline/skills/cli.js       команды управления skills: validate, list, sync
-src/pipeline/skills/author.js    генераторы частей навыка моделью (черновик, prompt-блоки, схема)
-src/pipeline/skills/writer.js    сборка SKILL.md, валидация, атомарная запись и горячая перезагрузка навыка
-src/pipeline/skills/authoring-support.js  помощники инструментов редактирования навыков
-src/pipeline/agent-tools/skill-authoring/  admin-инструменты создания и редактирования навыков (skill_author_*)
-src/pipeline/retrieve.js     выборка памяти, ранжирование, минимизация, сборка MEMORY_CONTEXT
-src/pipeline/extract.js      извлечение кандидатов в память, companion-памяти и тем после ответа
-src/pipeline/merge.js        фильтр приватности, поиск похожих, дедупликация, запись
-src/pipeline/memory-dedupe.js  смысловые dedupe_key, scoring, dry-run/apply очистки дублей
-src/pipeline/secure.js       защищённая память: шифрование, согласие, маскирование
-src/pipeline/scheduler.js    создание задач, воркер, повторы, перепланирование
-src/pipeline/tools.js        реестр инструментов: сборка definitions, права, журналирование, вызов handler, initTools
-src/pipeline/agent-tools/    по одному модулю на инструмент: title, definition и handler
-src/mcp/config.js            чтение и разбор .mcp.json (список внешних MCP-серверов в формате MCP-клиента)
-src/mcp/client.js            подключение к MCP-серверам, обёртка их инструментов под реестр, переподключение
-.mcp.json                    конфигурация внешних MCP-серверов (вне контроля версий; может отсутствовать)
-src/pipeline/admin.js        просмотр и удаление памяти пользователем, проверка прав администратора (isAdmin)
-src/pipeline/global-memory.js  глобальная память: факты (always-on) и общая база знаний (RAG) (критерии 19–21)
-src/pipeline/topics.js       тематический трекинг (критерий 13)
-src/pipeline/proactive.js    триггеры проактивности и анти-спам (критерии 15, 16)
-src/pipeline/proactiveMessage.js  генератор проактивного сообщения
-src/pipeline/events.js       внешние события и фильтр релевантности (критерий 17)
-src/pipeline/history-context.js   сборка справочного блока HISTORY_CONTEXT (критерий 18)
-src/pipeline/history-compress.js  решение о сжатии и вызов суммаризатора холодной зоны
-src/pipeline/token-counter.js     консервативная оценка числа токенов (estimateTokens)
-src/pipeline/llm-log.js      журнал обращений к модели: буфер, пакетная выгрузка в схему log, типы запросов
-src/pipeline/llm-pricing.js  расчёт стоимости обращения по прайс-листу моделей
-src/pipeline/llm-usage-stats.js   агрегаты затрат поверх узкого журнала log.llm_usage
-src/schema/meta.js           мета-схема определения домена и общий валидатор ajv
-src/schema/registry.js       доступ к схеме домена и спецификации сущности через реестр skills (getEntitySpec)
-src/schema/validate.js       validateAndCanonicalize: валидация data и канонизация entity_key
-tests/run.js                 комплексная проверка по слоям (базовый слой плюс слои проактивности, поджатия истории и глобальной памяти)
-tests/memory_cases.json      набор кейсов извлечения фактов
-tests/schema.test.js         проверка слоя схем data под домен (npm run test:schema)
-tests/skills.test.mjs        проверка реестра skills и фильтрации инструментов (npm run test:skills)
-tests/skill-authoring.test.mjs  проверка инструментария редактирования навыков (npm run test:skill-authoring)
-tests/check-llm.js           проверка доступности и возможностей моделей через выбранный endpoint
-scripts/memory-dedupe.js     CLI dry-run/apply для ретроактивной дедупликации памяти
+migrations/001_init.sql      single initialization: mem and log schemas, all tables, types, indexes, triggers, base domains
+skills/                      skills registry: one directory per domain (SKILL.md, domain-schema.json, references/)
+config/                      node-config configuration tree: default.yaml, environment files, local.yaml, env-var map
+src/config.js                snapshot of the config tree (node-config): model selection, flags, and DB connection parameters
+src/db.js                    PostgreSQL access via af-db-ts plus the vectorToSql helper
+src/llm.js                   LLM client: chat, strict JSON (chatJSON), embeddings
+src/migrate.js               database bootstrap and migration runner
+src/repo.js                  users, domains, conversations, messages, tool log, proactivity helpers
+src/agent.js                 main response pipeline (handleMessage) with companion branches gated by flags
+src/cli.js                   interactive terminal chat
+src/scheduler-run.js         scheduler and proactivity worker
+src/utils/temporal.js        temporal context (criterion 14)
+src/pipeline/classify.js     stage 1: request classification (skill selection)
+src/pipeline/skills/parse.js     parse SKILL.md into front-matter and markdown blocks
+src/pipeline/skills/registry.js  skills registry: loading, validation, access to prompt, schema, references
+src/pipeline/skills/cli.js       skill management commands: validate, list, sync
+src/pipeline/skills/author.js    model-driven generators for skill parts (draft, prompt blocks, schema)
+src/pipeline/skills/writer.js    assemble SKILL.md, validate, atomic write, and hot-reload the skill
+src/pipeline/skills/authoring-support.js  helpers for skill-authoring tools
+src/pipeline/agent-tools/skill-authoring/  admin tools for creating and editing skills (skill_author_*)
+src/pipeline/retrieve.js     memory retrieval, ranking, minimization, MEMORY_CONTEXT assembly
+src/pipeline/extract.js      extract memory candidates, companion memories, and topics after a reply
+src/pipeline/merge.js        privacy filter, similarity search, deduplication, write
+src/pipeline/memory-dedupe.js  semantic dedupe_key, scoring, dry-run/apply duplicate cleanup
+src/pipeline/secure.js       protected memory: encryption, consent, masking
+src/pipeline/scheduler.js    task creation, worker, retries, rescheduling
+src/pipeline/tools.js        tool registry: build definitions, permissions, logging, call handler, initTools
+src/pipeline/agent-tools/    one module per tool: title, definition, and handler
+src/mcp/config.js            read and parse .mcp.json (list of external MCP servers in MCP-client format)
+src/mcp/client.js            connect to MCP servers, wrap their tools for the registry, reconnect
+.mcp.json                    external MCP server configuration (not version-controlled; may be absent)
+src/pipeline/admin.js        user memory view and deletion, administrator permission check (isAdmin)
+src/pipeline/global-memory.js  global memory: facts (always-on) and shared knowledge base (RAG) (criteria 19–21)
+src/pipeline/topics.js       topic tracking (criterion 13)
+src/pipeline/proactive.js    proactivity triggers and anti-spam (criteria 15, 16)
+src/pipeline/proactiveMessage.js  proactive message generator
+src/pipeline/events.js       external events and relevance filter (criterion 17)
+src/pipeline/history-context.js   HISTORY_CONTEXT reference block assembly (criterion 18)
+src/pipeline/history-compress.js  compression decision and cold-zone summarizer invocation
+src/pipeline/token-counter.js     conservative token count estimation (estimateTokens)
+src/pipeline/llm-log.js      model request log: buffer, batch flush to log schema, request types
+src/pipeline/llm-pricing.js  request cost calculation from the model price list
+src/pipeline/llm-usage-stats.js   cost aggregates over the narrow log.llm_usage log
+src/schema/meta.js           domain definition meta-schema and shared ajv validator
+src/schema/registry.js       domain schema and entity spec access via the skills registry (getEntitySpec)
+src/schema/validate.js       validateAndCanonicalize: validate data and canonicalize entity_key
+tests/run.js                 layered test suite (base layer plus proactivity, history compression, and global memory layers)
+tests/memory_cases.json      fact-extraction test cases
+tests/schema.test.js         domain data schema layer tests (npm run test:schema)
+tests/skills.test.mjs        skills registry and tool-filtering tests (npm run test:skills)
+tests/skill-authoring.test.mjs  skill-authoring toolset tests (npm run test:skill-authoring)
+tests/check-llm.js           model availability and capability check via the selected endpoint
+scripts/memory-dedupe.js     CLI dry-run/apply for retroactive memory deduplication
 ```
 
 ---
 
-## [QS-6] Сборка с нуля (порядок)
+## [QS-6] Building from Scratch (order)
 
-1. **Фундамент.** Поднять Node.js 22 и PostgreSQL 16 с расширениями. Завести `package.json` (ESM, зависимости `openai`,
-   `pg`, `config`, `af-db-ts`, `dotenv`) и каталог конфигурации `config/`.
-2. **Схема памяти.** Написать `migrations/001_init.sql` (см. [05-data-schema.md](05-data-schema.md)), сделать миграцию
-   идемпотентной, реализовать `src/migrate.js`. Проверить структуру до написания логики.
-3. **Инфраструктура.** `src/db.js`, `src/config.js`, `src/llm.js`, `src/repo.js`.
-4. **Выборка памяти.** `src/pipeline/retrieve.js` — см. [06-memory.md](06-memory.md).
-5. **Контур записи.** `src/pipeline/extract.js` и `src/pipeline/merge.js` — см. [06-memory.md](06-memory.md).
-6. **Приватность.** `src/pipeline/secure.js` — см. [07-secure-privacy.md](07-secure-privacy.md).
-7. **Планировщик.** `src/pipeline/scheduler.js` и воркер — см. [10-operations.md](10-operations.md).
-8. **Инструменты и агент.** Модули `src/pipeline/agent-tools/*`, реестр `src/pipeline/tools.js` и `src/agent.js` —
-   см. [04-architecture.md](04-architecture.md). Управление своей памятью пользователю доступно прямо в диалоге:
-   инструменты `memory_list`, `memory_forget_entity` и `memory_forget_all` (поверх `src/pipeline/admin.js`) — см.
-   [06-memory.md](06-memory.md). Внешние источники инструментов по протоколу MCP (модули `src/mcp/*`, файл `.mcp.json`,
-   ленивая инициализация `initTools`) — см. [10-operations.md](10-operations.md), раздел `OPS-4a`.
-9. **Проверки.** `tests/run.js` по слоям — см. [10-operations.md](10-operations.md).
-10. **Проактивность и режим собеседника.** Таблицы проактивности и companion-виды `memory_kind` из единой
-    инициализации, модули `topics`, `temporal`, `proactive`, `events`, ветки в `agent.js` под флагами — см.
-    [09-proactivity.md](09-proactivity.md). Код — каталог `src/`.
-11. **Поджатие истории.** Служебные колонки `conversation_summaries`, модули `token-counter`, `history-compress`,
-    `history-context`, заполнение `token_count` в `saveMessage` и сборка `HISTORY_CONTEXT` в `agent.js` под флагом —
-    см. [13-history-compression.md](13-history-compression.md).
-12. **Глобальная память.** Таблицы глобальной памяти и колонка `is_admin` из единой инициализации, модуль
-    `global-memory`, функция `isAdmin` в `admin.js`, модули инструментов и проверка прав в `tools.js`, сборка блоков
-    `GLOBAL_FACTS` и `GLOBAL_KNOWLEDGE` в `agent.js` под флагами — см. [14-global-memory.md](14-global-memory.md).
+1. **Foundation.** Set up Node.js 22 and PostgreSQL 16 with the required extensions. Create `package.json` (ESM,
+   dependencies `openai`, `pg`, `config`, `af-db-ts`, `dotenv`) and the `config/` configuration directory.
+2. **Memory schema.** Write `migrations/001_init.sql` (see [05-data-schema.md](05-data-schema.md)), make the
+   migration idempotent, and implement `src/migrate.js`. Verify the structure before writing business logic.
+3. **Infrastructure.** `src/db.js`, `src/config.js`, `src/llm.js`, `src/repo.js`.
+4. **Memory retrieval.** `src/pipeline/retrieve.js` — see [06-memory.md](06-memory.md).
+5. **Write pipeline.** `src/pipeline/extract.js` and `src/pipeline/merge.js` — see [06-memory.md](06-memory.md).
+6. **Privacy.** `src/pipeline/secure.js` — see [07-secure-privacy.md](07-secure-privacy.md).
+7. **Scheduler.** `src/pipeline/scheduler.js` and the worker — see [10-operations.md](10-operations.md).
+8. **Tools and agent.** The `src/pipeline/agent-tools/*` modules, the `src/pipeline/tools.js` registry, and
+   `src/agent.js` — see [04-architecture.md](04-architecture.md). Users can manage their own memory directly in
+   conversation via the `memory_list`, `memory_forget_entity`, and `memory_forget_all` tools (backed by
+   `src/pipeline/admin.js`) — see [06-memory.md](06-memory.md). External tool sources over the MCP protocol
+   (`src/mcp/*` modules, `.mcp.json` file, lazy `initTools` initialization) — see
+   [10-operations.md](10-operations.md), section `OPS-4a`.
+9. **Tests.** `tests/run.js` in layers — see [10-operations.md](10-operations.md).
+10. **Proactivity and companion mode.** Proactivity tables and companion `memory_kind` values from the single
+    initialization, the `topics`, `temporal`, `proactive`, and `events` modules, and flag-gated branches in
+    `agent.js` — see [09-proactivity.md](09-proactivity.md). Code lives in the `src/` directory.
+11. **History compression.** The `conversation_summaries` service columns, the `token-counter`, `history-compress`,
+    and `history-context` modules, populating `token_count` in `saveMessage`, and assembling `HISTORY_CONTEXT` in
+    `agent.js` under the flag — see [13-history-compression.md](13-history-compression.md).
+12. **Global memory.** Global memory tables and the `is_admin` column from the single initialization, the
+    `global-memory` module, the `isAdmin` function in `admin.js`, tool modules and permission checks in `tools.js`,
+    and assembly of the `GLOBAL_FACTS` and `GLOBAL_KNOWLEDGE` blocks in `agent.js` under the flags — see
+    [14-global-memory.md](14-global-memory.md).
 
 ---
 

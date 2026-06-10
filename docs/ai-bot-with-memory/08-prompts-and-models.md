@@ -1,6 +1,6 @@
-# 08. Промпты, провайдер и выбор моделей
+# 08. Prompts, Provider, and Model Selection
 
-## [PROMPT-1] Клиент и строгий JSON
+## [PROMPT-1] Client and Strict JSON
 
 ```js
 export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result' }) {
@@ -24,21 +24,21 @@ ${JSON.stringify(schema)}
 }
 ```
 
-Эмбеддинги получает функция `embed`; при ошибке она возвращает `null`, и вся система откатывается на полнотекстовый и
-структурный поиск без векторов. Это делает векторный слой опциональным и устойчивым к недоступности модели.
+Embeddings are produced by the `embed` function; on error it returns `null`, and the entire system falls back to
+full-text and structural search without vectors. This makes the vector layer optional and resilient to model
+unavailability.
 
 ---
 
-## [PROMPT-1a] Потоковый основной ответ
+## [PROMPT-1a] Streaming Main Response
 
-Основной ответ модели выдаётся потоково функцией `chatStream`: выбранный провайдер возвращает ответ частями (chunks),
-где текст лежит в `delta.content`, а вызовы инструментов — в `delta.tool_calls`, причём части одного вызова приходят по
-индексу (сначала может прийти идентификатор, затем имя функции, затем фрагменты строки аргументов). Клиент по мере
-поступления текста
-вызывает `onDelta(chunkText)`, а из дельт собирает такой же финальный объект сообщения, какой возвращает непотоковый
-`chat`: поле `tool_calls` присутствует только если инструменты действительно вызывались, и его аргументы — это валидный
-JSON, собранный из всех фрагментов. Аргументы разбираются и валидируются только после полной сборки сообщения, а не на
-ходу.
+The model's main response is delivered as a stream by the `chatStream` function: the selected provider returns the
+response in chunks, where text lives in `delta.content` and tool calls live in `delta.tool_calls`. Parts of a single
+tool call arrive indexed (the identifier may come first, then the function name, then fragments of the argument
+string). As text arrives, the client calls `onDelta(chunkText)`, and from the deltas it assembles the same final
+message object that the non-streaming `chat` returns: the `tool_calls` field is present only when tools were actually
+invoked, and its arguments are valid JSON assembled from all fragments. Arguments are parsed and validated only after
+the full message has been assembled, not on the fly.
 
 ```js
 export async function chatStream({ model = config.llm.mainModel, messages, tools, toolChoice, onDelta }) {
@@ -53,22 +53,24 @@ export async function chatStream({ model = config.llm.mainModel, messages, tools
 }
 ```
 
-Три чистые функции сборки (`createDeltaAccumulator`, `accumulateChatDelta`, `finalizeChatMessage`) вынесены отдельно и
-покрыты модульными тестами без обращения к сети, потому что именно от их корректности зависит, что потоковый ответ ничем
-не отличается по форме от непотокового. Структурированные этапы (`chatJSON`) и эмбеддинги принципиально не стримятся:
-им нужен готовый результат целиком, а не постепенный показ.
+The three pure assembly functions (`createDeltaAccumulator`, `accumulateChatDelta`, `finalizeChatMessage`) are
+extracted into their own module and covered by unit tests that make no network calls, because their correctness is
+exactly what guarantees that a streaming response is structurally identical to a non-streaming one. The structured
+stages (`chatJSON`) and embeddings are deliberately never streamed: they require the complete result, not a
+progressive display.
 
 ---
 
-## Промпты всех этапов
+## Prompts for Every Stage
 
-### [PROMPT-2] Классификатор запроса
+### [PROMPT-2] Request Classifier
 
-Дешёвая модель выбирает наиболее подходящий skill, а заодно определяет намерение, сущности и то, какие виды памяти и
-инструменты нужны. Возвращает строгий JSON, а не ответ пользователю. Перечень skills в системный промпт не зашит:
-функция `buildSystemPrompt` (`src/pipeline/classify.js`) берёт компактный список из реестра skills через
-`listSkillRoutes()` и подставляет для каждого skill имя, доменный ключ, описание, правило применения `when_to_use` и
-сигналы. Благодаря этому добавление нового каталога `skills/<name>/` сразу отражается в классификаторе. Сборка промпта:
+A cheap model selects the most suitable skill and simultaneously determines the intent, entities, and which memory
+types and tools are needed. It returns strict JSON rather than a reply to the user. The list of skills is not
+hard-coded into the system prompt: the `buildSystemPrompt` function (`src/pipeline/classify.js`) fetches a compact
+list from the skill registry via `listSkillRoutes()` and injects, for each skill, its name, domain key, description,
+`when_to_use` rule, and signals. As a result, adding a new `skills/<name>/` directory is immediately reflected in
+the classifier. Prompt assembly:
 
 ```js
 function buildSystemPrompt(routes) {
@@ -91,17 +93,17 @@ ${list}
 }
 ```
 
-Источник истины — `skill_name`: доменный ключ для адресации памяти выводится из выбранного skill уже кодом, а не из
-ответа модели. Если модель вернула несогласованную пару, код доверяет реестру skills. Схема `skill_classification`:
-обязательные поля `intent`, `skill_name` (ограничен списком доступных skills), `domain_key`, `confidence`, `entities`,
-`needs_memory`, `needed_memory_scopes`, `needs_tools`, `candidate_tools`; область памяти — одно из
-`dialog | profile | domain | secure | reminder`.
+The source of truth is `skill_name`: the domain key used for memory addressing is derived from the chosen skill by
+code, not from the model's response. If the model returns an inconsistent pair, the code trusts the skill registry.
+The `skill_classification` schema has required fields: `intent`, `skill_name` (constrained to the list of available
+skills), `domain_key`, `confidence`, `entities`, `needs_memory`, `needed_memory_scopes`, `needs_tools`,
+`candidate_tools`; the memory scope is one of `dialog | profile | domain | secure | reminder`.
 
-### [PROMPT-2a] Выбор намерения доставки
+### [PROMPT-2a] Delivery Intent Selection
 
-Для коротких сообщений, где канал поддерживает компактные реакции, дешёвая модель может выбрать намерение доставки до
-полного ответа агента. Входом служат текст пользователя и возможности канала (`supportsReactions`, список ключей).
-Выход — строгий JSON `delivery_intent`:
+For short messages where the channel supports compact reactions, a cheap model can select a delivery intent before
+the full agent response is produced. The input is the user's text and the channel's capabilities (`supportsReactions`,
+list of keys). The output is strict JSON `delivery_intent`:
 
 ```json
 {
@@ -112,79 +114,84 @@ ${list}
 }
 ```
 
-Допустимые `reaction_key`: `like`, `okay`, `heart`, `laugh`, `fire`, `smile`, `100`, `sad`. Модель выбирает `reaction`
-только когда ответ не требует фактов, инструментов, уточнений или содержательного текста. Во всех остальных случаях она
-возвращает `kind = "text_needed"`, и сообщение идёт в обычный `handleMessage`.
+Allowed `reaction_key` values: `like`, `okay`, `heart`, `laugh`, `fire`, `smile`, `100`, `sad`. The model chooses
+`reaction` only when the response requires no facts, no tools, no clarifications, and no substantive text. In all
+other cases it returns `kind = "text_needed"`, and the message proceeds through the normal `handleMessage` flow.
 
-### [PROMPT-3] Извлечение кандидатов в память
+### [PROMPT-3] Memory Candidate Extraction
 
-Запускается после ответа и работает в два прохода. Первый проход перечисляет, что сохранять и что не сохранять, требует
-помечать чувствительные данные как `high`/`secret` с `requires_confirmation = true` и безопасным `memory_text`, для
-домена со схемой подставляет перечень его сущностей и полей, а также добавляет блок `## Fact Extraction Prompt`
-активного skill (он объясняет, какие факты полезны именно в этом домене, тогда как схема задаёт их форму). Схема
-`memory_candidates`: массив объектов с полями `scope`,
-`memory_kind`, `entity_type`, `entity_key`, `memory_text`, `data`, `importance`, `confidence`, `sensitivity`, `ttl_days`,
+Runs after the response and operates in two passes. The first pass enumerates what to save and what not to save,
+requires marking sensitive data as `high`/`secret` with `requires_confirmation = true` and a safe `memory_text`,
+injects the list of entities and fields for domains that have a schema, and also includes the `## Fact Extraction
+Prompt` block of the active skill (which explains what facts are useful in that specific domain, while the schema
+defines their shape). The `memory_candidates` schema is an array of objects with fields `scope`, `memory_kind`,
+`entity_type`, `entity_key`, `memory_text`, `data`, `importance`, `confidence`, `sensitivity`, `ttl_days`,
 `requires_confirmation`, `reason`.
 
-Промпт извлечения сохраняет устойчивые и полезные факты, а не разовые состояния. Он запрещает психологические диагнозы и
-ярлыки, абсолютные формулировки «всегда» и «никогда», и требует снижать `confidence`, когда вывод слабый. Кроме общих
-видов памяти (`fact`, `preference`, `goal`, `state`, `history`, `progress` и т. д.) доступны виды режима собеседника:
-`emotional_pattern`, `activity_rhythm`, `communication_style`, `open_loop`, `topic_energy`, `discovery_seed`.
-`open_loop` хранит планы, события, проблемы или самочувствие без последующего апдейта, а `discovery_seed` извлекается из
-фраз вроде «хочу попробовать», «интересно было бы», «давно думаю о».
+The extraction prompt preserves stable, useful facts rather than one-off states. It prohibits psychological
+diagnoses and labels, absolute phrasing such as "always" and "never", and requires lowering `confidence` when the
+inference is weak. In addition to the general memory kinds (`fact`, `preference`, `goal`, `state`, `history`,
+`progress`, etc.) companion-mode kinds are available: `emotional_pattern`, `activity_rhythm`,
+`communication_style`, `open_loop`, `topic_energy`, `discovery_seed`. `open_loop` stores plans, events, problems,
+or wellbeing items that have no follow-up update, while `discovery_seed` is extracted from phrases like "I'd like
+to try", "it would be interesting", "I've been thinking about".
 
-Второй проход применяется к предметным кандидатам, чья сущность объявлена в схеме домена: под каждую сущность
-собирается закрытая схема ответа, где `data` равно `data_schema` сущности, а `entity_key` для режима `fixed_vocab`
-ограничен словарём. Модель перезаполняет ровно эти поля с точными типами и значениями, поэтому на запись приходит уже
-валидный кандидат, а итоговый контроль всё равно выполняется в `validateAndCanonicalize`. Полный текст промптов — в
-`src/pipeline/extract.js`, слой схем — в [11-per-domain-schema.md](11-per-domain-schema.md).
+The second pass applies to subject-matter candidates whose entity type is declared in the domain schema: for each
+such entity a closed response schema is assembled where `data` equals the entity's `data_schema` and `entity_key`
+for `fixed_vocab` mode is constrained to the vocabulary. The model refills exactly those fields with precise types
+and values, so the candidate arrives at the write step already valid; a final check is still performed in
+`validateAndCanonicalize`. The full prompt text is in `src/pipeline/extract.js`; the schema layer is described in
+[11-per-domain-schema.md](11-per-domain-schema.md).
 
-Реакции пользователя на сообщение ассистента подаются в извлечение как отдельная пользовательская реплика истории.
-Промпт сохраняет факт только когда смысл реакции однозначен в контексте целевого сообщения ассистента. Например, вопрос
-«Ты любишь торты?» и реакция `:heart:` дают предпочтение «Пользователь любит торты». Реакции, которые могут означать
-вежливость, настроение или разовое одобрение без будущей пользы, не создают кандидатов памяти.
+User reactions to an assistant message are fed into extraction as a separate user turn in the history. The prompt
+saves a fact only when the meaning of the reaction is unambiguous in the context of the target assistant message.
+For example, the question "Do you like cakes?" followed by a `:heart:` reaction yields the preference "The user
+likes cakes." Reactions that could mean politeness, mood, or one-time approval without future utility do not
+create memory candidates.
 
-### [PROMPT-4] Создание задачи для планировщика
+### [PROMPT-4] Scheduler Task Creation
 
-Отдельного промпта-экстрактора у планировщика нет: задачи и напоминания создаёт сама модель основного диалога, вызывая
-инструмент `scheduler_create_task` (`src/pipeline/agent-tools/scheduler/scheduler_create_task.js`). Поведение задаётся
-описаниями параметров инструмента. Режим расписания выбирается полем `schedule_kind`: `one_time` с абсолютным `run_at`
-для разовой задачи, `interval` с `interval_seconds` для простого «каждые N секунд», `cron` с `cron_expr` для
-календарного локального времени (например будни в 09:00 — `0 9 * * 1-5`) и `rrule` для сложных правил iCalendar.
+The scheduler has no dedicated extractor prompt: tasks and reminders are created by the main dialogue model itself
+by calling the `scheduler_create_task` tool (`src/pipeline/agent-tools/scheduler/scheduler_create_task.js`).
+Behaviour is governed by the tool's parameter descriptions. The schedule kind is selected via the `schedule_kind`
+field: `one_time` with an absolute `run_at` for a one-off task, `interval` with `interval_seconds` for a simple
+"every N seconds" cadence, `cron` with a `cron_expr` for calendar local time (e.g. weekdays at 09:00 —
+`0 9 * * 1-5`), and `rrule` for complex iCalendar rules.
 
-Поле `instruction` — это готовый текст напоминания, который доставляется пользователю дословно, без переформулирования
-(см. [10-operations.md](10-operations.md), раздел OPS-3). Поэтому описание параметра требует писать его как живую речь от
-первого лица с обращением на «ты» — «Напоминаю, ты хотел позвонить маме», а не служебной инструкцией в третьем лице
-вроде «Напомнить пользователю позвонить маме».
+The `instruction` field contains the ready-to-deliver reminder text, which is delivered to the user verbatim
+without reformulation (see [10-operations.md](10-operations.md), section OPS-3). Accordingly, the parameter
+description requires writing it as live first-person speech addressed directly to the user — "Reminder: you wanted
+to call your mom" — rather than a third-person service instruction such as "Remind the user to call their mom."
 
-### [PROMPT-4a] Пользовательские настройки ответа
+### [PROMPT-4a] User Response Preferences
 
-Форму ответа и тембр голосового ответа меняет сама модель основного диалога через инструменты. В стабильном системном
-промпте есть явное правило: запросы на включение или выключение озвучивания (смена формата текст↔голос) вызывают
-`voice_or_text`, а запросы на конкретный голос, тембр или мужской/женский/нейтральный голос вызывают
-`voice_set_preference`. Эти инструменты не являются
-экстракторами памяти: они синхронно меняют управляющие поля пользователя, чтобы настройка действовала уже на текущий
-ответ.
+The format of the response and the voice tone are changed by the main dialogue model itself via tools. The stable
+system prompt includes an explicit rule: requests to enable or disable voice output (switching between text and
+voice format) invoke `voice_or_text`, while requests for a specific voice, tone, or male/female/neutral voice
+invoke `voice_set_preference`. These tools are not memory extractors: they synchronously update the user's control
+fields so that the preference takes effect for the current response.
 
-`voice_or_text` принимает `mode = "voice" | "text"`. `voice_set_preference` принимает строку `selection`: это может
-быть конкретный идентификатор голоса (`nova`, `onyx`, `ash`) или категория (`male`, `female`, `neutral` и русские
-аналоги). Handler валидирует выбор по каталогу голосов; неизвестные значения возвращают ошибку и список допустимых
-вариантов, но не записываются в состояние пользователя.
+`voice_or_text` accepts `mode = "voice" | "text"`. `voice_set_preference` accepts a string `selection`: this can
+be a specific voice identifier (`nova`, `onyx`, `ash`) or a category (`male`, `female`, `neutral` and their
+Russian equivalents). The handler validates the selection against the voice catalogue; unknown values return an
+error and the list of allowed options, and are not written to the user's state.
 
-### [PROMPT-5] Извлечение тем диалога (режим собеседника)
+### [PROMPT-5] Dialog Topic Extraction (Companion Mode)
 
-Параллельно с извлечением фактов при `config.companion.enabled` отдельный вызов возвращает темы диалога с оценкой вовлечённости.
-Схема `dialog_topics`: массив объектов с `topic_key` (короткий ключ латиницей в snake_case) и `user_engagement` (0..1).
-Промпт требует не создавать слишком общие темы (`life`, `things`, `stuff`), не дробить каждое предложение в отдельную
-тему, объединять близкие темы и использовать шкалу вовлечённости: 0.1–0.3 для односложных ответов без интереса, 0.4–0.6
-для нейтральной вовлечённости, 0.7–0.9 для активного развития темы и вопросов, 1.0 для явного энтузиазма. Подробнее —
-в [09-proactivity.md](09-proactivity.md).
+In parallel with fact extraction, when `config.companion.enabled` is set, a separate call returns the dialog's
+topics along with an engagement score. The `dialog_topics` schema is an array of objects with `topic_key` (a short
+snake_case Latin key) and `user_engagement` (0..1). The prompt requires avoiding overly generic topics (`life`,
+`things`, `stuff`), not splitting every sentence into a separate topic, merging closely related topics, and using
+the engagement scale: 0.1–0.3 for one-word answers with no interest, 0.4–0.6 for neutral engagement, 0.7–0.9 for
+active topic development and questions, 1.0 for explicit enthusiasm. More detail in
+[09-proactivity.md](09-proactivity.md).
 
-### [PROMPT-5a] Companion prompt основного ответа
+### [PROMPT-5a] Companion Prompt for the Main Response
 
-При `config.companion.enabled` основной ответ получает дополнительный стабильный system-блок `COMPANION_SYSTEM`. Он не заменяет
-`MAIN_SYSTEM`: правила инструментов, безопасности, памяти и приоритета текущего запроса остаются первым системным
-сообщением. `COMPANION_SYSTEM` задаёт роль и стиль живого собеседника:
+When `config.companion.enabled` is set, the main response receives an additional stable system block
+`COMPANION_SYSTEM`. It does not replace `MAIN_SYSTEM`: rules for tools, safety, memory, and prioritising the
+current request remain in the first system message. `COMPANION_SYSTEM` defines the role and style of a live
+conversational partner:
 
 ```text
 # Роль
@@ -201,30 +208,32 @@ ${list}
 Ты общаешься естественно, как близкий знакомый.
 ```
 
-Ключевая логика блока — формула «наблюдение → пространство → выбор»: сначала уместное наблюдение о моменте, состоянии
-или контексте; затем мягкое приглашение к разговору; затем ощущение свободы без давления. Блок также задаёт порядок
-выбора темы: «здесь и сейчас», незакрытые линии прошлого, микро-наблюдения, аккуратный эмоциональный вход и лёгкий
-выбор. Динамические данные не вшиваются в `COMPANION_SYSTEM`; они передаются отдельным `CONVERSATION_CONTEXT`.
+The block's key logic is the "observation → space → choice" formula: first an apt observation about the moment,
+the user's state, or the context; then a gentle invitation to talk; then a sense of freedom without pressure.
+The block also specifies the topic-selection order: "here and now", unresolved threads from the past,
+micro-observations, a careful emotional entry, and a light choice. Dynamic data is not embedded in
+`COMPANION_SYSTEM`; it is passed in a separate `CONVERSATION_CONTEXT`.
 
-`CONVERSATION_CONTEXT` остаётся справочным блоком, а не командой. Он содержит темпоральный контекст, управление темами,
-правила не возвращаться к недавним темам без повода, избегать выгоревших тем, развивать темы с высокой вовлечённостью и
-периодически предлагать новые направления из `discovery_seed` фактов.
+`CONVERSATION_CONTEXT` remains a reference block, not a directive. It contains temporal context, topic management,
+rules for not returning to recent topics without cause, avoiding burned-out topics, developing topics with high
+engagement, and periodically proposing new directions from `discovery_seed` facts.
 
-### [PROMPT-5b] Проактивное первое сообщение
+### [PROMPT-5b] Proactive First Message
 
-Генератор сообщения, которое бот пишет первым, использует тот же companion-каркас, но с жёстким форматом первого
-контакта: 1–2 предложения, максимум один вопрос, без представления, извинений и давления. Prompt получает тип повода,
-режим контакта, темпоральный контекст, темы и обычные факты пользователя как справочные данные. Решение отправлять
-сообщение принимает алгоритмическая contact policy до вызова модели, поэтому prompt не выбирает, писать ли пользователю,
-а только формулирует уместный текст. При режиме `cautious` он не начинает новую тему и коротко подхватывает важный
-повод.
+The generator for the message the bot sends first uses the same companion framework, but with a strict first-contact
+format: 1–2 sentences, at most one question, no self-introduction, no apologies, no pressure. The prompt receives
+the trigger type, contact mode, temporal context, topics, and the user's regular facts as reference data. The
+decision to send a message is made by the algorithmic contact policy before the model is called, so the prompt does
+not decide whether to write to the user — it only formulates an appropriate text. In `cautious` mode it does not
+start a new topic and briefly acknowledges an important trigger.
 
-### [PROMPT-6] Суммаризатор истории диалога (поджатие истории)
+### [PROMPT-6] Dialog History Summariser (History Compression)
 
-При `config.historyCompression.enabled` отдельный вызов сжимает холодную часть диалога. Промпт требует сохранить только то, что
-нужно для продолжения разговора, не трогать последние сообщения (они не переданы и добавятся отдельно), не дублировать
-факты из `active_memory`, описывать ближний контекст подробнее дальнего, выносить устойчивые факты в `facts_to_memory`,
-не сохранять секреты в открытом виде и не выдумывать факты.
+When `config.historyCompression.enabled` is set, a separate call compresses the cold portion of the dialog
+history. The prompt requires retaining only what is needed to continue the conversation, leaving the most recent
+messages untouched (they are not passed in and will be appended separately), not duplicating facts already in
+`active_memory`, describing the near context in more detail than the distant context, moving stable facts to
+`facts_to_memory`, not storing secrets in plain text, and not inventing facts.
 
 ```text
 Ты сжимаешь старую часть истории диалога для чат-бота с долговременной памятью.
@@ -233,21 +242,21 @@ ${list}
 Устойчивые факты для долговременной памяти вынеси в facts_to_memory. Верни только JSON по схеме.
 ```
 
-Схема `history_summary`: обязательные поля `summary_text`, `state_json`, `facts_to_memory`, `dropped_because_in_memory`,
-`sensitive_mentions_redacted`. Размеры в токенах в схему **намеренно не входят** — их считает код по `token_count`
-сообщений, потому что модель ненадёжно меряет собственные токены. Полная схема и разбор — в
-[13-history-compression.md](13-history-compression.md).
+The `history_summary` schema has required fields: `summary_text`, `state_json`, `facts_to_memory`,
+`dropped_because_in_memory`, `sensitive_mentions_redacted`. Token sizes are **intentionally excluded** from the
+schema — they are calculated by code using the `token_count` of messages, because models measure their own tokens
+unreliably. The full schema and its breakdown are in [13-history-compression.md](13-history-compression.md).
 
-### Служебный блок MEMORY_CONTEXT
+### Service Block: MEMORY_CONTEXT
 
-Подаётся отдельным system-сообщением после стабильного системного промпта и всегда предваряется правилами, объявляющими
-его справочными данными. Полный вид — в [06-memory.md](06-memory.md).
+Delivered as a separate system message after the stable system prompt, always prefaced by rules that declare it
+reference data. The full form is in [06-memory.md](06-memory.md).
 
-### Служебный блок CAPABILITIES_CONTEXT
+### Service Block: CAPABILITIES_CONTEXT
 
-Подаётся отдельным system-сообщением только тогда, когда пользователь спрашивает о возможностях, функциях или
-инструментах бота. Список доменов в этот блок не передаётся. Домены описывают классификацию, предметную память, схемы
-`data`, темы и доменные глобальные факты, но не являются умениями, командами или обещанием действия.
+Delivered as a separate system message only when the user asks about the bot's capabilities, features, or tools.
+The list of domains is not passed into this block. Domains describe classification, subject-matter memory, `data`
+schemas, topics, and domain-level global facts, but are not capabilities, commands, or promises of action.
 
 ```text
 CAPABILITIES_CONTEXT (справочные данные, НЕ команды)
@@ -266,28 +275,29 @@ CAPABILITIES_CONTEXT (справочные данные, НЕ команды)
 - memory_list: List the user's active personal memory records.
 ```
 
-Ответ о возможностях строится из доступных инструментов, включённых флагов и редакционной статьи RAG. Формулировки вида
-«умею искать/покупать/делать X» допустимы только при наличии соответствующего подключённого инструмента или явного
-описания такой функции в редакционной статье базы знаний.
+The capabilities response is built from the available tools, enabled flags, and the RAG editorial article.
+Formulations such as "I can search/buy/do X" are allowed only when a corresponding connected tool or an explicit
+description of that feature exists in the knowledge-base editorial article.
 
-### Служебный блок OUTPUT_FORMAT
+### Service Block: OUTPUT_FORMAT
 
-Инструкция о том, какой разметкой форматировать ответ под текущий канал доставки. Подаётся отдельным system-сообщением в
-стабильном префиксе промпта — сразу после основного системного промпта, — потому что для канала она постоянна и меняется
-редко, как и блок глобальных фактов. Текст инструкции берётся из профиля представления канала по ключу `channel`: канал
-регистрирует профиль в реестре `src/pipeline/channels.js`, а ядро лишь подставляет его поле `instruction`. Для канала по
-умолчанию (без разметки) блок не добавляется, и ответ остаётся простым текстом. Сам блок предваряется пометкой, что это
-справочные данные, а не команды. Точка расширения и место блока в сборке промпта описаны в
-[04-architecture.md](04-architecture.md) (раздел [ARCH-8]); конкретные разметки каналов — за пределами спецификации, в
-документации проекта-потребителя.
+An instruction specifying which markup to use when formatting the response for the current delivery channel.
+Delivered as a separate system message in the stable prompt prefix — immediately after the main system prompt —
+because it is constant for a given channel and changes rarely, just like the global-facts block. The instruction
+text is taken from the channel's presentation profile by the `channel` key: the channel registers its profile in
+the `src/pipeline/channels.js` registry, and the core simply injects its `instruction` field. For the default
+channel (no markup) the block is not added and the response remains plain text. The block is prefaced with a note
+that it is reference data, not commands. The extension point and the block's position in the prompt assembly are
+described in [04-architecture.md](04-architecture.md) (section [ARCH-8]); the specific channel markups are
+outside this specification, in the consumer-project documentation.
 
-### [PROMPT-7] Решение о слиянии факта (опциональная схема-расширение)
+### [PROMPT-7] Fact Merge Decision (Optional Schema Extension)
 
-Конфликт нового факта с уже сохранённым разрешается детерминированными правилами `decideDedupe` (см.
-[06-memory.md](06-memory.md)): они используют `dedupe_key`, совместимые scope-группы, каноническую сущность,
-полнотекстовый матч, векторную близость и совпадение `data`. Для спорных групп подключается отдельный вызов модели,
-возвращающий решение о слиянии по строгой JSON-схеме `MergeDecision`; очевидные случаи не требуют дополнительного
-LLM-вызова.
+Conflicts between a new fact and an already-stored one are resolved by the deterministic rules of `decideDedupe`
+(see [06-memory.md](06-memory.md)): they use `dedupe_key`, compatible scope groups, the canonical entity,
+full-text matching, vector similarity, and `data` matching. For ambiguous groups a separate model call is made
+that returns a merge decision as a strict JSON `MergeDecision` schema; clear-cut cases require no additional LLM
+call.
 
 ```json
 {
@@ -304,33 +314,34 @@ LLM-вызова.
 }
 ```
 
-Поле `decision` выбирает действие: слить с существующим фактом, заменить его целиком, оставить факты раздельно,
-архивировать старую строку или переспросить пользователя. Поля `target_memory_id`, `merged_memory_text` и `merged_data`
-заполняются, когда действие затрагивает конкретную запись, а `reason` хранит обоснование решения для аудита.
+The `decision` field selects the action: merge with the existing fact, replace it entirely, keep the facts
+separate, archive the old record, or ask the user for confirmation. The fields `target_memory_id`,
+`merged_memory_text`, and `merged_data` are populated when the action affects a specific record, and `reason`
+stores the rationale for auditing purposes.
 
-### [PROMPT-10] Генераторы частей навыка (редактирование навыков)
+### [PROMPT-10] Skill-Part Generators (Skill Editing)
 
-Инструментарий редактирования навыков опирается на отдельные генераторы со строгим JSON в
-`src/pipeline/skills/author.js`. `generateSkillDraft` собирает черновик целого навыка по описанию (имя, доменный
-ключ, признаки классификации,
-prompt-блоки и при необходимости определение схемы); `refineBlock` переписывает блок `# Skill Prompt` или
-`## Fact Extraction Prompt` по инструкции; `generateDomainSchema` и `proposeSchemaEdit` создают и точечно правят
-закрытую схему домена. Каждый результат, содержащий схему, до записи проходит мета-валидатор `validateDefinition`, и
-замечания возвращаются для предпросмотра. Грунтинг для выбора нужного инструмента модель получает из блока
-`# Skill Prompt` навыка-редактора `skill-author` (см. [11-per-domain-schema.md](11-per-domain-schema.md)). Эти
-генераторы и инструменты доступны только администратору и только при включённом флаге.
+The skill-editing toolset relies on dedicated generators with strict JSON output in
+`src/pipeline/skills/author.js`. `generateSkillDraft` assembles a full skill draft from a description (name,
+domain key, classification signals, prompt blocks, and optionally a schema definition); `refineBlock` rewrites the
+`# Skill Prompt` or `## Fact Extraction Prompt` block according to an instruction; `generateDomainSchema` and
+`proposeSchemaEdit` create and surgically update a closed domain schema. Every result that contains a schema
+passes through the `validateDefinition` meta-validator before being written, and any findings are returned for
+preview. The model receives grounding for choosing the right tool from the `# Skill Prompt` block of the
+`skill-author` editor skill (see [11-per-domain-schema.md](11-per-domain-schema.md)). These generators and tools
+are available to administrators only and only when the corresponding flag is enabled.
 
 ---
 
-## [PROMPT-8] Конфигурация
+## [PROMPT-8] Configuration
 
-Конфигурация собирается пакетом `node-config` из каталога `config/` и доступна в коде как объект `config`, который
-отдаёт модуль `src/config.js`. Дерево настроек складывается из `config/default.yaml` (значения по умолчанию), файла
-окружения (`development.yaml` или `production.yaml`, выбор по `NODE_ENV`) и `config/local.yaml` (локальные секреты);
-карта `config/custom-environment-variables.yaml` позволяет переопределить любое значение одноимённой переменной
-окружения. Модели задаются ветвью `config.llm.*`; флаги собеседника, проактивности, глобальной памяти и поджатия
-истории по умолчанию включены, а контур внешних событий — выключен. Полный список настроек —
-в [03-quickstart.md](03-quickstart.md).
+Configuration is assembled by the `node-config` package from the `config/` directory and is accessible in code as
+the `config` object exported by `src/config.js`. The settings tree is composed of `config/default.yaml` (default
+values), an environment file (`development.yaml` or `production.yaml`, selected by `NODE_ENV`), and
+`config/local.yaml` (local secrets); the map `config/custom-environment-variables.yaml` allows any value to be
+overridden by an environment variable of the same name. Models are configured under the `config.llm.*` branch;
+companion, proactivity, global memory, and history compression flags are enabled by default, while the external
+events loop is disabled. The full list of settings is in [03-quickstart.md](03-quickstart.md).
 
 ```js
 export const config = {
@@ -381,39 +392,40 @@ export const config = {
 };
 ```
 
-При старте проверяется инвариант гистерезиса: значение `config.historyCompression.shrinkTokens` должно быть строго
-меньше `config.historyCompression.maxTokens`.
+At startup the hysteresis invariant is checked: the value of `config.historyCompression.shrinkTokens` must be
+strictly less than `config.historyCompression.maxTokens`.
 
 ---
 
-## [PROMPT-9] Выбор моделей по этапам
+## [PROMPT-9] Model Selection by Stage
 
-Принцип: основной ответ даёт модель среднего уровня, все вспомогательные JSON-задачи — самая дешёвая быстрая модель,
-память пишется асинхронно, чтобы не тормозить ответ.
+The principle is: the main response is produced by a mid-tier model, all auxiliary JSON tasks use the cheapest
+fast model, and memory writes happen asynchronously so they do not delay the response.
 
-| Этап | Что используется | Путь в `config` |
-|------|------------------|-----------------|
-| Основной ответ агента | `<MAIN_MODEL>` | `llm.mainModel` |
-| Классификация запроса | `<AUX_MODEL>` | `llm.auxModel` |
-| Выбор намерения доставки | `<AUX_MODEL>` | `llm.auxModel` |
-| Извлечение фактов в память | `<MAIN_MODEL>` | `llm.extractModel` |
-| Извлечение тем диалога | `<AUX_MODEL>` | `llm.auxModel` |
-| Суммаризатор истории диалога | `<AUX_MODEL>` | `historyCompression.model` |
-| Слияние фактов | детерминированные правила, без вызова модели | — |
-| Эмбеддинги | `<EMBED_MODEL>` (1536) | `llm.embedModel` |
+| Stage | What is used | Path in `config` |
+|-------|--------------|------------------|
+| Main agent response | `<MAIN_MODEL>` | `llm.mainModel` |
+| Request classification | `<AUX_MODEL>` | `llm.auxModel` |
+| Delivery intent selection | `<AUX_MODEL>` | `llm.auxModel` |
+| Fact extraction to memory | `<MAIN_MODEL>` | `llm.extractModel` |
+| Dialog topic extraction | `<AUX_MODEL>` | `llm.auxModel` |
+| Dialog history summariser | `<AUX_MODEL>` | `historyCompression.model` |
+| Fact merging | deterministic rules, no model call | — |
+| Embeddings | `<EMBED_MODEL>` (1536) | `llm.embedModel` |
 
-Перед выводом в продакшен следует проверить доступность и возможности выбранных моделей (чат, строгий JSON, вызов
-инструментов и эмбеддинги) через выбранный endpoint скриптом проверки `tests/check-llm.js` (`npm run check:llm`).
+Before going to production, verify the availability and capabilities of the selected models (chat, strict JSON,
+tool calling, and embeddings) through the chosen endpoint using the check script `tests/check-llm.js`
+(`npm run check:llm`).
 
-### Рекомендованные модели (примеры подбора)
+### Recommended Models (Selection Examples)
 
-Ориентиры подбора для двух провайдеров; подойдёт любая модель сопоставимого класса, проходящая `npm run check:llm`.
+Reference points for two providers; any model of a comparable class that passes `npm run check:llm` is suitable.
 
-| Класс модели | OpenAI-совместимый прокси | Аналог на Groq |
-|--------------|---------------------------|----------------|
-| `<MAIN_MODEL>` — основной ответ | `gpt-5.4-mini` | `llama-3.3-70b-versatile` |
-| `<AUX_MODEL>` — дешёвый вспомогательный | `gpt-5.4-nano` | `openai/gpt-oss-20b` или `llama-3.1-8b-instant` |
-| `<EMBED_MODEL>` — эмбеддинги (1536) | `text-embedding-3-small` | у Groq нет эмбеддингов: взять другого провайдера или отключить векторный слой |
+| Model class | OpenAI-compatible proxy | Groq equivalent |
+|-------------|-------------------------|-----------------|
+| `<MAIN_MODEL>` — main response | `gpt-5.4-mini` | `llama-3.3-70b-versatile` |
+| `<AUX_MODEL>` — cheap auxiliary | `gpt-5.4-nano` | `openai/gpt-oss-20b` or `llama-3.1-8b-instant` |
+| `<EMBED_MODEL>` — embeddings (1536) | `text-embedding-3-small` | Groq has no embeddings: use another provider or disable the vector layer |
 
 ---
 

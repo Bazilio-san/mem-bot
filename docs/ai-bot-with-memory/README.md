@@ -1,10 +1,10 @@
-# Чат-бот с долговременной памятью и проактивностью
+# Chat-Bot with Long-Term Memory and Proactivity
 
-Паспорт контракта для быстрой реализации полностью рабочего проекта:
+Contract passport for rapid implementation of a fully working project:
 
-- реактивный диалог с инструментами и памятью,
-- проактивные поводы и анти-спам,
-- глобальная память и ролевая безопасность,
-- потоковая выдача и голосовой ответ,
-- интегрированные и MCP-инструменты,
-- полный слой тестов для проверки готовности.
+- reactive dialogue with tools and memory,
+- proactive triggers and anti-spam,
+- global memory and role-based security,
+- streaming output and voice responses,
+- integrated and MCP tools,
+- a complete test layer to verify readiness.

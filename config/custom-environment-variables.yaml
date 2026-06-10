@@ -3,6 +3,12 @@
 # Если переменная окружения задана (в т. ч. из .env через dotenv), её значение переопределяет файлы.
 # Числа помечаются __format: number, флаги — __format: boolean ("true"/"false"), массивы/объекты — __format: json.
 # Ключи каждого уровня отсортированы по алфавиту (соглашение проекта).
+admin:
+  host: ADMIN_HOST
+  port:
+    __name: ADMIN_PORT
+    __format: number
+
 authSecret: AUTH_SECRET
 
 companion:
