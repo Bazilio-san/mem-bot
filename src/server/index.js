@@ -69,7 +69,7 @@ function listen(app) {
 async function main() {
   const app = buildApp();
   const server = await listen(app);
-  console.log(`Admin web server is listening on http://${HOST}:${PORT} (API available at /api).`);
+  console.log(`Admin web server is listening on http://${HOST}:${PORT}/# (API available at /api).`);
 
   // Telegram is started after the web server. The bot itself logs that long polling is active.
   const { username } = await startTelegram();

@@ -947,9 +947,7 @@ async function pollLoop() {
       // Inline button taps are handled immediately (without an LLM call and without the semaphore): these are
       // light database operations and keyboard redraws. We only log the error so as not to break polling.
       else if (update.callback_query) {
-        handleCallback(update.callback_query).catch((e) =>
-          console.error('Error handling callback_query:', e.message),
-        );
+        handleCallback(update.callback_query).catch((e) => console.error('Error handling callback_query:', e.message));
       }
     }
   }

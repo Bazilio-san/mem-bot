@@ -61,7 +61,7 @@ function findProcessesOnWindows() {
   // Get-CimInstance даёт полную командную строку каждого процесса Node.js. Перечисляем все процессы node.exe,
   // а отбор по маркеру делаем в JS. Вывод формируется построчно в формате «PID<табуляция>командная строка».
   const ps = [
-    "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\"",
+    'Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'"',
     '| ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
   ].join(' ');
   let out;

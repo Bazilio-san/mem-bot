@@ -163,9 +163,7 @@ function wrapMcpTool(connection, server, mcpTool) {
 // At startup this gives a full picture of "what is declared for connection at all" before any connection attempts.
 function logDeclaredServers(servers) {
   if (servers.length === 0) {
-    console.log(
-      'MCP: no servers are declared in the configuration (.mcp.json) — no external tools are connected.',
-    );
+    console.log('MCP: no servers are declared in the configuration (.mcp.json) — no external tools are connected.');
     return;
   }
   console.log(`MCP: servers declared in the configuration — ${servers.length}. Full list:`);

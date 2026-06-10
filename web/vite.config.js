@@ -9,6 +9,7 @@ import vue from '@vitejs/plugin-vue';
 // (по умолчанию 3001). При необходимости переопределяется переменной окружения VITE_API_TARGET.
 const API_TARGET = process.env.VITE_API_TARGET || 'http://localhost:3001';
 
+// oxlint-disable-next-line import/no-default-export
 export default defineConfig({
   plugins: [vue()],
   server: {
