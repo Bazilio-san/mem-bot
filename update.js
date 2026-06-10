@@ -2,10 +2,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '2026.06.10-0200';
+const VERSION = '2026.06.11-0000';
 console.log(`Update script version: ${VERSION}`);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,12 +15,15 @@ const __dirname = path.dirname(__filename);
 const scriptDirName = path.basename(__dirname);
 process.chdir(__dirname);
 const CWD = process.cwd();
+// Deploy logs live in the parent directory (one level above the project), so they survive a hard reset/clean of
+// the working tree. Only the running app's own log stays inside the project directory.
+const VON = path.resolve(path.join(CWD, '..'));
 
 const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0].replace('T', '');
 const now = () => new Date().toISOString().replace('T', ' ').substring(0, 19) + 'Z';
-const runTimeLogFile = path.join(CWD, `deploy__${scriptDirName}__processing__${timestamp.slice(2, 14)}.log`);
-const cumulativeLogFile = path.join(CWD, `deploy__${scriptDirName}__cumulative.log`);
-const lastDeployLogFile = path.join(CWD, `deploy__${scriptDirName}__last_deploy.log`);
+const runTimeLogFile = path.join(VON, `deploy__${scriptDirName}__processing__${timestamp.slice(2, 14)}.log`);
+const cumulativeLogFile = path.join(VON, `deploy__${scriptDirName}__cumulative.log`);
+const lastDeployLogFile = path.join(VON, `deploy__${scriptDirName}__last_deploy.log`);
 const appRuntimeLogFile = path.join(CWD, `${scriptDirName}-server.log`);
 
 const DEFAULT_CONFIG = {
@@ -62,6 +66,12 @@ const echo = {
 };
 
 let logBuffer = '';
+
+// NVM environment loaded from .envrc. When present, build/install commands are wrapped with `source .envrc` so they
+// run under the Node.js version pinned for this project rather than whatever node happens to be on PATH.
+let setupScript = '';
+let nodeVersion = null;
+const DEFAULT_NODE_VERSION = '22.17.1';
 
 const clearColors = (text) => text.replace(/\x1B\[[0-9;]*[mGKH]/g, '');
 const clearHtmlColors = (text) => text.replace(/<\/?(red|y|g|r|status)>/g, '');
@@ -116,15 +126,44 @@ const logTryUpdate = (updateReason = '') => {
 };
 
 /**
- * Execute shell command.
+ * Execute shell command. When withSetupScript is true and an .envrc was loaded, the command is prefixed with
+ * `source .envrc &&` so it runs inside the project's NVM environment.
  */
-function execCommand(command, options = {}) {
-  return execSync(command, {
+function execCommand(command, options = {}, withSetupScript = false) {
+  const fullCommand = setupScript && withSetupScript ? `${setupScript} && ${command}` : command;
+  return execSync(fullCommand, {
     encoding: 'utf8',
     stdio: options.silent ? 'inherit' : 'pipe',
     shell: '/bin/bash',
     ...options,
   });
+}
+
+/**
+ * Execute a command inside the loaded NVM environment (used for install/build/migrate steps).
+ */
+function execWithNODE(command, options = {}) {
+  return execCommand(command, options, true);
+}
+
+/**
+ * Load the NVM environment from .envrc, extracting the pinned Node.js version for logging. If there is no .envrc,
+ * setupScript stays empty and execWithNODE behaves exactly like execCommand.
+ */
+function loadNVMEnvironment() {
+  try {
+    if (fs.existsSync('.envrc')) {
+      const envrcContent = fs.readFileSync('.envrc', 'utf8');
+      const nodeVersionMatch = envrcContent.match(/nvm use\s+([0-9.]+)/);
+      if (nodeVersionMatch) {
+        nodeVersion = nodeVersionMatch[1];
+      }
+      setupScript = 'source .envrc';
+    }
+  } catch (error) {
+    logError(`Error loading .envrc file: ${error.message}`);
+    throw error;
+  }
 }
 
 /**
@@ -221,24 +260,68 @@ function toBool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
+/**
+ * Parse a minimal YAML file consisting of `key: value` pairs (no nesting). Quotes are stripped and the literals
+ * `null`/`~` become an empty string. Enough for deploy/config.yml, which only holds flat scalar settings.
+ */
+function parseSimpleYAML(content) {
+  const config = {};
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+    const match = trimmed.match(/^\s*([^:]+?)\s*:\s*(.*)\s*$/);
+    if (!match) {
+      continue;
+    }
+    const key = match[1];
+    let value = (match[2] || '').replace(/^(['"])(.*)\1$/, '$2');
+    if (value === 'null' || value === '~') {
+      value = '';
+    }
+    config[key] = value;
+  }
+  return config;
+}
+
+/**
+ * Read deploy/config.yml if it exists. Returns an empty object when the file is missing or unparseable. The .env
+ * and process.env take precedence over these values in loadConfig.
+ */
+function readYamlConfig() {
+  const configFile = path.join(CWD, 'deploy', 'config.yml');
+  if (!fs.existsSync(configFile)) {
+    return {};
+  }
+  try {
+    return parseSimpleYAML(fs.readFileSync(configFile, 'utf8'));
+  } catch (error) {
+    logError(`Could not parse config file ${configFile}: ${error.message}`);
+    return {};
+  }
+}
+
 function loadConfig() {
+  // Load the NVM environment first so nodeVersion is known before any build command runs.
+  loadNVMEnvironment();
   const envFromFile = readDotEnv();
   const env = { ...process.env, ...envFromFile };
+  const yaml = readYamlConfig();
   const packageName = getPackageName();
 
-  const cfg = {
+  return {
     ...DEFAULT_CONFIG,
-    branch: env.DEPLOY_BRANCH || DEFAULT_CONFIG.branch,
+    branch: env.DEPLOY_BRANCH || yaml.branch || DEFAULT_CONFIG.branch,
     nodeEnv: env.NODE_ENV || DEFAULT_CONFIG.nodeEnv,
     serviceName: env.SERVICE_NAME || packageName,
     serviceStartCommand: env.SERVICE_START_COMMAND || DEFAULT_CONFIG.serviceStartCommand,
     serviceNodeEnv: env.SERVICE_NODE_ENV || env.NODE_ENV || DEFAULT_CONFIG.serviceNodeEnv,
     serviceLogFile: env.SERVICE_LOG_FILE || '',
     runMigrations: toBool(env.DEPLOY_RUN_MIGRATIONS || '0'),
-    email: env.DEPLOY_NOTIFY_EMAIL || '',
+    email: env.DEPLOY_NOTIFY_EMAIL || yaml.email || '',
+    nodeVersion: yaml.nodeVersion || '',
   };
-
-  return cfg;
 }
 
 function getDeploymentConfig(config) {
@@ -318,12 +401,12 @@ function getRemoteHash(branch) {
 function installWithFallback(label, primaryCommand, fallbackCommand) {
   try {
     logIt(`${label}: trying ${primaryCommand}`);
-    execCommand(primaryCommand, { silent: true });
+    execWithNODE(primaryCommand, { silent: true });
   } catch (error) {
     const shortError = String(error.message).replace(/\n/g, ' ');
     logIt(`${label}: ${primaryCommand} failed (${shortError})`);
     logIt(`${label}: trying ${fallbackCommand}`);
-    execCommand(fallbackCommand, { silent: true });
+    execWithNODE(fallbackCommand, { silent: true });
   }
 }
 
@@ -403,13 +486,13 @@ function buildProject() {
   }
 
   logIt('BUILD FRONTEND (web)', true);
-  execCommand('npm --prefix web run build', { silent: true });
+  execWithNODE('npm --prefix web run build', { silent: true });
   logIt('Web build completed');
 }
 
 function runMigrations() {
   logIt('RUN DATABASE MIGRATIONS', true);
-  execCommand('npm run migrate', { silent: true });
+  execWithNODE('npm run migrate', { silent: true });
   logIt('Migrations completed');
 }
 
@@ -466,6 +549,77 @@ function restartService(deploymentConfig) {
   startFallbackProcess(deploymentConfig);
 }
 
+/**
+ * Expand the internal <red>/<y>/<g>/<r> markup (and [ERROR]) used in the log buffer into inline-styled HTML spans
+ * for the email body, so the notification keeps the colour highlighting the terminal log has.
+ */
+const colorizeHTML = (text) =>
+  text
+    .replace(/<red>/g, '<span style="color:#ff0000;">')
+    .replace(/<\/red>/g, '</span>')
+    .replace(/<y>/g, '<span style="background-color:#ffff00;">')
+    .replace(/<\/y>/g, '</span>')
+    .replace(/<g>/g, '<span style="background-color:#00ff00;">')
+    .replace(/<\/g>/g, '</span>')
+    .replace(/<r>/g, '<span style="background-color:#ff0000; color:#ffffff;">')
+    .replace(/<\/r>/g, '</span>')
+    .replace(/\[ERROR]/g, '<span style="color:#ffffff; background-color: #ff0000">[ERROR]</span>');
+
+/**
+ * Send the build/deploy notification email to one or more comma-separated addresses via the system `mail` command.
+ * Does nothing when no addresses are configured. Each address is attempted independently; a failure for one address
+ * is logged and does not abort the others.
+ */
+async function sendBuildNotification(emails, status, body, serviceName) {
+  if (!emails) {
+    return;
+  }
+  let statusMark = '';
+  if (status === 'FAIL') {
+    statusMark = `<r>FAIL</r> `;
+  } else if (status === 'SUCCESS') {
+    statusMark = `<g>SUCCESS</g> `;
+  }
+  body = body.replace('<status>', statusMark);
+
+  const hostname = os.hostname();
+  const htmlContent = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+    <meta content="text/html; charset=UTF-8" http-equiv="Content-Type">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${status} Update ${serviceName} (on ${hostname})</title>
+</head>
+<body>
+<pre>
+${colorizeHTML(clearColors(body))}
+</pre></body></html>`;
+
+  const emailArray = emails
+    .split(',')
+    .map((email) => email.trim())
+    .filter((email) => email);
+
+  for (let i = 0; i < emailArray.length; i++) {
+    const emailAddress = emailArray[i];
+    try {
+      logIt(`Sending update notification to: ${emailAddress}`);
+      const subject = `${status} Update: ${serviceName} (on ${hostname})`;
+      const command = `mail -a "Content-Type: text/html; charset=UTF-8" -s "${subject.replace(/"/g, '\\"')}" "${emailAddress}"`;
+      const child = spawn('/bin/bash', ['-lc', command], { stdio: ['pipe', 'inherit', 'inherit'] });
+      child.stdin.write(htmlContent);
+      child.stdin.end();
+
+      await new Promise((resolve, reject) => {
+        child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`mail exit code ${code}`))));
+        child.on('error', reject);
+      });
+    } catch (error) {
+      logError(`Failed to send email to ${emailAddress}: ${error.message}`);
+    }
+  }
+}
+
 async function main() {
   truncateCumulativeLogIfNeeded();
   fs.writeFileSync(runTimeLogFile, '');
@@ -479,6 +633,17 @@ async function main() {
 
   const config = loadConfig();
   const deploymentConfig = getDeploymentConfig(config);
+
+  // Decide which Node.js version label to report: .envrc wins, then deploy/config.yml, then the built-in default.
+  let nodeVersionFrom = ' DEFAULT';
+  if (nodeVersion) {
+    nodeVersionFrom = ' .envrc';
+  } else if (config.nodeVersion) {
+    ({ nodeVersion } = config);
+    nodeVersionFrom = ' deploy/config.yml';
+  }
+  logIt(`Using Node.js version: ${colorG.y(nodeVersion || DEFAULT_NODE_VERSION)}${nodeVersionFrom}`);
+
   const expectedBranch = args.expectedBranch || config.branch;
   const deployBranch = resolveDeployBranch(expectedBranch);
   if (expectedBranch !== deployBranch) {
@@ -540,6 +705,11 @@ async function main() {
       restartService(deploymentConfig);
       runDeployedLogFile = true;
       logIt(`Update completed at ${new Date().toISOString().replace('T', ' ').substring(0, 19)}`);
+      if (config.email) {
+        await sendBuildNotification(config.email, 'SUCCESS', logBuffer, deploymentConfig.serviceName);
+      } else {
+        logIt('EMAIL not configured');
+      }
     } else {
       logIt('No changes detected. Update skipped.');
     }
@@ -548,6 +718,9 @@ async function main() {
       ? error.message
       : [error.stderr, error.message].join('\n');
     logError(message);
+    if (config.email) {
+      await sendBuildNotification(config.email, 'FAIL', logBuffer, deploymentConfig.serviceName);
+    }
     throw error;
   } finally {
     logIt('#FINISH#');
