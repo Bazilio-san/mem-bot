@@ -166,7 +166,7 @@ function showHelp () {
     Options:
 
     -b|--branch <name>
-        Git branch to deploy (default: main)
+        Git branch to deploy (default: project default / remote branch)
     -f|--force
         Force reinstall, rebuild and restart even if there are no new commits
     -m|--migrate
@@ -313,19 +313,76 @@ Commit message: ${colorG.lg(info.headCommitMessage)}`,
 
 function getRemoteHash (branch) {
   return execCommand(`git rev-parse --verify origin/${branch}`).trim();
-};
+}
 
-function reinstallDependencies () {
-  logIt('INSTALL ROOT DEPENDENCIES', true);
-  execCommand('npm ci');
-
-  if (fs.existsSync(path.join(CWD, 'web', 'package.json'))) {
-    execIt('npm --prefix web ci');
+function installWithFallback (label, primaryCommand, fallbackCommand) {
+  try {
+    logIt(`${label}: trying ${primaryCommand}`);
+    execCommand(primaryCommand, { silent: true });
+  } catch (error) {
+    const shortError = String(error.message).replace(/\n/g, ' ');
+    logIt(`${label}: ${primaryCommand} failed (${shortError})`);
+    logIt(`${label}: trying ${fallbackCommand}`);
+    execCommand(fallbackCommand, { silent: true });
   }
 }
 
-function execIt (command) {
-  return execCommand(command, { silent: true });
+function getRemoteBranches () {
+  const output = execCommand('git ls-remote --heads origin').trim();
+  if (!output) {
+    return [];
+  }
+
+  return output.split('\n').map((line) => {
+    const match = line.match(/\srefs\/heads\/(.+)$/);
+    return match ? match[1] : '';
+  }).filter(Boolean);
+}
+
+function resolveDeployBranch (requestedBranch) {
+  const remoteBranches = getRemoteBranches();
+  if (remoteBranches.includes(requestedBranch)) {
+    return requestedBranch;
+  }
+
+  const remoteDefault = (() => {
+    try {
+      const remoteHead = execCommand('git symbolic-ref refs/remotes/origin/HEAD', { silent: true }).trim();
+      return remoteHead ? remoteHead.replace(/^refs\/remotes\/origin\//, '') : '';
+    } catch {
+      return '';
+    }
+  })();
+
+  if (remoteDefault && remoteBranches.includes(remoteDefault)) {
+    return remoteDefault;
+  }
+
+  let localBranch = '';
+  try {
+    localBranch = execCommand('git rev-parse --abbrev-ref HEAD').trim();
+  } catch {
+    localBranch = '';
+  }
+
+  if (localBranch && remoteBranches.includes(localBranch)) {
+    return localBranch;
+  }
+
+  if (remoteBranches.length > 0) {
+    return remoteBranches[0];
+  }
+
+  throw new Error(`Remote branch "${requestedBranch}" not found in origin`);
+}
+
+function reinstallDependencies () {
+  logIt('INSTALL ROOT DEPENDENCIES', true);
+  installWithFallback('root', 'npm ci', 'npm install');
+
+  if (fs.existsSync(path.join(CWD, 'web', 'package.json'))) {
+    installWithFallback('web', 'npm --prefix web ci', 'npm --prefix web install');
+  }
 }
 
 function buildProject () {
@@ -412,11 +469,15 @@ async function main () {
   const config = loadConfig();
   const deploymentConfig = getDeploymentConfig(config);
   const expectedBranch = args.expectedBranch || config.branch;
+  const deployBranch = resolveDeployBranch(expectedBranch);
+  if (expectedBranch !== deployBranch) {
+    logIt(`Remote branch "${expectedBranch}" not found. Using "${deployBranch}" instead.`);
+  }
 
   logIt(`<status>MEM-BOT update <y>${colorG.y(deploymentConfig.serviceNamePM)}</y> ${now()}`);
   logIt(`Working directory: ${colorG.y(CWD)}`);
   logIt(`Service candidates: ${colorG.y(deploymentConfig.serviceCandidates.join(', '))}`);
-  logIt(`Expected branch: ${colorG.y(expectedBranch)}`);
+  logIt(`Expected branch: ${colorG.y(deployBranch)}`);
   logIt(`Start command: ${colorG.y(deploymentConfig.startCommand)} (${deploymentConfig.startNodeEnv})`);
 
   let runDeployedLogFile = false;
@@ -432,25 +493,25 @@ async function main () {
     let needUpdate = args.force;
     let reason = args.force ? 'force' : '';
 
-    if (before.branch !== expectedBranch) {
+    if (before.branch !== deployBranch) {
       needUpdate = true;
-      reason += `${reason ? '. ' : ''}branch != expected (${before.branch} != ${expectedBranch})`;
-      logIt(`Current branch is ${before.branch}. Switching to ${expectedBranch}.`);
-      execCommand(`git fetch origin ${expectedBranch} --prune`);
-      execCommand(`git checkout -B ${expectedBranch} origin/${expectedBranch}`);
-      execCommand(`git reset --hard origin/${expectedBranch}`);
+      reason += `${reason ? '. ' : ''}branch != expected (${before.branch} != ${deployBranch})`;
+      logIt(`Current branch is ${before.branch}. Switching to ${deployBranch}.`);
+      execCommand(`git fetch origin ${deployBranch} --prune`);
+      execCommand(`git checkout -B ${deployBranch} origin/${deployBranch}`);
+      execCommand(`git reset --hard origin/${deployBranch}`);
       execCommand('git clean -fd');
       printCurrentBranch();
     } else {
-      logIt(`Pulling latest from origin/${expectedBranch}...`);
-      execCommand(`git fetch origin ${expectedBranch} --prune`);
-      const upstream = getRemoteHash(expectedBranch);
+      logIt(`Pulling latest from origin/${deployBranch}...`);
+      execCommand(`git fetch origin ${deployBranch} --prune`);
+      const upstream = getRemoteHash(deployBranch);
       if (before.headHash !== upstream) {
         needUpdate = true;
         reason += `${reason ? '. ' : ''}new commit in remote`;
         logIt('Remote commit changed. Hard reset to origin branch.');
-        execCommand(`git checkout -B ${expectedBranch} origin/${expectedBranch}`);
-        execCommand(`git reset --hard origin/${expectedBranch}`);
+        execCommand(`git checkout -B ${deployBranch} origin/${deployBranch}`);
+        execCommand(`git reset --hard origin/${deployBranch}`);
         execCommand('git clean -fd');
         printCurrentBranch();
       }

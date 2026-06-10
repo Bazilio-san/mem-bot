@@ -44,3 +44,4 @@ config/local-*.yaml
 /.browser-session/
 /_misc/
 /config/__server__/
+/deploy/config.yml
