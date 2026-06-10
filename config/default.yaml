@@ -54,9 +54,9 @@ db:
       #> Служебное подключение к базе 'postgres' — только для CREATE DATABASE в migrate.js.
       bootstrap:
         #> Имя служебной базы (фиксировано как postgres).
-        database: 'postgres'
+        database: postgres
         #> Хост PostgreSQL.
-        host: 'localhost'
+        host: localhost
         #> Человекочитаемая метка для диагностики.
         label: 'postgres (bootstrap for CREATE DATABASE)'
         #> Пароль БД (секрет; держать в local.yaml или окружении).
@@ -73,11 +73,11 @@ db:
       #> PostgreSQL); задавать их здесь или в local.yaml нужно только для отдельного сервера логов.
       logs:
         #> Имя БД журналов.
-        database: 'mem_bot_logs'
+        database: mem_bot_logs
         #> Хост PostgreSQL. Пусто — наследуется от main.
-        host: ''
+        host: localhost
         #> Человекочитаемая метка, показывается в диагностике.
-        label: 'mem-bot logs'
+        label: mem-bot logs
         #> Пароль БД. Пусто — наследуется от main.
         password: ''
         #> Порт PostgreSQL. Пусто — наследуется от main.
@@ -89,11 +89,11 @@ db:
       #> Рабочая БД памяти агента (connectionId = main).
       main:
         #> Имя рабочей БД памяти агента.
-        database: 'mem_bot'
+        database: mem_bot
         #> Хост PostgreSQL. Пустая строка ('') ОТКЛЮЧАЕТ БД (isMainDBUsed = false).
-        host: 'localhost'
+        host: localhost
         #> Человекочитаемая метка, показывается в диагностике.
-        label: 'mem-bot memory'
+        label: mem-bot memory
         #> Пароль БД (секрет; держать в local.yaml или окружении).
         password: ''
         #> Порт PostgreSQL.
