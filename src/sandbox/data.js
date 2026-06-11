@@ -109,6 +109,16 @@ export async function getUserMemory(userId) {
   return { profile: group.profile, dialog: group.dialog, domain: group.domain, secure, reminder };
 }
 
+// Полное удаление пользователя со всеми его данными. Одна команда DELETE по mem.users: связанные таблицы
+// (диалоги, сообщения, факты, задачи планировщика, уведомления и т.д.) объявлены с ON DELETE CASCADE и
+// удаляются на уровне БД атомарно. Журналы при этом сохраняются: в mem.tool_calls ссылка на пользователя
+// обнуляется правилом ON DELETE SET NULL, а журнал LLM-запросов живёт в отдельной БД логов без внешних
+// ключей на mem.users. Возвращает true, если пользователь существовал и был удалён.
+export async function deleteUser(userId) {
+  const { rowCount } = await query('DELETE FROM mem.users WHERE id = $1', [userId]);
+  return rowCount > 0;
+}
+
 // Turn the memory retrieval result into sets of selected ids, scores and ranks.
 // This is what the page highlights: exactly which facts will land in MEMORY_CONTEXT.
 function summarizeSelection(mem) {

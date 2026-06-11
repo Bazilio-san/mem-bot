@@ -144,6 +144,39 @@ body {
   color: #555;
 }
 
+/* Правый край строки пользователя: счётчик памяти и кнопка удаления. Кнопка появляется при наведении
+   на строку, чтобы список не пестрел красными иконками. */
+.user-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.user-item .user-delete {
+  width: 26px;
+  height: 26px;
+  visibility: hidden;
+}
+
+.user-item:hover .user-delete,
+.user-item.active .user-delete {
+  visibility: visible;
+}
+
+/* Содержимое диалога подтверждения удаления пользователя. */
+.delete-warning {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.delete-suppress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
 .main {
   grid-area: main;
   overflow-y: auto;

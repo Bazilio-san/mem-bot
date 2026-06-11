@@ -59,7 +59,8 @@
     "test:notes-api": "cross-env NODE_ENV=test node tests/notes-api.test.mjs",
     "test:notes-mcp": "cross-env NODE_ENV=test node tests/notes-mcp.test.mjs",
     "test:notes": "cross-env NODE_ENV=test node tests/notes-store.test.mjs && cross-env NODE_ENV=test node tests/notes-api.test.mjs && cross-env NODE_ENV=test node tests/notes-mcp.test.mjs",
-    "test:admin-auth": "cross-env NODE_ENV=test node tests/admin-auth.test.mjs"
+    "test:admin-auth": "cross-env NODE_ENV=test node tests/admin-auth.test.mjs",
+    "test:admin-ui": "cross-env NODE_ENV=test node tests/admin-user-delete-ui.test.mjs"
   },
   "keywords": [
     "ai-agent",

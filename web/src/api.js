@@ -61,6 +61,13 @@ export function deleteMemoryItem(userId, category, itemId) {
   );
 }
 
+// Каскадное удаление пользователя и всех его данных (диалоги, факты, задачи, уведомления и т.д.).
+// Журналы вызовов инструментов и LLM-запросов при этом сохраняются — у них лишь обнуляется ссылка
+// на пользователя либо они живут в отдельной БД логов.
+export function deleteUser(userId) {
+  return request(`/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+}
+
 // Состояние проактивности пользователя по его внутреннему идентификатору (поле id из списка пользователей).
 export function fetchUserProactivity(userId) {
   return request(`/users/${encodeURIComponent(userId)}/proactivity`);

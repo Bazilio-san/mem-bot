@@ -7,8 +7,10 @@ import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
+import Dialog from 'primevue/dialog';
+import Checkbox from 'primevue/checkbox';
 import { FilterMatchMode } from '@primevue/core/api';
-import { fetchUsers, fetchUserMemory, deleteMemoryItem, fetchAuthMe, logoutAdmin } from './api.js';
+import { fetchUsers, fetchUserMemory, deleteMemoryItem, deleteUser, fetchAuthMe, logoutAdmin } from './api.js';
 import LlmLogPage from './components/llm-log/LlmLogPage.vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
 
@@ -178,6 +180,67 @@ async function removeItem(groupKey, item) {
   }
 }
 
+// --- Удаление пользователя целиком -------------------------------------------------------------
+// По кнопке у строки пользователя показывается диалог-предупреждение о каскадном удалении всех данных.
+// Флажок «Не напоминать в течение 5 минут» записывает в localStorage момент, до которого подтверждение
+// не требуется: пока он не наступил, повторные удаления выполняются сразу, без диалога.
+const DELETE_CONFIRM_SUPPRESS_KEY = 'memAdmin.deleteUserConfirmSuppressedUntil';
+const DELETE_CONFIRM_SUPPRESS_MS = 5 * 60 * 1000;
+
+const deleteDialogVisible = ref(false);
+const userToDelete = ref(null);
+const suppressDeleteConfirm = ref(false);
+const deletingUser = ref(false);
+
+// Активно ли сейчас подавление диалога подтверждения (включённый ранее флажок ещё не истёк).
+function isDeleteConfirmSuppressed() {
+  const until = Number(localStorage.getItem(DELETE_CONFIRM_SUPPRESS_KEY) || 0);
+  return Number.isFinite(until) && Date.now() < until;
+}
+
+// Клик по кнопке удаления в списке: либо сразу удаляем (подавление активно), либо открываем диалог.
+function askDeleteUser(user) {
+  if (isDeleteConfirmSuppressed()) {
+    performDeleteUser(user);
+    return;
+  }
+  userToDelete.value = user;
+  suppressDeleteConfirm.value = false;
+  deleteDialogVisible.value = true;
+}
+
+// Подтверждение в диалоге: при включённом флажке запоминаем срок подавления, затем удаляем.
+async function confirmDeleteUser() {
+  if (suppressDeleteConfirm.value) {
+    localStorage.setItem(DELETE_CONFIRM_SUPPRESS_KEY, String(Date.now() + DELETE_CONFIRM_SUPPRESS_MS));
+  }
+  const user = userToDelete.value;
+  deleteDialogVisible.value = false;
+  userToDelete.value = null;
+  if (user) {
+    await performDeleteUser(user);
+  }
+}
+
+// Собственно удаление: запрос к API, затем чистка локального состояния — пользователь уходит из списка,
+// а если была открыта его память, правая панель возвращается к подсказке «выберите пользователя».
+async function performDeleteUser(user) {
+  deletingUser.value = true;
+  error.value = '';
+  try {
+    await deleteUser(user.id);
+    users.value = users.value.filter((u) => u.id !== user.id);
+    if (selectedUser.value && selectedUser.value.id === user.id) {
+      selectedUser.value = null;
+      memory.value = null;
+    }
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    deletingUser.value = false;
+  }
+}
+
 onMounted(() => {
   window.addEventListener('admin-auth-required', onAuthRequired);
   checkAuth();
@@ -230,9 +293,44 @@ onBeforeUnmount(() => {
           <div class="name">{{ user.name }}</div>
           <div class="meta">{{ user.externalId }}<span v-if="user.isAdmin"> · администратор</span></div>
         </div>
-        <span class="badge">{{ user.memoryCount }}</span>
+        <span class="user-side">
+          <span class="badge">{{ user.memoryCount }}</span>
+          <Button
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            rounded
+            size="small"
+            class="user-delete"
+            :disabled="deletingUser"
+            :aria-label="`Удалить пользователя ${user.name}`"
+            @click.stop="askDeleteUser(user)"
+          />
+        </span>
       </div>
     </aside>
+
+    <Dialog
+      v-model:visible="deleteDialogVisible"
+      modal
+      header="Удаление пользователя"
+      :style="{ width: 'min(480px, 92vw)' }"
+    >
+      <p class="delete-warning">
+        Будут безвозвратно удалены пользователь
+        <strong>{{ userToDelete ? userToDelete.name : '' }}</strong> и все его данные: диалоги, сообщения, факты памяти,
+        защищённые записи, задачи планировщика и уведомления. Журналы вызовов инструментов и LLM-запросов сохранятся.
+        Отменить это действие нельзя.
+      </p>
+      <label class="delete-suppress">
+        <Checkbox v-model="suppressDeleteConfirm" binary input-id="suppress-delete-confirm" />
+        <span>Не напоминать в течение 5 минут</span>
+      </label>
+      <template #footer>
+        <Button label="Отмена" severity="secondary" text @click="deleteDialogVisible = false" />
+        <Button label="Удалить" severity="danger" @click="confirmDeleteUser" />
+      </template>
+    </Dialog>
 
     <main v-if="activeTab === 'memory'" class="main">
       <div v-if="error" class="error">Ошибка: {{ error }}</div>
