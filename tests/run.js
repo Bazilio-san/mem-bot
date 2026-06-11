@@ -35,6 +35,7 @@ import {
   getGlobalKnowledgeById,
   updateGlobalKnowledge,
   reembedGlobalKnowledge,
+  searchGlobalKnowledgeText,
 } from '../src/pipeline/global-memory.js';
 import { runEmbeddingRepairOnce } from '../src/pipeline/embedding-repair.js';
 import { buildTemporalContext } from '../src/utils/temporal.js';
@@ -2284,6 +2285,36 @@ async function layerGlobalMemory() {
       status: 'active',
     });
     check('8.6. Восстановление из корзины через update со status = active', restored?.status === 'active');
+
+    // 8.7. Неточный текстовый поиск (полнотекст + триграммы pg_trgm): точное слово, словоформа с опечаткой,
+    // посторонний запрос. Сервис эмбеддингов не участвует — поиск чисто текстовый.
+    const sample = await addGlobalKnowledge({
+      title: 'Доставка',
+      content: 'Запись для проверки админ-CRUD: доставка посылки занимает один рабочий день.',
+      createdBy: admin.id,
+      source: 'тест',
+    });
+    const byWord = await searchGlobalKnowledgeText({ q: 'доставка посылки' });
+    check(
+      '8.7. Текстовый поиск находит запись по точным словам',
+      byWord.some((r) => r.id === sample.id && r.relevance > 0),
+    );
+    const byTypo = await searchGlobalKnowledgeText({ q: 'досатвка' });
+    check(
+      '8.7. Текстовый поиск находит запись по слову с опечаткой',
+      byTypo.some((r) => r.id === sample.id),
+      byTypo
+        .map((r) => `${r.title}:${r.relevance.toFixed(2)}`)
+        .join(' | ')
+        .slice(0, 120),
+    );
+    const byForeign = await searchGlobalKnowledgeText({ q: 'квантовая хромодинамика глюонов' });
+    check('8.7. Посторонний запрос не возвращает запись', !byForeign.some((r) => r.id === sample.id));
+    const ranked = await searchGlobalKnowledgeText({ q: 'доставка' });
+    check(
+      '8.7. Результаты отсортированы по убыванию релевантности',
+      ranked.every((r, i) => i === 0 || ranked[i - 1].relevance >= r.relevance),
+    );
   } else {
     console.log('   (8.6 пропущен: GLOBAL_RAG_ENABLED выключен.)');
   }

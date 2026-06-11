@@ -15,6 +15,7 @@ import {
   getGlobalKnowledgeById,
   listGlobalKnowledge,
   reembedGlobalKnowledge,
+  searchGlobalKnowledgeText,
   updateGlobalKnowledge,
 } from '../pipeline/global-memory.js';
 
@@ -228,6 +229,23 @@ export function createAdminApi() {
         return res.status(400).json({ error: 'Недопустимое значение параметра status.' });
       }
       res.json(await listGlobalKnowledge({ statuses }));
+    }),
+  );
+
+  // Fuzzy text search over the knowledge base: full-text matching plus trigram similarity (catches typos
+  // and word forms). Returns records in the list shape with an extra relevance field (0..1), best first.
+  router.get(
+    '/knowledge/search',
+    wrap(async (req, res) => {
+      const q = String(req.query.q || '').trim();
+      if (!q) {
+        return res.status(400).json({ error: 'Пустой поисковый запрос.' });
+      }
+      const statuses = parseKnowledgeStatuses(req.query.status);
+      if (!statuses) {
+        return res.status(400).json({ error: 'Недопустимое значение параметра status.' });
+      }
+      res.json(await searchGlobalKnowledgeText({ q, statuses }));
     }),
   );
 

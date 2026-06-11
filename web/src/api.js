@@ -86,6 +86,16 @@ export function fetchKnowledge(status) {
   return request(`/knowledge${status ? `?status=${encodeURIComponent(status)}` : ''}`);
 }
 
+// Неточный текстовый поиск по базе: полнотекст плюс триграммная похожесть (ловит опечатки и словоформы).
+// Ответ — записи в форме списка с дополнительным полем relevance (0–1), самые релевантные первыми.
+export function searchKnowledgeText(q, status) {
+  const params = new URLSearchParams({ q });
+  if (status) {
+    params.set('status', status);
+  }
+  return request(`/knowledge/search?${params}`);
+}
+
 // Создание записи. Сервер сразу считает эмбеддинг; в ответе — созданная запись с hasEmbedding.
 export function createKnowledge(record) {
   return request('/knowledge', {

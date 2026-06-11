@@ -77,6 +77,7 @@ and the failure is logged on the server.
 | `POST /api/llm-log/analyze` | AI analysis of a logged request, streamed as Server-Sent Events | `runAnalysis()` |
 | `GET /api/domains` | agent domains (key and title) — options for the domain select of the knowledge form | `listDomains()` |
 | `GET /api/knowledge` | knowledge-base records with `hasEmbedding` (`?status=` comma list, `deleted`, or `all`; default active+archived) | `listGlobalKnowledge()` |
+| `GET /api/knowledge/search?q=` | fuzzy text search: full-text plus trigram similarity, records with a `relevance` field, best first | `searchGlobalKnowledgeText()` |
 | `POST /api/knowledge` | create a knowledge record; the embedding is computed immediately | `addGlobalKnowledge()` |
 | `PUT /api/knowledge/:id` | update a record; a text change resets and recomputes the embedding; restoring from the bin is `status: 'active'` | `updateGlobalKnowledge()` |
 | `DELETE /api/knowledge/:id` | soft delete (`status = 'deleted'`), the record moves to the recycle bin | `deleteGlobalKnowledge()` |
@@ -191,8 +192,15 @@ unavailable. In both engines the result streams into the dialog as Server-Sent E
 
 The "База знаний" tab is a full CRUD interface over the shared knowledge base (`mem.global_knowledge` — the
 business rules of the layer live in `docs/ai-bot-with-memory/14-global-memory.md`). The page is full-width, with
-a toolbar above the table: the "Добавить запись" button, the record counter, and a clickable "⚠ без эмбеддинга:
-N" indicator that toggles a filter showing only records without a vector.
+a toolbar above the table: the "Добавить запись" button, the fuzzy text-search box, the record counter, and a
+clickable "⚠ без эмбеддинга: N" indicator that toggles a filter showing only records without a vector.
+
+**Fuzzy text search.** The toolbar search box performs an inexact search over titles and contents on the server
+(`GET /api/knowledge/search`): exact full-text word matching is combined with pg_trgm trigram similarity, so the
+search also finds records by misspelled words and other word forms. The query is sent after a short typing pause;
+the results replace the table contents, a "Релевантность" column (0–1) appears, and rows are sorted by relevance
+descending. The column filters keep working on top of the search results, and clearing the box returns the full
+list. The search is purely textual — embeddings and the embedding service are not involved.
 
 **Table.** A PrimeVue `DataTable` (`size="small"`, `removable-sort`, `striped-rows`, `filter-display="row"`, a
 paginator from 50 rows). The base is small, so the whole list — including the recycle bin — is loaded at once

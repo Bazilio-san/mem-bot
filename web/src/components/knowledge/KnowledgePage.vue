@@ -3,7 +3,7 @@
 // с сортировками и фильтрами по столбцам; объём базы мал (десятки–сотни записей), поэтому список загружается
 // целиком (включая корзину), а сортировка и фильтрация выполняются на клиенте. Фильтр по статусу по умолчанию
 // скрывает удалённые записи — выбор статуса deleted открывает корзину, восстановление — через форму записи.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import MultiSelect from 'primevue/multiselect';
@@ -18,6 +18,7 @@ import {
   updateKnowledge,
   deleteKnowledge,
   reembedKnowledge,
+  searchKnowledgeText,
 } from '../../api.js';
 import KnowledgeDialog from './KnowledgeDialog.vue';
 
@@ -97,6 +98,55 @@ function toggleNoEmbeddingFilter() {
   filters.value.embeddingLabel.value = filters.value.embeddingLabel.value === 'нет' ? null : 'нет';
 }
 
+// --- Неточный текстовый поиск ------------------------------------------------------------------
+// Запрос уходит на сервер (полнотекст + триграммная похожесть, ловит опечатки и словоформы) с задержкой
+// после окончания ввода. Результаты заменяют содержимое таблицы и сортируются по релевантности; очистка
+// поля возвращает полный список. Колоночные фильтры продолжают работать поверх результатов поиска.
+const searchQuery = ref('');
+const searching = ref(false);
+const searchMode = ref(false);
+let searchTimer = null;
+let searchSeq = 0;
+
+async function runSearch() {
+  const q = searchQuery.value.trim();
+  const seq = ++searchSeq;
+  if (!q) {
+    searchMode.value = false;
+    await load();
+    return;
+  }
+  searching.value = true;
+  try {
+    const found = await searchKnowledgeText(q, 'all');
+    if (seq !== searchSeq) {
+      return; // пришёл ответ на устаревший запрос — пользователь уже набрал другой текст
+    }
+    records.value = found.map(decorate);
+    searchMode.value = true;
+    error.value = '';
+  } catch (err) {
+    if (seq === searchSeq) {
+      error.value = err.message;
+    }
+  } finally {
+    if (seq === searchSeq) {
+      searching.value = false;
+    }
+  }
+}
+
+watch(searchQuery, () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 350);
+});
+
+function clearSearch() {
+  searchQuery.value = '';
+}
+
+onBeforeUnmount(() => clearTimeout(searchTimer));
+
 function openCreate() {
   dialogRecord.value = {};
 }
@@ -164,7 +214,19 @@ onMounted(load);
   <div class="kb">
     <div class="kb-toolbar">
       <Button label="Добавить запись" icon="pi pi-plus" size="small" @click="openCreate" />
-      <span class="kb-count">записей: {{ records.length }}</span>
+      <span class="kb-search">
+        <InputText
+          v-model="searchQuery"
+          size="small"
+          placeholder="Текстовый поиск (неточный: опечатки, словоформы)"
+          class="kb-search-input"
+        />
+        <button v-if="searchQuery" type="button" class="kb-search-x" title="Очистить поиск" @click="clearSearch">
+          ✕
+        </button>
+      </span>
+      <span v-if="searching" class="kb-count">поиск…</span>
+      <span class="kb-count">{{ searchMode ? `найдено: ${records.length}` : `записей: ${records.length}` }}</span>
       <button
         v-if="withoutEmbedding"
         type="button"
@@ -188,13 +250,17 @@ onMounted(load);
       removable-sort
       striped-rows
       filter-display="row"
-      sort-field="updatedAt"
+      :sort-field="searchMode ? 'relevance' : 'updatedAt'"
       :sort-order="-1"
       paginator
       :rows="50"
       :rows-per-page-options="[25, 50, 100]"
       :always-show-paginator="false"
     >
+      <Column v-if="searchMode" field="relevance" header="Релевантность" sortable :style="{ width: '8rem' }">
+        <template #body="{ data }">{{ data.relevance != null ? data.relevance.toFixed(2) : '' }}</template>
+      </Column>
+
       <Column field="embeddingLabel" header="Эмбеддинг" sortable :show-filter-menu="false" :style="{ width: '9rem' }">
         <template #filter="{ filterModel, filterCallback }">
           <Select
@@ -343,6 +409,28 @@ onMounted(load);
 .kb-count {
   color: #777;
   font-size: 13px;
+}
+.kb-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.kb-search-input {
+  width: 24rem;
+  padding-right: 1.8rem;
+}
+.kb-search-x {
+  position: absolute;
+  right: 6px;
+  border: none;
+  background: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px;
+}
+.kb-search-x:hover {
+  color: #333;
 }
 .kb-noemb {
   border: 1px solid #e0a800;

@@ -139,6 +139,7 @@ export async function listGlobalKnowledge({ statuses }) { /* full records with h
 export async function getGlobalKnowledgeById(id) { /* one record in the same shape, or null */ }
 export async function updateGlobalKnowledge(id, fields) { /* update + immediate embedding recompute */ }
 export async function reembedGlobalKnowledge(id, { force }) { /* fill a missing vector; force recomputes always */ }
+export async function searchGlobalKnowledgeText({ q, statuses }) { /* fuzzy text search with a relevance score */ }
 ```
 
 Both `getActiveGlobalFacts` and `searchGlobalKnowledge` always respect the domain: they return records for the
@@ -156,6 +157,15 @@ moment a text-vector mismatch is impossible by construction. Second, `updateGlob
 trigger leaves it alone. When the embedding service is unavailable, the second step quietly ends, the record stays
 with `embedding = NULL` and `hasEmbedding: false`, and the vector is filled in later — by `reembedGlobalKnowledge`
 on demand or by the background repair pass.
+
+**Fuzzy text search for management interfaces.** Besides the semantic `searchGlobalKnowledge` used by the
+response pipeline, the module exposes `searchGlobalKnowledgeText` — an inexact, embeddings-free search over
+titles and contents for administrative tooling. It combines exact full-text matching by `search_tsv` with the
+trigram `word_similarity` from the `pg_trgm` extension (installed by migration
+`003_global_knowledge_text_search.sql`), so records are also found by misspelled words and other word forms that
+full-text matching misses. The relevance of each hit is the best of the two signals, normalised to 0..1, and the
+results come best first. No trigram index is created: the knowledge base is small (tens to hundreds of records),
+so a sequential scan is cheaper than maintaining an index.
 
 **Background embedding repair.** The module `src/pipeline/embedding-repair.js` exposes `runEmbeddingRepairOnce()`
 plus `startEmbeddingRepair()`/`stopEmbeddingRepair()`. A pass selects active knowledge records with
@@ -377,6 +387,9 @@ code on failure. Fact tests and knowledge-base tests are enabled independently, 
    `hasEmbedding: false`; `reembedGlobalKnowledge` restores the vector; a `runEmbeddingRepairOnce` pass fills in
    missing vectors; soft deletion removes the record from the default selection but keeps it reachable by the
    `deleted` status, and restoring is the same update with status `active`.
+8. **Fuzzy text search** (when `config.globalMemory.ragEnabled` is set). `searchGlobalKnowledgeText` finds a
+   record by its exact words and by a misspelled word, does not return it for an unrelated query, and orders the
+   results by descending relevance.
 
 ---
 

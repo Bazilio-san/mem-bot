@@ -200,6 +200,40 @@ export async function getGlobalKnowledgeById(id) {
   return rows.length ? mapKnowledgeRow(rows[0]) : null;
 }
 
+// Fuzzy text search over the knowledge base for the admin table. Combines two signals over title+content:
+// exact full-text matching by search_tsv (word hits, 'simple' configuration without stemming) and trigram
+// word_similarity from pg_trgm, which also catches typos and other word forms that full-text misses.
+// Relevance is the best of the two signals, normalised to 0..1. No embeddings are involved — this is a
+// text search, intentionally independent of the vector layer and the embedding service. The base is small,
+// so a sequential scan over the filtered statuses is fine without a trigram index.
+export async function searchGlobalKnowledgeText({
+  q,
+  statuses = ['active', 'archived'],
+  minSimilarity = 0.35,
+  limit = 100,
+}) {
+  const { rows } = await query(
+    `WITH scored AS (
+       SELECT k.id,
+              k.search_tsv @@ plainto_tsquery('simple', $1) AS fts_match,
+              GREATEST(
+                LEAST(ts_rank(k.search_tsv, plainto_tsquery('simple', $1)) * 4, 1),
+                word_similarity($1, coalesce(k.title, '') || ' ' || k.content)
+              ) AS relevance
+       FROM mem.global_knowledge k
+       WHERE k.status = ANY($2::mem.memory_status[])
+     )
+     SELECT t.*, s.relevance
+     FROM (${KNOWLEDGE_SELECT}) t
+     JOIN scored s ON s.id = t.id
+     WHERE s.fts_match OR s.relevance >= $3
+     ORDER BY s.relevance DESC, t.updated_at DESC
+     LIMIT $4`,
+    [q, statuses, minSimilarity, limit],
+  );
+  return rows.map((r) => ({ ...mapKnowledgeRow(r), relevance: Number(r.relevance) }));
+}
+
 // Update a record from the admin form. The UPDATE deliberately does not touch the embedding column: if the
 // text changed, the database trigger resets the vector to NULL, after which we immediately try to compute a
 // fresh one (second UPDATE writes only the vector, so the trigger leaves it alone). When the embedding
