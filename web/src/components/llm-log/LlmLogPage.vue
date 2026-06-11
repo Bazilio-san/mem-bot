@@ -11,7 +11,21 @@ import LogPane from './LogPane.vue';
 import AnalyzeDialog from './AnalyzeDialog.vue';
 import { fetchCycle, fetchSingleRequest } from '../../api.js';
 
-const selectedUser = ref(null);
+// Последний выбранный пользователь переживает перезагрузку страницы: объект пользователя целиком лежит
+// в localStorage, при старте восстанавливается, и ChatPane (watch по user-id) сам подгружает его историю.
+const LAST_USER_KEY = 'memBot.llmLog.lastUser';
+
+function restoreLastUser() {
+  try {
+    const raw = localStorage.getItem(LAST_USER_KEY);
+    const user = raw ? JSON.parse(raw) : null;
+    return user && user.id ? user : null;
+  } catch {
+    return null;
+  }
+}
+
+const selectedUser = ref(restoreLastUser());
 const log = ref(null);
 const logTitle = ref('');
 const logLoading = ref(false);
@@ -23,6 +37,11 @@ function pickUser(user) {
   log.value = null;
   logTitle.value = '';
   error.value = '';
+  try {
+    localStorage.setItem(LAST_USER_KEY, JSON.stringify(user));
+  } catch {
+    // localStorage может быть недоступен (приватный режим) — выбор просто не сохранится.
+  }
 }
 
 async function selectLog({ requestId, llmRequestId, item }) {
