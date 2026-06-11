@@ -180,7 +180,6 @@ src/pipeline/agent-event-log.js   agent event journal: stages, tool calls with a
 src/pipeline/log-retention.js     daily age-based cleanup of the journals (config.llmLog.retention)
 src/pipeline/llm-pricing.js  request cost calculation from the model price list
 src/pipeline/llm-usage-stats.js   cost aggregates over the narrow log.llm_usage log
-scripts/migrate-llm-log-db.js     one-time transfer of historical journals into the logs database
 tests/run.js                 layered test suite (base layer plus proactivity, history compression, and global memory layers)
 tests/memory_cases.json      fact-extraction test cases
 tests/skills.test.mjs        skills registry and tool-filtering tests (npm run test:skills)

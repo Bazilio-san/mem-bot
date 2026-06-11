@@ -4,11 +4,11 @@
 // Идемпотентен: повторный запуск пересоздаёт демо-пользователей заново (по внешнему идентификатору).
 // Запуск: npm run seed:sandbox
 import { query, closePool } from '../src/db.js';
+import { flushLlmLog } from '../src/pipeline/llm-log.js';
 import { embed } from '../src/llm.js';
 import { getDomainId, ensureDefaultTriggers } from '../src/repo.js';
 import { saveSecureRecord } from '../src/pipeline/secure.js';
 import { createTask } from '../src/pipeline/scheduler.js';
-import { mapKindToType } from '../src/pipeline/facts.js';
 
 const DAY = 86400000;
 const HOUR = 3600000;
@@ -27,14 +27,13 @@ async function recreateUser(externalId, displayName, timezone) {
   return rows[0];
 }
 
-// Вставить один факт памяти в плоскую таблицу mem.user_facts. Описания фактов в сидах остались
-// в старой форме (scope/kind) — здесь они отображаются на новые координаты: kind → fact_type,
-// scope 'domain' → domain_key текущего домена, остальное → general. Эмбеддинг считается по тексту
-// (если прокси доступен), иначе остаётся пустым — тогда выборка опирается на полнотекстовый поиск.
+// Вставить один факт памяти в плоскую таблицу mem.user_facts: scope 'domain' → domain_key текущего
+// домена, остальное → general. Эмбеддинг считается по тексту (если прокси доступен), иначе остаётся
+// пустым — тогда выборка опирается на полнотекстовый поиск.
 async function insertMemory(userId, domainKey, m) {
   const vector = await embed(m.text);
   const updatedAt = iso(-(m.daysAgo || 0) * DAY);
-  const factType = mapKindToType(m.kind) || 'profile';
+  const factType = m.type || 'profile';
   await query(
     `INSERT INTO mem.user_facts
        (user_id, domain_key, fact_type, fact_text, confidence, evidence_count, embedding,
@@ -88,95 +87,64 @@ async function seedAnna() {
   const facts = [
     {
       scope: 'profile',
-      kind: 'preference',
-      entityType: 'comm_style',
-      entityKey: 'style',
+      type: 'preference',
       text: 'Предпочитает короткие ответы и примеры по шагам',
-      data: { tone: 'concise' },
-      importance: 0.8,
       confidence: 0.9,
       usage: 11,
       daysAgo: 2,
     },
     {
       scope: 'profile',
-      kind: 'goal',
-      entityType: 'profile',
-      entityKey: 'goal',
+      type: 'goal',
       text: 'Готовится к ЕГЭ по математике, 11 класс',
-      data: { goal: 'ege_math' },
-      importance: 0.75,
       confidence: 0.85,
       usage: 6,
       daysAgo: 5,
     },
     {
       scope: 'profile',
-      kind: 'fact',
-      entityType: 'profile',
-      entityKey: 'lang',
+      type: 'profile',
       text: 'Общается на русском, иногда просит английские термины',
-      data: { lang: 'ru' },
-      importance: 0.4,
       confidence: 0.7,
-      sensitivity: 'low',
       usage: 2,
       daysAgo: 18,
     },
     {
       scope: 'dialog',
-      kind: 'state',
-      entityType: 'dialog',
-      entityKey: 'last_topic',
+      type: 'open_loop',
       text: 'В прошлый раз разбирали дискриминант квадратного уравнения',
-      importance: 0.55,
       confidence: 0.8,
       usage: 1,
       daysAgo: 0.8,
     },
     {
       scope: 'dialog',
-      kind: 'state',
-      entityType: 'dialog',
-      entityKey: 'mood',
+      type: 'open_loop',
       text: 'Путается в знаках при переносе слагаемых',
-      importance: 0.45,
       confidence: 0.65,
       usage: 1,
       daysAgo: 0.8,
     },
     {
       scope: 'domain',
-      kind: 'progress',
-      entityType: 'student_skill',
-      entityKey: 'quadratic_equations',
+      type: 'goal',
       text: 'Слабо понимает квадратные уравнения, путает дискриминант',
-      data: { topic: 'quadratic_equations', level: 'weak' },
-      importance: 0.85,
       confidence: 0.9,
       usage: 8,
       daysAgo: 1,
     },
     {
       scope: 'domain',
-      kind: 'progress',
-      entityType: 'student_skill',
-      entityKey: 'linear_equations',
+      type: 'goal',
       text: 'Линейные уравнения решает уверенно',
-      data: { level: 'strong' },
-      importance: 0.6,
       confidence: 0.85,
       usage: 4,
       daysAgo: 9,
     },
     {
       scope: 'domain',
-      kind: 'preference',
-      entityType: 'study_pref',
-      entityKey: 'pace',
+      type: 'preference',
       text: 'Любит сначала теорию, потом задачу',
-      data: { order: ['theory', 'task'] },
-      importance: 0.5,
       confidence: 0.7,
       usage: 3,
       daysAgo: 12,
@@ -254,72 +222,48 @@ async function seedDmitry() {
   const facts = [
     {
       scope: 'profile',
-      kind: 'preference',
-      entityType: 'comm_style',
-      entityKey: 'style',
+      type: 'preference',
       text: 'Любит развёрнутые объяснения с вариантами',
-      data: { tone: 'detailed' },
-      importance: 0.7,
       confidence: 0.85,
       usage: 9,
       daysAgo: 3,
     },
     {
       scope: 'profile',
-      kind: 'fact',
-      entityType: 'profile',
-      entityKey: 'city',
+      type: 'profile',
       text: 'Живёт в Казани',
-      data: { city: 'Kazan' },
-      importance: 0.65,
       confidence: 0.9,
-      sensitivity: 'low',
       usage: 7,
       daysAgo: 6,
     },
     {
       scope: 'dialog',
-      kind: 'state',
-      entityType: 'dialog',
-      entityKey: 'last_topic',
+      type: 'open_loop',
       text: 'Искал рейсы в Стамбул на майские праздники',
-      importance: 0.5,
       confidence: 0.8,
       usage: 1,
       daysAgo: 1.2,
     },
     {
       scope: 'domain',
-      kind: 'preference',
-      entityType: 'flight_preference',
-      entityKey: 'departure',
+      type: 'preference',
       text: 'Вылетает из Казани, не любит ночные рейсы',
-      data: { city: 'Kazan', avoid: ['night_flights'] },
-      importance: 0.88,
       confidence: 0.92,
       usage: 12,
       daysAgo: 1,
     },
     {
       scope: 'domain',
-      kind: 'preference',
-      entityType: 'flight_preference',
-      entityKey: 'cabin',
+      type: 'preference',
       text: 'Эконом с возможностью провоза багажа',
-      data: { cabin_class: 'economy', baggage: true },
-      importance: 0.6,
       confidence: 0.8,
       usage: 5,
       daysAgo: 7,
     },
     {
       scope: 'domain',
-      kind: 'goal',
-      entityType: 'trip',
-      entityKey: 'istanbul',
+      type: 'goal',
       text: 'Поездка Казань → Стамбул в мае, 2 пассажира',
-      data: { destination: 'Istanbul', passengers: 2, status: 'searching' },
-      importance: 0.75,
       confidence: 0.85,
       usage: 3,
       daysAgo: 1.2,
@@ -390,49 +334,33 @@ async function seedLena() {
   const facts = [
     {
       scope: 'profile',
-      kind: 'preference',
-      entityType: 'comm_style',
-      entityKey: 'style',
+      type: 'preference',
       text: 'Лёгкий, дружелюбный тон с эмодзи',
-      data: { tone: 'friendly' },
-      importance: 0.7,
       confidence: 0.85,
       usage: 8,
       daysAgo: 4,
     },
     {
       scope: 'dialog',
-      kind: 'state',
-      entityType: 'dialog',
-      entityKey: 'last_topic',
+      type: 'open_loop',
       text: 'Просила шутку про программистов вчера',
-      importance: 0.45,
       confidence: 0.7,
       usage: 1,
       daysAgo: 1.1,
     },
     {
       scope: 'domain',
-      kind: 'preference',
-      entityType: 'joke_preference',
-      entityKey: 'taste',
+      type: 'preference',
       text: 'Любит шутки про программистов и быт, не любит политику',
-      data: { liked: ['programmers', 'everyday_life'], disliked: ['politics'] },
-      importance: 0.82,
       confidence: 0.9,
       usage: 10,
       daysAgo: 1,
     },
     {
       scope: 'domain',
-      kind: 'history',
-      entityType: 'told_jokes',
-      entityKey: 'history',
+      type: 'profile',
       text: 'Слышала 2 шутки про программистов (j-101, j-204)',
-      data: { told: ['j-101', 'j-204'] },
-      importance: 0.5,
       confidence: 0.85,
-      sensitivity: 'low',
       usage: 4,
       daysAgo: 1,
     },
@@ -478,11 +406,13 @@ async function main() {
   await seedDmitry();
   await seedLena();
   console.log('Готово. Запустите: npm run sandbox');
+  await flushLlmLog();
   await closePool();
 }
 
 main().catch(async (err) => {
   console.error('Ошибка засева:', err.message);
+  await flushLlmLog();
   await closePool();
   process.exit(1);
 });

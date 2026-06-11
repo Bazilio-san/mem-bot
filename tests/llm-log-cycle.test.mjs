@@ -1,6 +1,6 @@
 // Модульные тесты сборки ленты цикла для просмотрщика логов (buildCycleRows): слияние записей журнала
-// LLM-запросов с агентными событиями, порядок по времени, группы-стадии, синтетическая группа
-// пост-обработки и деградация к синтезу tool-строк для исторических циклов без событий.
+// LLM-запросов с агентными событиями, порядок по времени, группы-стадии и синтетическая группа
+// пост-обработки.
 import assert from 'node:assert/strict';
 import { buildCycleRows } from '../src/server/llm-log-data.js';
 
@@ -199,44 +199,7 @@ const payloadWithTool = {
   assert.equal(classifyReq.groupId, stage1.groupId, 'запрос классификации в группе своей стадии');
 }
 
-// 2. Деградация без событий (исторические циклы): tool-строки синтезируются из payload/response.
-{
-  const records = [
-    chatRecord({
-      id: 1,
-      kind: 'main_agent_answer',
-      endSec: 3,
-      durationMs: 2000,
-      payload: basePayload,
-      response: {
-        message: {
-          role: 'assistant',
-          content: '',
-          tool_calls: [{ function: { name: 'memory_search', arguments: '{"query":"q"}' } }],
-        },
-      },
-    }),
-    chatRecord({
-      id: 2,
-      kind: 'main_agent_answer',
-      endSec: 8,
-      durationMs: 2000,
-      payload: payloadWithTool,
-      response: { message: { role: 'assistant', content: 'Ответ' } },
-    }),
-  ];
-  const rows = buildCycleRows(records, [], {});
-  const types = rows.map((r) => r.rowType);
-  assert.ok(types.includes('tool_call'), 'вызов инструмента синтезирован из response.tool_calls');
-  assert.ok(types.includes('tool_result'), 'результат инструмента синтезирован из diff массива messages');
-  const callIdx = types.indexOf('tool_call');
-  const resultIdx = types.indexOf('tool_result');
-  assert.ok(callIdx < resultIdx, 'вызов раньше результата');
-  const call = rows[callIdx];
-  assert.ok(call.title.includes('memory_search'));
-}
-
-// 3. Ошибка вызова: строка запроса несёт статус и текст ошибки; ответа без response нет.
+// 2. Ошибка вызова: строка запроса несёт статус и текст ошибки; ответа без response нет.
 {
   const records = [
     chatRecord({

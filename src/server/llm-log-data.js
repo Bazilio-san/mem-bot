@@ -3,8 +3,7 @@
 // impossible, so merging happens here in JS. The central piece is buildCycleRows(): a pure function that
 // turns the journal records and agent events of one dialog turn into a flat list of display rows for the
 // viewer (groups, indents, request/response pairs, tool calls). It is covered by a unit test
-// (tests/llm-log-cycle.test.mjs) and degrades gracefully for historical cycles recorded before the agent
-// event journal existed.
+// (tests/llm-log-cycle.test.mjs).
 import { query, queryLog } from '../db.js';
 import { REQUEST_KIND_DISPLAY } from '../pipeline/llm-log.js';
 import { EVENT_DISPLAY } from '../pipeline/agent-event-log.js';
@@ -257,7 +256,6 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
     });
   }
 
-  const hasEvents = events.length > 0;
   let groupSeq = 0;
   let currentGroup = null;
 
@@ -386,8 +384,6 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
   }
 
   // Journal records → a request/response row pair (or a single combined row for one-purpose endpoints).
-  // Without events the tool chain is synthesized from the payloads (historical cycles).
-  let prevChatPayload = null;
   let llmIteration = 0;
   for (const r of records) {
     const endMs = new Date(r.created_at).getTime();
@@ -396,20 +392,6 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
     const kind = r.request_kind || 'untyped';
     const tokens = r.total_tokens != null ? Number(r.total_tokens) : null;
     const priceUsd = r.price_usd != null ? Number(r.price_usd) : null;
-
-    if (!hasEvents && isChat && prevChatPayload) {
-      // Fallback synthesis: new role='tool' messages relative to the previous request are tool results.
-      for (const toolMsg of newToolMessages(prevChatPayload, r.payload)) {
-        rows.push({
-          rowType: 'tool_result',
-          kind: 'tool_result',
-          title: `Результат инструмента${toolMsg.name ? `: ${toolMsg.name}` : ''}`,
-          indent: 2,
-          createdAt: new Date(startMs - 1).toISOString(),
-          body: { kind: 'content', content: toolMsg.content, displayFormat: 'JSON' },
-        });
-      }
-    }
 
     // Iterations are counted only over the main-answer calls: the tool loop of one turn can hit the model
     // several times, and the viewer labels them "итерация N".
@@ -450,22 +432,6 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           displayFormat: REQUEST_KIND_DISPLAY[kind] ?? null,
         },
       });
-    }
-
-    if (!hasEvents && isChat) {
-      // Fallback synthesis: tool calls in the response become rows (without timings — there are no events).
-      const toolCalls = r.response?.message?.tool_calls || [];
-      for (const tc of toolCalls) {
-        rows.push({
-          rowType: 'tool_call',
-          kind: 'tool_call',
-          title: `Вызов инструмента: ${tc.function?.name || '?'}`,
-          indent: 2,
-          createdAt: new Date(endMs + 1).toISOString(),
-          body: { kind: 'content', content: tc.function?.arguments || '{}', displayFormat: 'JSON' },
-        });
-      }
-      prevChatPayload = r.payload;
     }
   }
 
@@ -584,12 +550,4 @@ function serializeResponse(response) {
     return msg.content;
   }
   return JSON.stringify(response);
-}
-
-// Messages with role='tool' present in `next` but not in `prev` — the tool results appended between two
-// consecutive model turns (fallback synthesis for cycles without agent events).
-function newToolMessages(prev, next) {
-  const prevCount = Array.isArray(prev?.messages) ? prev.messages.filter((m) => m.role === 'tool').length : 0;
-  const nextTool = Array.isArray(next?.messages) ? next.messages.filter((m) => m.role === 'tool') : [];
-  return nextTool.slice(prevCount).map((m) => ({ name: m.name || null, content: m.content ?? '' }));
 }

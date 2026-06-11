@@ -12,7 +12,7 @@ import {
   getColdPendingMessages,
   saveConversationSummary,
 } from '../repo.js';
-import { saveFacts, mapKindToType } from './facts.js';
+import { saveFacts } from './facts.js';
 import { estimateTokens, sumMessageTokens, estimateSummaryTokens } from './token-counter.js';
 
 function dbg(...args) {
@@ -253,13 +253,12 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
 }
 
 // Convert summarizer facts into the flat fact shape and run them through the normal saveFacts flow
-// (confidence threshold, semantic deduplication, update instead of duplicates). The summarizer may emit
-// either the new shape (type/fact_text) or the legacy one (memory_kind/memory_text) — both are accepted.
+// (confidence threshold, semantic deduplication, update instead of duplicates).
 function factsToCandidates(facts = []) {
   return facts
     .map((f) => ({
-      type: f.type || mapKindToType(f.memory_kind) || 'profile',
-      fact_text: f.fact_text || f.memory_text || '',
+      type: f.type || 'profile',
+      fact_text: f.fact_text || '',
       confidence: Number(f.confidence ?? 0.7),
       ttl_days: f.ttl_days ?? null,
     }))

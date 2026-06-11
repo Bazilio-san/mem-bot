@@ -8,7 +8,6 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE SCHEMA IF NOT EXISTS mem;
 
 CREATE TYPE mem.memory_status     AS ENUM ('active','archived','deleted','pending_confirmation','rejected');
-CREATE TYPE mem.sensitivity_level AS ENUM ('public','low','normal','high','secret');
 CREATE TYPE mem.task_status        AS ENUM ('active','paused','completed','cancelled','failed');
 CREATE TYPE mem.task_schedule_kind AS ENUM ('one_time','interval','cron','rrule');
 CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed','skipped');
@@ -312,12 +311,11 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_a
 
 ---
 
-## [DATA-7] Tool Call Log and Memory Write Queue
+## [DATA-7] Tool Call Log
 
 `tool_calls` is a log of all tool invocations (input, output, status, latency, error) for debugging, auditing, and
-security purposes. The `memory_jobs` table serves the asynchronous memory write queue, processed by a separate
-worker; in the basic flow, writing is triggered after the response as a non-blocking promise inside the response
-process.
+security purposes. Memory writing needs no queue table: it is triggered after the response as a non-blocking
+promise inside the response process.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.tool_calls (
@@ -336,27 +334,11 @@ CREATE TABLE IF NOT EXISTS mem.tool_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_calls_user_created         ON mem.tool_calls (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_conversation_created ON mem.tool_calls (conversation_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS mem.memory_jobs (
-    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
-    conversation_id uuid REFERENCES mem.conversations(id) ON DELETE CASCADE,
-    job_type        text NOT NULL DEFAULT 'extract_memory',
-    payload         jsonb NOT NULL DEFAULT '{}'::jsonb,
-    status          text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','success','failed')),
-    attempts        integer NOT NULL DEFAULT 0,
-    locked_by       text,
-    locked_until    timestamptz,
-    error_text      text,
-    created_at      timestamptz NOT NULL DEFAULT now(),
-    updated_at      timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_at) WHERE status = 'pending';
 ```
 
-The base schema totals twelve tables: `users`, `agent_domains`, `conversations`, `conversation_messages`,
+The base schema totals eleven tables: `users`, `agent_domains`, `conversations`, `conversation_messages`,
 `conversation_summaries`, `user_facts`, `secure_records`, `scheduled_tasks`, `scheduled_task_runs`,
-`notification_outbox`, `tool_calls`, `memory_jobs`.
+`notification_outbox`, `tool_calls`.
 
 ---
 

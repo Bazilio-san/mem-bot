@@ -41,29 +41,6 @@ const GENERAL_TYPES = new Set([
   'discovery_seed',
 ]);
 
-// Маппинг старых memory_kind (суммаризатор истории, миграция) в типы плоской таблицы.
-const KIND_TO_TYPE = {
-  fact: 'profile',
-  preference: 'preference',
-  constraint: 'preference',
-  goal: 'goal',
-  history: 'profile',
-  state: 'open_loop',
-  progress: 'goal',
-  instruction: 'communication_style',
-  relationship: 'profile',
-  emotional_pattern: 'emotional_pattern',
-  activity_rhythm: 'activity_rhythm',
-  communication_style: 'communication_style',
-  open_loop: 'open_loop',
-  topic_energy: 'topic_energy',
-  discovery_seed: 'discovery_seed',
-};
-
-export function mapKindToType(kind) {
-  return KIND_TO_TYPE[kind] || null;
-}
-
 // Ранги источников фактов для разрешения конфликтов при записи: замещение существующей строки
 // разрешено, только если ранг нового источника не ниже ранга старого. Закреплённые (persistent)
 // строки замещает только источник ранга user_statement и выше — человек явно передумал.
@@ -299,7 +276,7 @@ function retentionExpiry(factType, ttlDays) {
 //   created   — новый факт;
 //   skipped   — не прошёл порог уверенности или неизвестный тип.
 export async function saveFact(userId, domainKey, fact, sourceConversationId = null, opts = {}) {
-  const factType = FACT_TYPES.includes(fact.type) ? fact.type : mapKindToType(fact.type);
+  const factType = FACT_TYPES.includes(fact.type) ? fact.type : null;
   const factText = String(fact.fact_text || '').trim();
   const confidence = Math.min(Math.max(Number(fact.confidence) || 0, 0), 0.99);
   const source = normalizeSource(opts.source);

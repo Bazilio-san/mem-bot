@@ -1,14 +1,9 @@
 -- Единая стартовая миграция: полная схема памяти в конечном состоянии.
 -- Рассчитана на PostgreSQL 16 + pgvector. Идемпотентна: повторный запуск не ломает БД.
 --
--- Этот файл — результат схлопывания прежних миграций 001–016 в одну. Сведение выполнено к КОНЕЧНОМУ
--- состоянию схемы, а не к простой конкатенации:
---   * таблица mem.domain_schemas (прежние 006 + 014) исключена — она создавалась и тут же удалялась;
---   * companion-виды памяти (прежняя 013) уже включены в определение типа mem.memory_kind ниже;
---   * RAG-статья «Что умеет бот» (прежние 011 + 012) засевается сразу в финальном виде;
---   * колонки, прежде добавлявшиеся через ALTER (003/005/007/009/015/016), встроены в CREATE TABLE.
 -- Журнала применённых миграций в проекте нет: src/migrate.js прогоняет все .sql каждый раз, поэтому
 -- все операторы здесь идемпотентны (IF NOT EXISTS / ON CONFLICT / WHERE NOT EXISTS).
+-- Долговременная память живёт в плоской таблице mem.user_facts (определена ниже).
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -18,19 +13,6 @@ CREATE SCHEMA IF NOT EXISTS mem;
 -- ---- Справочные ENUM-типы (создаются только если ещё нет) -------------------
 DO $$ BEGIN
   CREATE TYPE mem.memory_status AS ENUM ('active','archived','deleted','pending_confirmation','rejected');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-  CREATE TYPE mem.sensitivity_level AS ENUM ('public','low','normal','high','secret');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
--- Включает виды для режима собеседника (прежняя миграция 013): emotional_pattern, activity_rhythm,
--- communication_style, open_loop, topic_energy, discovery_seed.
-DO $$ BEGIN
-  CREATE TYPE mem.memory_kind AS ENUM
-    ('fact','preference','constraint','goal','history','state','progress','instruction','relationship','reminder',
-     'secure_reference','emotional_pattern','activity_rhythm','communication_style','open_loop','topic_energy',
-     'discovery_seed');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -129,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON mem.conversation
 CREATE INDEX IF NOT EXISTS idx_messages_user_created ON mem.conversation_messages (user_id, created_at DESC);
 
 -- ---- Сводки диалога (сжатая краткосрочная память) ---------------------------
--- Поля поджатия истории (прежняя миграция 003) встроены в определение таблицы.
+-- Поля поджатия истории встроены в определение таблицы.
 CREATE TABLE IF NOT EXISTS mem.conversation_summaries (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id uuid NOT NULL REFERENCES mem.conversations(id) ON DELETE CASCADE,
@@ -164,64 +146,6 @@ CREATE INDEX IF NOT EXISTS idx_summaries_active_conversation
 CREATE INDEX IF NOT EXISTS idx_summaries_covered_until
   ON mem.conversation_summaries (conversation_id, covered_until DESC);
 
--- ---- Главная таблица памяти: профиль + предметные знания --------------------
--- Поля смысловой дедупликации (прежняя миграция 015) встроены в определение таблицы.
-CREATE TABLE IF NOT EXISTS mem.memory_items (
-    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
-    domain_id   uuid REFERENCES mem.agent_domains(id),
-
-    scope       text NOT NULL CHECK (scope IN ('profile','domain','dialog','system')),
-    memory_kind mem.memory_kind NOT NULL,
-
-    entity_type text,
-    entity_key  text,
-    title       text,
-    memory_text text NOT NULL,
-    data        jsonb NOT NULL DEFAULT '{}'::jsonb,
-
-    importance  numeric(3,2) NOT NULL DEFAULT 0.50 CHECK (importance >= 0 AND importance <= 1),
-    confidence  numeric(3,2) NOT NULL DEFAULT 0.70 CHECK (confidence >= 0 AND confidence <= 1),
-    sensitivity mem.sensitivity_level NOT NULL DEFAULT 'normal',
-    status      mem.memory_status NOT NULL DEFAULT 'active',
-
-    source_conversation_id uuid REFERENCES mem.conversations(id) ON DELETE SET NULL,
-    source_message_id      uuid REFERENCES mem.conversation_messages(id) ON DELETE SET NULL,
-
-    valid_from   timestamptz,
-    expires_at   timestamptz,
-    last_used_at timestamptz,
-    usage_count  integer NOT NULL DEFAULT 0,
-
-    -- Смысловая дедупликация: устойчивый ключ, каноническая группа и статус в группе.
-    dedupe_key         text,
-    canonical_group_id uuid,
-    dedupe_status      text NOT NULL DEFAULT 'candidate',
-
-    embedding    vector(1536),
-    search_tsv   tsvector GENERATED ALWAYS AS (
-        to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(memory_text,''))
-    ) STORED,
-
-    metadata   jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_memory_user_scope_status  ON mem.memory_items (user_id, scope, status);
-CREATE INDEX IF NOT EXISTS idx_memory_user_domain_status ON mem.memory_items (user_id, domain_id, status);
-CREATE INDEX IF NOT EXISTS idx_memory_entity            ON mem.memory_items (user_id, domain_id, entity_type, entity_key);
-CREATE INDEX IF NOT EXISTS idx_memory_expires           ON mem.memory_items (expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memory_importance        ON mem.memory_items (user_id, importance DESC, updated_at DESC) WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_memory_search_tsv        ON mem.memory_items USING gin (search_tsv);
-CREATE INDEX IF NOT EXISTS idx_memory_data_gin          ON mem.memory_items USING gin (data jsonb_path_ops);
-CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw    ON mem.memory_items USING hnsw (embedding vector_cosine_ops) WHERE embedding IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memory_dedupe_key
-  ON mem.memory_items (user_id, dedupe_key)
-  WHERE status = 'active' AND dedupe_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memory_canonical_group
-  ON mem.memory_items (user_id, canonical_group_id)
-  WHERE canonical_group_id IS NOT NULL;
-
 -- ---- Защищённая память (шифрованные персональные данные) --------------------
 CREATE TABLE IF NOT EXISTS mem.secure_records (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -250,13 +174,79 @@ CREATE INDEX IF NOT EXISTS idx_secure_user_type ON mem.secure_records (user_id, 
 CREATE INDEX IF NOT EXISTS idx_secure_subject   ON mem.secure_records (user_id, domain_id, subject_key);
 CREATE INDEX IF NOT EXISTS idx_secure_expires   ON mem.secure_records (expires_at) WHERE expires_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS mem.memory_secure_links (
-    memory_item_id   uuid NOT NULL REFERENCES mem.memory_items(id) ON DELETE CASCADE,
-    secure_record_id uuid NOT NULL REFERENCES mem.secure_records(id) ON DELETE CASCADE,
-    relation_type    text NOT NULL DEFAULT 'references',
-    created_at       timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (memory_item_id, secure_record_id)
+-- ---- Долговременная память: плоская таблица фактов о пользователе ----------
+-- Основное и единственное хранилище долговременной памяти. Координаты хранения — пользователь, домен,
+-- тип факта. Дедупликация — семантическая (embedding) внутри пары (user_id, fact_type); устаревание —
+-- expires_at; ранжирование — confidence + свежесть + число подтверждений + надёжность источника.
+-- Колонки source и persistent встроены сразу в определение таблицы.
+CREATE TABLE IF NOT EXISTS mem.user_facts (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
+
+    -- Домен общения: 'general' для общечеловеческих фактов (профиль, стиль, привычки),
+    -- ключ домена для предметных (цели и незакрытые линии конкретной специализации).
+    domain_key  text NOT NULL DEFAULT 'general',
+
+    -- Закрытый набор типов. Типы выбраны под задачу «бот — лучший собеседник»:
+    --   profile             — базовые сведения (имя, семья, город, работа);
+    --   preference          — вкусы и предпочтения;
+    --   habit               — привычки и рутины;
+    --   goal                — цели и долгосрочные задачи;
+    --   emotional_pattern   — повторяющиеся эмоциональные паттерны;
+    --   activity_rhythm     — ритм активности (когда пишет, когда занят);
+    --   communication_style — стиль общения (короткие ответы, без официоза);
+    --   open_loop           — незакрытые линии (события без финала) — всегда с TTL;
+    --   topic_energy        — темы, где пользователь оживляется или гаснет;
+    --   discovery_seed      — темы, которые хочет попробовать или изучить.
+    fact_type   text NOT NULL CHECK (fact_type IN (
+        'profile','preference','habit','goal','emotional_pattern','activity_rhythm',
+        'communication_style','open_loop','topic_energy','discovery_seed')),
+
+    fact_text   text NOT NULL,
+    confidence  numeric(3,2) NOT NULL DEFAULT 0.80 CHECK (confidence >= 0 AND confidence <= 1),
+    -- Сколько раз факт подтверждался повторными извлечениями: растёт при дедупликации-подтверждении.
+    evidence_count integer NOT NULL DEFAULT 1,
+
+    status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','deleted')),
+
+    -- Тип источника факта: кто/что его породило. Влияет на ранжирование и на разрешение конфликтов
+    -- (замещение разрешено, только если ранг нового источника не ниже ранга старого):
+    --   manual          — явная просьба пользователя запомнить (инструмент memory_pin);
+    --   user_statement  — прямое высказывание пользователя (основной путь извлечения);
+    --   user_reaction   — реакция пользователя на сообщение ассистента;
+    --   history_summary — факт, восстановленный суммаризатором при сжатии истории.
+    source      text NOT NULL DEFAULT 'user_statement'
+                CHECK (source IN ('user_statement','user_reaction','history_summary','manual')),
+    -- Закрепление: пользователь явно попросил помнить. Закреплённый факт не получает expires_at,
+    -- его не трогает фоновый sweep, автозамещение требует источника ранга user_statement и выше.
+    persistent  boolean NOT NULL DEFAULT false,
+
+    source_conversation_id uuid REFERENCES mem.conversations(id) ON DELETE SET NULL,
+
+    embedding   vector(1536),
+    search_tsv  tsvector GENERATED ALWAYS AS (to_tsvector('simple', fact_text)) STORED,
+
+    metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+
+    -- Семантика expires_at: это момент ЗАБЫВАНИЯ (retention), а не момент, когда факт перестаёт быть
+    -- истинным. Срок вычисляется при записи из facts.retention конфига по типу факта; подтверждение
+    -- факта продлевает срок от текущего момента.
+    expires_at        timestamptz,
+    last_confirmed_at timestamptz NOT NULL DEFAULT now(),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now()
 );
+COMMENT ON COLUMN mem.user_facts.expires_at IS
+    'Момент забывания (retention), а не окончания истинности факта. NULL — бессрочно. '
+    'Вычисляется из facts.retention по типу факта; подтверждение продлевает срок.';
+
+CREATE INDEX IF NOT EXISTS idx_user_facts_lookup    ON mem.user_facts (user_id, status, domain_key, fact_type);
+CREATE INDEX IF NOT EXISTS idx_user_facts_rank      ON mem.user_facts (user_id, confidence DESC, last_confirmed_at DESC)
+                                                    WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_user_facts_expires   ON mem.user_facts (expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_facts_tsv       ON mem.user_facts USING gin (search_tsv);
+CREATE INDEX IF NOT EXISTS idx_user_facts_embedding ON mem.user_facts USING hnsw (embedding vector_cosine_ops)
+                                                    WHERE embedding IS NOT NULL;
 
 -- ---- Планировщик: задачи, запуски, исходящие уведомления --------------------
 CREATE TABLE IF NOT EXISTS mem.scheduled_tasks (
@@ -327,7 +317,7 @@ CREATE TABLE IF NOT EXISTS mem.notification_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON mem.notification_outbox (next_attempt_at) WHERE status = 'pending';
 
--- Событийная доставка очереди (прежняя миграция 004): при вставке строки со статусом «pending» база
+-- Событийная доставка очереди: при вставке строки со статусом «pending» база
 -- сама посылает уведомление PostgreSQL NOTIFY на канал «outbox_new». Адаптер слушает этот канал и
 -- опустошает очередь немедленно, а не по таймеру.
 CREATE OR REPLACE FUNCTION mem.notify_outbox() RETURNS trigger AS $$
@@ -362,24 +352,7 @@ CREATE TABLE IF NOT EXISTS mem.tool_calls (
 CREATE INDEX IF NOT EXISTS idx_tool_calls_user_created         ON mem.tool_calls (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_conversation_created ON mem.tool_calls (conversation_id, created_at DESC);
 
--- ---- Очередь асинхронной записи памяти -------------------------------------
-CREATE TABLE IF NOT EXISTS mem.memory_jobs (
-    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
-    conversation_id uuid REFERENCES mem.conversations(id) ON DELETE CASCADE,
-    job_type        text NOT NULL DEFAULT 'extract_memory',
-    payload         jsonb NOT NULL DEFAULT '{}'::jsonb,
-    status          text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','success','failed')),
-    attempts        integer NOT NULL DEFAULT 0,
-    locked_by       text,
-    locked_until    timestamptz,
-    error_text      text,
-    created_at      timestamptz NOT NULL DEFAULT now(),
-    updated_at      timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_at) WHERE status = 'pending';
-
--- ---- Проактивность (прежняя миграция 002): тематический трекинг, триггеры, журнал доставок --------
+-- ---- Проактивность: тематический трекинг, триггеры, журнал доставок --------
 -- 1. Тематический трекинг. Одна строка на пару «пользователь + домен + тема».
 CREATE TABLE IF NOT EXISTS mem.topic_mentions (
     id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -425,7 +398,7 @@ CREATE TABLE IF NOT EXISTS mem.event_deliveries (
 );
 CREATE INDEX IF NOT EXISTS idx_event_deliveries_user ON mem.event_deliveries (user_id, delivered_at DESC);
 
--- ---- Глобальная память (прежняя миграция 005): глобальные факты и общая база знаний (RAG) ---------
+-- ---- Глобальная память: глобальные факты и общая база знаний (RAG) ---------
 -- 1. Глобальные факты (always-on). Короткие записи, которые подмешиваются в каждый запрос как
 --    авторитетные общие сведения и политика. Источник доверенный (только администратор).
 CREATE TABLE IF NOT EXISTS mem.global_facts (
@@ -484,7 +457,7 @@ WHERE NOT EXISTS (
   SELECT 1 FROM mem.global_facts gf WHERE gf.fact_text = v.fact_text
 );
 
--- ---- Внешние идентификаторы сообщений (прежняя миграция 008) ---------------
+-- ---- Внешние идентификаторы сообщений ---------------
 -- Связь внутренней истории с сообщениями в каналах доставки. Используется обработчиками реакций.
 CREATE TABLE IF NOT EXISTS mem.message_external_refs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -499,7 +472,7 @@ CREATE TABLE IF NOT EXISTS mem.message_external_refs (
 CREATE INDEX IF NOT EXISTS idx_message_external_refs_message
 ON mem.message_external_refs (conversation_message_id);
 
--- ---- Состояние контакта для проактивности (прежняя миграция 010) -----------
+-- ---- Состояние контакта для проактивности -----------
 -- Каналонезависимое состояние контакта для человекоподобной проактивности.
 CREATE TABLE IF NOT EXISTS mem.proactive_contact_state (
     user_id                           uuid PRIMARY KEY REFERENCES mem.users(id) ON DELETE CASCADE,
@@ -523,7 +496,7 @@ CREATE TABLE IF NOT EXISTS mem.proactive_contact_state (
 CREATE INDEX IF NOT EXISTS idx_proactive_contact_state_mode
     ON mem.proactive_contact_state (mode, quiet_until);
 
--- ---- Засев RAG-статьи «Что умеет бот» (прежние миграции 011 + 012) ---------
+-- ---- Засев RAG-статьи «Что умеет бот» ---------
 -- Финальный вид статьи (после правки 012, убравшей сведения о конкретных доменах). Идемпотентно:
 -- вставляется только если статьи с таким source/kind ещё нет, поэтому повторный прогон дублей не создаёт.
 INSERT INTO mem.global_knowledge (title, content, tags, importance, source, metadata)
@@ -595,7 +568,7 @@ WHERE NOT EXISTS (
 --     поэтому короткий точный заголовок не «разбавляется» длинным телом;
 --   * мягкое удаление через deleted_at (вместо флага) — само время удаления нужно кнопке «Отменить»
 --     в виджете и потенциальной фоновой чистке старых удалённых заметок;
---   * search_tsv на словаре russian (а не simple, как в mem.memory_items): заметки — живой русский текст,
+--   * search_tsv на словаре russian (а не simple, как в mem.user_facts): заметки — живой русский текст,
 --     морфология здесь повышает полноту полнотекстовой ветки гибридного поиска.
 
 CREATE TABLE IF NOT EXISTS mem.notes (
@@ -629,7 +602,5 @@ CREATE INDEX IF NOT EXISTS idx_notes_body_emb_hnsw   ON mem.notes
 -- ============================================================================
 -- Журналы LLM-запросов и агентных событий живут в ОТДЕЛЬНОЙ базе (mem_bot_logs, подключение
 -- db.postgres.dbs.logs), а не здесь: объёмные быстрорастущие логи отделены от пользовательских
--- данных. Схема журналов — в migrations-log/001_log_init.sql; перенос исторических данных из
--- этой базы — scripts/migrate-llm-log-db.js. Оставшиеся здесь таблицы log.* (от прежних установок)
--- не используются кодом и могут быть удалены вручную после переноса.
+-- данных. Схема журналов — в migrations-log/001_log_init.sql.
 -- ============================================================================

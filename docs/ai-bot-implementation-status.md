@@ -22,14 +22,13 @@ with references to real code and to numbered specification requirements.
 ## Summary by Layer
 
 - **Reactive core** (response loop, five memory kinds, retrieval, write, privacy, scheduler, tools) — implemented;
-  the baseline `npm test` run passes fully (36 of 36 checks).
+  the `npm test` run passes fully.
 - **Proactivity and companion mode** (`COMPANION_MODE`, `PROACTIVE_ENABLED`, `PROACTIVE_EVENTS_ENABLED`) —
   implemented; the proactivity check layer is enabled by a separate flag.
 - **History compression** (`HISTORY_COMPRESSION_ENABLED`) — implemented; the `layerHistory` check layer is enabled
   by a separate flag.
 - **Global memory** (`GLOBAL_MEMORY_ENABLED`, `GLOBAL_RAG_ENABLED`) — implemented: global facts (always-on) and a
-  shared knowledge base (RAG), writes restricted to admin; the `layerGlobalMemory` check layer is enabled by flags
-  and, when both are on, passes fully (16 of 16 layer checks; total `npm test` — 78 of 78).
+  shared knowledge base (RAG), writes restricted to admin; the `layerGlobalMemory` check layer is enabled by flags.
 - **External notification delivery** — partial: Telegram channel added (`src/telegram/bot.js`); email and push
   notification channels are not implemented.
 - **Domain specificity of memory** (`DOMAIN-1`…`DOMAIN-3`) — implemented through two mechanisms: the
@@ -54,11 +53,11 @@ with references to real code and to numbered specification requirements.
 | Requirement ID | Short description | Status | Code reference / note |
 |----------------|-------------------|--------|------------------------|
 | `CRIT-1` | Five memory kinds, each with its own logic | done | `migrations/001_init.sql`, `mem.*` tables |
-| `CRIT-2` | Does not save noise (auto-save threshold) | done | `passesAutoSave` in `src/pipeline/merge.js` |
+| `CRIT-2` | Does not save noise (auto-save threshold) | done | `facts.minConfidence` threshold in `saveFact` (`src/pipeline/facts.js`) |
 | `CRIT-3` | Does not bloat the prompt (10–30 facts) | done | `LIMITS` in `src/pipeline/retrieve.js` |
 | `CRIT-4` | New message takes priority over old memory | done | rule in `MAIN_SYSTEM`, `src/agent.js` |
-| `CRIT-5` | Updates a fact without duplicates | done | `decideMerge` in `src/pipeline/merge.js` |
-| `CRIT-6` | Distinguishes fact, intention, and task | done | `scope` / `memory_kind` fields plus scheduler |
+| `CRIT-5` | Updates a fact without duplicates | done | write-time semantic dedupe in `saveFact` (`src/pipeline/facts.js`) |
+| `CRIT-6` | Distinguishes fact, intention, and task | done | `fact_type` coordinate (`goal`, `open_loop`, …) plus scheduler |
 | `CRIT-7` | Sensitive data only with confirmation | done | `src/pipeline/secure.js` |
 | `CRIT-8` | Does not expose excess data (only `redacted_summary`) | done | `src/pipeline/secure.js`, `src/pipeline/retrieve.js` |
 | `CRIT-9` | Calls tools | done | `src/pipeline/tools.js`, tool loop in `src/agent.js` |
@@ -105,13 +104,13 @@ with references to real code and to numbered specification requirements.
 | `DATA-1` | Extensions, `mem` schema, ENUM types | done | `migrations/001_init.sql` |
 | `DATA-2` | Users and domains | done | `migrations/001_init.sql` (`users`, `agent_domains`) |
 | `DATA-3` | Conversations, messages, summaries | done | `migrations/001_init.sql` |
-| `DATA-4` | Main memory table `memory_items` | done | `migrations/001_init.sql` |
-| `DATA-5` | Secure memory (`secure_records`, `memory_secure_links`) | partial | tables created; `memory_secure_links` not yet populated with explicit links |
+| `DATA-4` | Main memory table `user_facts` | done | `migrations/001_init.sql` (`user_facts`) |
+| `DATA-5` | Secure memory (`secure_records`) | done | self-contained table; only `redacted_summary` reaches the prompt |
 | `DATA-6` | Scheduler: tasks, runs, outgoing notifications | done | tables present; `cron_expr` and `rrule` are evaluated with timezone support |
-| `DATA-7` | Tool call log and memory write queue | partial | `tool_calls` works; `memory_jobs` created but writes happen as a promise during the response |
+| `DATA-7` | Tool call log | done | `tool_calls`; memory writes happen as a non-blocking promise during the response |
 | `DATA-8` | Three proactivity tables | done | `migrations/001_init.sql` |
 | `DATA-9` | Two global memory tables and `is_admin` column | done | `migrations/001_init.sql` (`global_facts`, `global_knowledge`) |
-| `DATA-10` | Per-domain `data` schema registry | done | `migrations/001_init.sql` (`mem.domain_schemas`, one active version per domain) |
+| `DATA-10` | Domain specificity without extra tables | done | `domain_key` coordinate of `mem.user_facts`; `## Fact Extraction Prompt` block |
 
 ### Memory: Kinds, Retrieval, Write — `MEM`
 
@@ -120,9 +119,9 @@ with references to real code and to numbered specification requirements.
 | `MEM-1` | Five memory kinds | done | `src/pipeline/retrieve.js`, `migrations/001_init.sql` |
 | `MEM-2` | Retrieval and three relevance signals | done | `src/pipeline/retrieve.js` (`scoreItem`, structural filter) |
 | `MEM-3` | Building `MEMORY_CONTEXT` | done | `buildMemoryContext` in `src/pipeline/retrieve.js` |
-| `MEM-4` | Write loop (extraction, filter, deduplication) | done | `src/pipeline/extract.js`, `src/pipeline/merge.js` |
-| `MEM-5` | Auto-save threshold and privacy | done | `passesAutoSave` in `src/pipeline/merge.js` |
-| `MEM-6` | Deduplication and update instead of duplicates | done | `decideMerge` in `src/pipeline/merge.js` |
+| `MEM-4` | Write loop (extraction, filter, deduplication) | done | `extractFacts`/`saveFacts` in `src/pipeline/facts.js` |
+| `MEM-5` | Auto-save threshold, fact sources, and privacy | done | `facts.minConfidence`, `SOURCE_RANK` in `src/pipeline/facts.js` |
+| `MEM-6` | Deduplication and update instead of duplicates | done | confirm/replace thresholds in `saveFact` (`src/pipeline/facts.js`) |
 | `MEM-7` | User-initiated memory deletion | done | `src/pipeline/admin.js`; in conversation — `memory_list`, `memory_forget_entity`, `memory_forget_all` in `src/pipeline/tools.js` |
 
 ### Secure Memory — `SEC`
@@ -132,7 +131,7 @@ with references to real code and to numbered specification requirements.
 | `SEC-1` | Encryption (AES-256-GCM) and redaction | done | `encrypt` / `redact` in `src/pipeline/secure.js` |
 | `SEC-2` | Consent and access to full value | done | `getSecureValue` in `src/pipeline/secure.js` |
 | `SEC-3` | Privacy checks (four branches) | done | privacy layer in `tests/run.js` |
-| `SEC-4` | Secret detection during extraction | done | extraction prompt in `src/pipeline/extract.js` |
+| `SEC-4` | Secret detection during extraction | done | extraction prompt in `src/pipeline/facts.js` |
 | `SEC-5` | Proactivity does not expose secured data | done | `src/pipeline/proactiveMessage.js` uses only safe summaries |
 
 ### Prompts, Proxy, Models — `PROMPT`
@@ -144,11 +143,11 @@ Full runtime prompt coordinates, tool definitions, and test and historical templ
 |----------------|-------------------|--------|------------------------|
 | `PROMPT-1` | LLM client and strict JSON (`chatJSON`) | done | `src/llm.js` |
 | `PROMPT-2` | Request classifier prompt | done | `src/pipeline/classify.js` |
-| `PROMPT-3` | Memory candidate extraction prompt (two-pass: entity hint + strict schema fill) | done | `src/pipeline/extract.js` |
+| `PROMPT-3` | Fact extraction prompt (single pass, flat facts) | done | `EXTRACT_SYSTEM` in `src/pipeline/facts.js` |
 | `PROMPT-4` | Task creation via tool definition `scheduler_create_task` | done | `src/pipeline/agent-tools/scheduler/scheduler_create_task.js` |
-| `PROMPT-5` | Conversation topic extraction prompt | done | `extractTopics` in `src/pipeline/extract.js` |
+| `PROMPT-5` | Conversation topic extraction prompt | done | `extractTopics` in `src/pipeline/topics.js` |
 | `PROMPT-6` | History summarizer prompt | done | `src/pipeline/history-compress.js` |
-| `PROMPT-7` | Optional merge decision schema (`MergeDecision`) | no | conflict resolved by `decideMerge` rules; model-based schema not used |
+| `PROMPT-7` | Optional merge decision schema (`MergeDecision`) | no | conflicts resolved deterministically by similarity thresholds and source ranks |
 | `PROMPT-8` | Configuration from the `config/` YAML hierarchy (`node-config` package) | done | `src/config.js` |
 | `PROMPT-9` | Model selection per pipeline stage | done | `src/config.js`; actual values listed in the "Project Config" section below |
 
@@ -236,7 +235,6 @@ break the baseline 36 checks or the proactivity layer, but are important for an 
 |------|----------------|-------------|-------------------|
 | Exact history tokenizer | character-based heuristic; no exact tokenizer | `HIST-10` | integrate `tiktoken` for the target model |
 | Layered history re-compression | zone-based compression used; no layered re-compression | `HIST-16` | re-compress summaries across `near`/`middle`/`far` layers |
-| Memory write queue | `memory_jobs` created; writes happen as a promise during the response | `DATA-7` | separate memory-worker process |
 | External notification delivery | Telegram implemented; email and push not done | `PROACT-1`, `DATA-6` | transport-worker for remaining channels |
 | Complex fact merging | conflict resolved by rules, no `MergeDecision` model | `PROMPT-7`, `MEM-6` | model-based conflict resolution |
 | External event source | built-in news stub | `PROACT-6`, `CRIT-17` | external events API |
@@ -248,7 +246,6 @@ break the baseline 36 checks or the proactivity layer, but are important for an 
 | System prompt caching | stable prompt is separated; cache not wired up | `ARCH-1` | cache the immutable part of the prompt |
 | JSON logging | `DEBUG`-level tracing and table logs; no unified logger | `OPS-5` | configurable log level, correlation id |
 | Scheduled memory cleanup | no `memory_cleanup` task | `DATA-4`, `OPS-1` | recurring `memory_cleanup` task in `scheduler.js` |
-| Secure fact-to-secret link | `memory_secure_links` created but not populated | `DATA-5`, `SEC-1` | populate `memory_secure_links` in `src/pipeline/secure.js` |
 
 ---
 
