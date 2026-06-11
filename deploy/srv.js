@@ -244,7 +244,48 @@ async function detectPort () {
   process.exit(1);
 }
 
-function generateUnitFile (serviceName, nodePath, mainFile) {
+// Build the ExecStart command for the systemd unit. The package.json `main` field is unreliable (it can point at a
+// non-existent file such as `index.js`), so we derive the real start command the same way update.js does: the
+// SERVICE_START_COMMAND from .env wins, then the `server` npm script, then the `start` npm script, and only as a last
+// resort `node <main>`. The leading binary (node/npm/npx) is resolved to the chosen Node.js install's bin directory so
+// systemd, which runs without the user's PATH, launches the correct interpreter.
+function resolveExecStart (nodePath) {
+  const binDir = path.dirname(nodePath);
+  const envVars = parseDotEnvVars();
+
+  let command = trim(envVars.SERVICE_START_COMMAND);
+  if (!command) {
+    let pkg = {};
+    try { pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8')); } catch {}
+    const scripts = pkg.scripts || {};
+    if (trim(scripts.server)) {
+      command = trim(scripts.server);
+    } else if (trim(scripts.start)) {
+      command = trim(scripts.start);
+    } else if (trim(pkg.main)) {
+      command = `node ${trim(pkg.main)}`;
+    }
+  }
+
+  if (!command) {
+    err(`${r}**** Error: Could not determine start command (no SERVICE_START_COMMAND, scripts.server/start or main) ****${c0}`);
+    process.exit(1);
+  }
+
+  const tokens = command.split(/\s+/);
+  const bin = tokens[0];
+  if (bin === 'node') {
+    tokens[0] = nodePath;
+  } else if (bin === 'npm' || bin === 'npx') {
+    const candidate = path.join(binDir, bin);
+    if (fs.existsSync(candidate)) {
+      tokens[0] = candidate;
+    }
+  }
+  return tokens.join(' ');
+}
+
+function generateUnitFile (serviceName, execStart) {
   const workingDir = PROJECT_ROOT;
   const serviceFile = `/etc/systemd/system/${serviceName}.service`;
   const content = `
@@ -258,7 +299,7 @@ StartLimitIntervalSec=0
 User=root
 WorkingDirectory=${workingDir}
 EnvironmentFile=${workingDir}/.env
-ExecStart=${nodePath} ${mainFile}
+ExecStart=${execStart}
 Restart=always
 RestartSec=3
 
@@ -269,7 +310,7 @@ WantedBy=multi-user.target
   const info = `
 ${c}**** Generated unit file for ${g}${serviceName}${c} ****${c0}
 ${lc}   WorkingDirectory: ${g}${workingDir}${c0}
-${lc}   ExecStart: ${g}${nodePath} ${mainFile}${c0}
+${lc}   ExecStart: ${g}${execStart}${c0}
 ${lc}   View Service file: ${g}cat ${serviceFile}${c0}
 `.trim();
   err(info);
@@ -290,7 +331,7 @@ async function installService () {
   log(`${c}**** Installing service ****${c0}`);
   const nodeVersion = detectNodeVersion();
   const nodePath = findNodePath(nodeVersion);
-  const mainFile = parsePackageJson('main');
+  const execStart = resolveExecStart(nodePath);
   const serviceName = getServiceName();
 
   const cfgInfo = `
@@ -298,7 +339,7 @@ ${c}**** Service configuration ****${c0}
 ${lc}   Service name: ${g}${serviceName}${c0}
 ${lc}   Node.js version: ${g}${nodeVersion}${c0}
 ${lc}   Node.js path: ${g}${nodePath}${c0}
-${lc}   Main file: ${g}${mainFile}${c0}
+${lc}   ExecStart: ${g}${execStart}${c0}
 ${lc}   Project root: ${g}${PROJECT_ROOT}${c0}
 `.trim();
   err(cfgInfo);
@@ -308,7 +349,7 @@ ${lc}   Project root: ${g}${PROJECT_ROOT}${c0}
     return;
   }
 
-  generateUnitFile(serviceName, nodePath, mainFile);
+  generateUnitFile(serviceName, execStart);
 
   // Reload systemd and enable service
   sh('systemctl daemon-reload');

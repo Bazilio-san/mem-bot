@@ -208,3 +208,14 @@ journalctl -u <serviceName> --since "1 hour ago"
 ```bash
 sudo systemctl start|stop|restart|disable|status <serviceName>
 ```
+
+### Manual delete
+
+```bash
+sudo systemctl stop mem-bot
+sudo systemctl disable mem-bot
+sudo rm -f /etc/systemd/system/mem-bot.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
+systemctl status mem-bot
+```
