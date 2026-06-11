@@ -357,7 +357,7 @@ export async function handleMessage({
   externalId,
   userMessage,
   domainKey = 'general',
-  // channel — the delivery channel key ('telegram', 'html', 'plain'). Determines which response-formatting
+  // channel — the delivery channel key ('telegram', 'admin', 'plain'). Determines which response-formatting
   // instruction to mix into the system prompt. The channel profile is registered by the channel itself
   // at startup (see src/pipeline/channels.js); an unregistered channel gets no markup.
   channel = 'plain',

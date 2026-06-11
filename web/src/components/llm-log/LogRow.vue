@@ -204,7 +204,7 @@ const hasBody = computed(() => props.row.body != null);
   text-align: center;
 }
 .lr-chev .pi {
-  font-size: 15px;
+  font-size: 11px;
   vertical-align: middle;
 }
 .lr-b {

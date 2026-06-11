@@ -51,14 +51,22 @@ const onAuthRequired = () => {
   authState.value = 'login';
 };
 
-// Активный раздел админки: «Память» (исходная страница), «Логи LLM» (просмотрщик журналов)
-// или «База знаний» (CRUD глобальной RAG-базы).
-const activeTab = ref('memory');
+// Активный раздел админки: «Логи LLM» (просмотрщик журналов, раздел по умолчанию), «Память» (память
+// пользователей) или «База знаний» (CRUD глобальной RAG-базы). Выбранная вкладка запоминается в localStorage
+// и восстанавливается при следующем открытии админки; неизвестное сохранённое значение откатывается к первой вкладке.
 const TABS = [
-  { key: 'memory', title: 'Память' },
   { key: 'llm-log', title: 'Логи LLM' },
+  { key: 'memory', title: 'Память' },
   { key: 'knowledge', title: 'База знаний' },
 ];
+const ACTIVE_TAB_STORAGE_KEY = 'memAdmin.activeTab';
+const savedTab = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+const activeTab = ref(TABS.some((t) => t.key === savedTab) ? savedTab : TABS[0].key);
+
+function switchTab(key) {
+  activeTab.value = key;
+  localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, key);
+}
 
 const users = ref([]);
 const selectedUser = ref(null);
@@ -301,7 +309,7 @@ onBeforeUnmount(() => {
           type="button"
           class="tab"
           :class="{ active: activeTab === t.key }"
-          @click="activeTab = t.key"
+          @click="switchTab(t.key)"
         >
           {{ t.title }}
         </button>

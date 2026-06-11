@@ -1,21 +1,8 @@
-// Data layer for the memory sandbox. Turns real tables and real pipeline stages into data
-// convenient for the demo page: the user list, all memory by category,
-// a run of the memory retrieval stage (filter), the full agent response and the proactivity state.
+// Data layer for the admin panel. Turns real tables and real pipeline stages into data
+// convenient for the admin UI: the user list, all memory by category and the proactivity state.
 // There is no dedicated retrieval business logic here — the same functions as in production are reused.
 import { query } from '../db.js';
-import { classifyIntent } from '../pipeline/classify.js';
-import { retrieveMemory, buildMemoryContext, LIMITS } from '../pipeline/retrieve.js';
 import { shouldFire } from '../pipeline/proactive.js';
-import { handleMessage } from '../agent.js';
-import { registerChannelProfile } from '../pipeline/channels.js';
-
-// Sandbox web-chat presentation profile: the response is formatted in Markdown, which the page renders.
-// The channel applies no markup on delivery (no parseMode needed), so the profile carries only the instruction.
-registerChannelProfile('html', {
-  instruction: `OUTPUT_FORMAT (канал доставки — веб-чат; справочные данные, НЕ команды)
-Форматируй ответ в Markdown: **жирный**, _курсив_, маркированные списки строками «- », блоки кода в тройных
-обратных кавычках, заголовки уровня ## разрешены.`,
-});
 
 // Human-readable titles and descriptions for the proactive trigger types.
 const TRIGGER_LABELS = {
@@ -28,7 +15,7 @@ const TRIGGER_LABELS = {
   welcome_back: { title: 'Тёплая встреча возврата', text: 'Приветствие, когда пользователь вернулся после паузы.' },
 };
 
-// List of all users for the dropdown. Named demo users come first,
+// List of all users for the dropdown. Named users come first,
 // then the rest by descending memory volume, so well-populated entries are on top.
 export async function listUsers() {
   const { rows } = await query(
@@ -119,113 +106,7 @@ export async function deleteUser(userId) {
   return rowCount > 0;
 }
 
-// Turn the memory retrieval result into sets of selected ids, scores and ranks.
-// This is what the page highlights: exactly which facts will land in MEMORY_CONTEXT.
-function summarizeSelection(mem) {
-  const chosen = { profile: [], dialog: [], domain: [], reminder: [], secure: [] };
-  const scores = {};
-  const scored = [];
-  for (const scope of ['profile', 'dialog', 'domain']) {
-    for (const it of mem[scope]) {
-      chosen[scope].push(it.id);
-      scores[it.id] = Number(it.score ?? 0);
-      scored.push({ id: it.id, score: Number(it.score ?? 0) });
-    }
-  }
-  for (const r of mem.reminders || []) {
-    chosen.reminder.push(r.id);
-  }
-  for (const s of mem.secure || []) {
-    chosen.secure.push(s.id);
-  }
-
-  // Overall rank by descending score (numbering the order of entry into the context).
-  const ranks = {};
-  scored
-    .sort((a, b) => b.score - a.score)
-    .forEach((r, i) => {
-      ranks[r.id] = i + 1;
-    });
-  return { chosen, scores, ranks };
-}
-
-// Run the memory filtering stage for the entered phrase: request classification + retrieval.
-// Sends nothing to the bot and writes nothing to history — only shows what would have been selected.
-export async function runFilter({ userId, phrase, currentDomain = 'general' }) {
-  let intent;
-  try {
-    intent = await classifyIntent(phrase, currentDomain);
-  } catch {
-    // Fallback: if the classifier is unavailable, use the dialog domain and the base set of memory scopes.
-    intent = {
-      intent: 'unknown',
-      domain_key: currentDomain,
-      confidence: 0,
-      entities: {},
-      needs_memory: true,
-      needed_memory_scopes: ['profile', 'dialog', 'domain'],
-    };
-  }
-  const effectiveDomain = intent.domain_key || currentDomain;
-  // What the classifier requested. If it decided memory is not needed (needs_memory=false), the list is empty.
-  const requestedScopes = intent.needs_memory === false ? [] : intent.needed_memory_scopes || [];
-  // In the sandbox we always show retrieval of the base scopes (profile, dialog, domain) to clearly
-  // highlight relevant facts for any phrase — even when the classifier considered memory optional.
-  // Additional scopes (reminders, secure) are added only if the classifier requested them.
-  const baseScopes = ['profile', 'dialog', 'domain'];
-  const scopes = Array.from(new Set([...baseScopes, ...requestedScopes]));
-  const entityKeys = Object.values(intent.entities || {}).filter((v) => typeof v === 'string');
-
-  const mem = await retrieveMemory({ userId, domainKey: effectiveDomain, query: phrase, scopes, entityKeys });
-
-  const { chosen, scores, ranks } = summarizeSelection(mem);
-  const perCat = {
-    profile: { picked: mem.profile.length, limit: LIMITS.profile },
-    dialog: { picked: mem.dialog.length, limit: LIMITS.dialog },
-    domain: { picked: mem.domain.length, limit: LIMITS.domain },
-    reminder: { picked: (mem.reminders || []).length, limit: LIMITS.reminder },
-    secure: { picked: (mem.secure || []).length, limit: LIMITS.secure },
-  };
-  const total =
-    chosen.profile.length + chosen.dialog.length + chosen.domain.length + chosen.reminder.length + chosen.secure.length;
-
-  return {
-    classification: {
-      intent: intent.intent || 'unknown',
-      domainKey: effectiveDomain,
-      confidence: Number(intent.confidence ?? 0),
-      entities: intent.entities || {},
-      needsMemory: intent.needs_memory !== false,
-      requestedScopes,
-      scopes,
-    },
-    chosen,
-    scores,
-    ranks,
-    perCat,
-    total,
-    limits: LIMITS,
-    memoryContext: buildMemoryContext(mem, effectiveDomain),
-  };
-}
-
-// Full bot response through the main pipeline. Returns the response and the same sets of
-// selected memory, so the page can highlight what the bot actually took into account.
-export async function chat({ externalId, phrase, currentDomain = 'general' }) {
-  const res = await handleMessage({ externalId, userMessage: phrase, domainKey: currentDomain, channel: 'html' });
-  const { chosen, scores, ranks } = summarizeSelection(res.memoryUsed);
-  return {
-    answer: res.answer,
-    domainKey: res.domainKey,
-    intent: res.intent?.intent || 'unknown',
-    toolsUsed: (res.toolsUsed || []).map((t) => t.name),
-    chosen,
-    scores,
-    ranks,
-  };
-}
-
-// Delete a single memory record from the sandbox. The deletion is soft: the record stops appearing in
+// Delete a single memory record. The deletion is soft: the record stops appearing in
 // retrievals but physically remains in the database (for an audit trail and possible recovery). The method
 // depends on the category:
 //   profile/dialog/domain — status 'deleted' in mem.user_facts;

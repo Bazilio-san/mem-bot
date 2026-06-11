@@ -16,14 +16,14 @@
 //   - mem.global_knowledge.created_by — глобальная база знаний остаётся, теряется авторство.
 //
 // Запуск (одиночное удаление):
-//   node scripts/delete-user.js --external-id sandbox-anna
+//   node scripts/delete-user.js --external-id tg-123456789
 //   node scripts/delete-user.js --id 7f3c...-uuid
 //   node scripts/delete-user.js --name "Анна"
 //
 // Запуск (пакетное удаление):
-//   node scripts/delete-user.js --external-id sandbox-anna,sandbox-dmitry,sandbox-lena
+//   node scripts/delete-user.js --external-id tg-111,tg-222,tg-333
 //   node scripts/delete-user.js --external-id a --external-id b --id <uuid>
-//   node scripts/delete-user.js --prefix sandbox-          (все, чей external_id начинается с "sandbox-")
+//   node scripts/delete-user.js --prefix tg-               (все, чей external_id начинается с "tg-")
 //   node scripts/delete-user.js --prefix t --yes           (без интерактивного подтверждения)
 //
 // Запуск (удаление всех тестовых пользователей):

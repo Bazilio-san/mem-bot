@@ -5,6 +5,7 @@
 // thanks to this, proactive messages from the delivery queue find the right chat.
 // Run: npm run telegram
 import { config, requireConfig } from '../config.js';
+import { debugImgGen } from '../debug.js';
 import { pathToFileURL } from 'node:url';
 import { handleMessage, recordReactionTurn, recordUserReaction } from '../agent.js';
 import { tick, msUntilDueTask } from '../pipeline/scheduler.js';
@@ -396,10 +397,29 @@ async function sendWidgetButtons(chatId, result) {
   }
 }
 
-// Send a photo to a chat. The image-generation API returns a public https URL, so we hand that URL straight to
-// Telegram in the photo field and let Telegram fetch the file itself — no need to download it on our side.
+// Send a photo to a chat: download the image on our side and upload the bytes to Telegram as a multipart form.
+// Passing the public URL straight to Telegram is deliberately NOT used: Telegram's datacenters may be unable to
+// fetch a URL even when the file is perfectly valid (observed with ml.bazilio.ru: we get a correct PNG, while
+// Telegram gets something else and answers "Bad Request: wrong type of the web page content"). Uploading the
+// bytes does not depend on Telegram reaching the image host. tg() is JSON-only, so the request is assembled
+// here with FormData/Blob (native in Node 18+).
 async function sendPhoto(chatId, imageUrl) {
-  return tg('sendPhoto', { chat_id: chatId, photo: imageUrl });
+  const res = await fetch(imageUrl);
+  if (!res.ok) {
+    throw new Error(`image download for upload failed: HTTP ${res.status} (${imageUrl})`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  debugImgGen(`telegram: downloaded ${buf.length} bytes from ${imageUrl}, uploading to chat ${chatId} as multipart`);
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('photo', new Blob([buf], { type: res.headers.get('content-type') || 'image/png' }), 'image.png');
+  const tgRes = await fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
+  const data = await tgRes.json();
+  if (!data.ok) {
+    throw new Error(`Telegram sendPhoto (multipart upload): ${data.description || tgRes.status}`);
+  }
+  debugImgGen(`telegram: photo uploaded to chat ${chatId}, message_id=${data.result.message_id}`);
+  return data.result;
 }
 
 // Show the "uploading a photo…" indicator. Optional, so a failure is swallowed silently.
@@ -420,6 +440,7 @@ async function sendGeneratedImages(chatId, result) {
   if (!images.length) {
     return;
   }
+  debugImgGen(`telegram: delivering ${images.length} generated image(s) to chat ${chatId}`);
   await sendPhotoAction(chatId);
   for (const img of images) {
     try {
@@ -427,6 +448,7 @@ async function sendGeneratedImages(chatId, result) {
       await saveSentRefs(chatId, [photoMsg], result.assistantMessageId, 'image');
     } catch (err) {
       console.error(`Failed to send a generated image to chat ${chatId}:`, err.message);
+      debugImgGen(`telegram: all delivery paths failed for ${img.url} in chat ${chatId}: ${err.message}`);
       await sendMessage(chatId, `Картинка сгенерирована, но её не удалось отправить. Ссылка: ${img.url}`);
     }
   }

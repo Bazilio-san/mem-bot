@@ -5,7 +5,8 @@
 // don't make it into the digest (dedup protection). Durable facts are pushed into long-term memory
 // through the normal flow.
 import { chatJSON } from '../llm.js';
-import { config, debugEnabled } from '../config.js';
+import { config } from '../config.js';
+import { debugSummarizer } from '../debug.js';
 import {
   getRecentMessages,
   getActiveConversationSummary,
@@ -14,12 +15,6 @@ import {
 } from '../repo.js';
 import { saveFacts } from './facts.js';
 import { estimateTokens, sumMessageTokens, estimateSummaryTokens } from './token-counter.js';
-
-function dbg(...args) {
-  if (debugEnabled('llm:summarizer')) {
-    console.error('[summarizer]', ...args);
-  }
-}
 
 // Zone headers in the final digest. The order is fixed: near, middle, far.
 const ZONE_HEADERS = {
@@ -305,7 +300,7 @@ ${renderZone(zones.middle) || '(нет сообщений)'}
 ${ZONE_HEADERS.far}
 ${renderZone(zones.far) || '(нет сообщений)'}`;
 
-  dbg('compressing cold zone, messages:', coldPending.length, 'token target:', targetTokens);
+  debugSummarizer(`compressing cold zone, messages: ${coldPending.length}, token target: ${targetTokens}`);
   let raw;
   try {
     raw = await chatJSON({
@@ -317,7 +312,7 @@ ${renderZone(zones.far) || '(нет сообщений)'}`;
       user,
     });
   } catch (err) {
-    dbg('summarizer returned an error, active summary unchanged:', err.message);
+    debugSummarizer(`summarizer returned an error, active summary unchanged: ${err.message}`);
     return null; // bad JSON — leave the old active summary untouched
   }
 
@@ -393,19 +388,18 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
     try {
       await saveFacts(userId, domainKey, result.factsToMemory, conversationId, { source: 'history_summary' });
     } catch (err) {
-      dbg('writing facts_to_memory failed:', err.message);
+      debugSummarizer(`writing facts_to_memory failed: ${err.message}`);
     }
   }
 
-  dbg(
-    'history compressed:',
-    JSON.stringify({
+  debugSummarizer(
+    `history compressed: ${JSON.stringify({
       source_token_count: coldSize,
       summary_token_count: result.summaryTokenCount,
       compression_ratio: Number((result.summaryTokenCount / coldSize).toFixed(2)),
       facts_dropped_because_in_memory: result.droppedBecauseInMemory.length,
       facts_to_memory: result.factsToMemory.length,
-    }),
+    })}`,
   );
 
   return { compressed: true, coldSize, summaryTokens: result.summaryTokenCount };

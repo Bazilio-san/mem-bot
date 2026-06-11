@@ -21,6 +21,7 @@ const KIND_TITLES = {
   history_compress: 'Сжатие истории',
   skill_authoring: 'Создание навыка',
   voice_summary: 'Резюме для голоса',
+  image_prompt_translate: 'Перевод промпта картинки',
   embedding: 'Запрос эмбеддинга',
   stt: 'Распознавание речи',
   tts: 'Синтез речи',

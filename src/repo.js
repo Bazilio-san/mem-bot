@@ -320,7 +320,7 @@ export async function listUsersWithTriggers() {
 }
 
 // The default set of proactivity triggers with firing thresholds from the configuration.
-// Used both by the sandbox seed and at the moment the user enables proactivity.
+// Used at the moment the user enables proactivity.
 export function defaultProactiveTriggers() {
   return [
     { trigger_type: 'inactivity', config: { minutes_inactive: config.proactive.inactivityMinutes } },
@@ -332,7 +332,6 @@ export function defaultProactiveTriggers() {
 
 // Idempotent creation of the default trigger set for a user. By default the triggers are created
 // disabled (enabled = false): enabling specific occasions is a separate explicit user action.
-// The sandbox seed passes { enabled: true } so demo users are illustrative right away.
 export async function ensureDefaultTriggers(userId, domainId, defaults, { enabled = false } = {}) {
   for (const t of defaults) {
     await query(

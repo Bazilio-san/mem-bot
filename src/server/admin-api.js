@@ -1,10 +1,9 @@
-// Routes of the admin interface (JSON API under the /api prefix). This is a thin layer over the existing
-// data-fetching functions from the sandbox (src/sandbox/data.js): the admin panel reuses the same code as
-// the visual sandbox page, so there is no separate business logic here. Each route wraps the call in
-// try/catch and on error returns a clear JSON with code 500, so the frontend can show the reason rather
-// than a "white screen".
+// Routes of the admin interface (JSON API under the /api prefix). This is a thin layer over the
+// data-fetching functions in src/server/admin-data.js, so there is no separate business logic here.
+// Each route wraps the call in try/catch and on error returns a clear JSON with code 500, so the
+// frontend can show the reason rather than a "white screen".
 import express from 'express';
-import { listUsers, getUserMemory, getProactivity, deleteItem, deleteUser } from '../sandbox/data.js';
+import { listUsers, getUserMemory, getProactivity, deleteItem, deleteUser } from './admin-data.js';
 import { searchUsers, getTimeline, getCycle, getSingleRequest, getUserById } from './llm-log-data.js';
 import { analysisConfigPublic, runAnalysis } from './log-analysis.js';
 import { handleMessage } from '../agent.js';

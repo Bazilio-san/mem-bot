@@ -6,16 +6,11 @@
 // extracts tokens from the provider's response and puts a record into the buffer. Logging is wrapped in exception
 // protection, so a journal failure does not affect the returned result, and the shape of the return value stays the same.
 import OpenAI from 'openai';
-import { config, debugEnabled } from './config.js';
+import { config } from './config.js';
+import { debugLlm } from './debug.js';
 import { logLlmRequest } from './pipeline/llm-log.js';
 
 const client = new OpenAI({ apiKey: config.llm.apiKey, baseURL: config.llm.baseURL });
-
-function dbg(...args) {
-  if (debugEnabled('llm')) {
-    console.error('[llm]', ...args);
-  }
-}
 
 // Safely log a call: any logging error is swallowed so it does not affect the model's response.
 function safeLog(input) {
@@ -50,7 +45,7 @@ export async function chat({ model = config.llm.mainModel, messages, tools, tool
   if (toolChoice) {
     body.tool_choice = toolChoice;
   }
-  dbg('chat ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
+  debugLlm(`chat -> ${model} msgs: ${messages.length} tools: ${tools?.length || 0}`);
   const startedAt = Date.now();
   let res;
   try {
@@ -78,7 +73,7 @@ export async function chat({ model = config.llm.mainModel, messages, tools, tool
     durationMs: Date.now() - startedAt,
     ...usage,
   });
-  dbg('chat <-', JSON.stringify(msg).slice(0, 400));
+  debugLlm(`chat <- ${JSON.stringify(msg).slice(0, 400)}`);
   return msg;
 }
 
@@ -163,7 +158,7 @@ export async function chatStream({
   if (toolChoice) {
     body.tool_choice = toolChoice;
   }
-  dbg('chatStream ->', model, 'msgs:', messages.length, 'tools:', tools?.length || 0);
+  debugLlm(`chatStream -> ${model} msgs: ${messages.length} tools: ${tools?.length || 0}`);
 
   const startedAt = Date.now();
   const stream = await api.chat.completions.create(body);
@@ -200,7 +195,7 @@ export async function chatStream({
     durationMs: Date.now() - startedAt,
     ...extractUsage(usageRaw),
   });
-  dbg('chatStream <-', 'chunks:', chunks, 'finish:', finishReason, 'tool_calls:', message.tool_calls?.length || 0);
+  debugLlm(`chatStream <- chunks: ${chunks} finish: ${finishReason} tool_calls: ${message.tool_calls?.length || 0}`);
   return message;
 }
 
@@ -225,7 +220,7 @@ ${schemaText}
     ],
     response_format: { type: 'json_object' },
   };
-  dbg('chatJSON ->', model, schemaName);
+  debugLlm(`chatJSON -> ${model} ${schemaName}`);
   const startedAt = Date.now();
   let res;
   try {
@@ -294,7 +289,7 @@ export async function embed(text, { kind } = {}) {
       status: 'error',
       error: err.message || err,
     });
-    dbg('embedding unavailable:', err.message);
+    debugLlm(`embedding unavailable: ${err.message}`);
     return null;
   }
 }

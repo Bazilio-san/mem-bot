@@ -1,8 +1,8 @@
 // Модульные тесты инструмента генерации картинок (generate_image). Внешний API не вызывается по-настоящему:
 // глобальный fetch подменяется заглушкой, чтобы проверить тело запроса, разбор успешного ответа, поведение при
-// ошибках и срабатывание ограничения размеров. Запуск: cross-env NODE_ENV=test node tests/image-generate.test.mjs
+// ошибках и срабатывание ограничения размеров. Запуск: cross-env NODE_ENV=test node tests/generate_image.test.mjs
 import assert from 'node:assert/strict';
-import { imageGenerateTool } from '../src/pipeline/agent-tools/image/image-generate.js';
+import { imageGenerateTool } from '../src/pipeline/agent-tools/image/generate_image.js';
 import { config } from '../src/config.js';
 
 const realFetch = globalThis.fetch;
@@ -78,4 +78,4 @@ function jsonResponse(obj, ok = true, status = 200) {
 }
 
 globalThis.fetch = realFetch;
-console.log('image-generate.test.mjs: ok');
+console.log('generate_image.test.mjs: ok');

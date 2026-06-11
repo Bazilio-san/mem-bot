@@ -1,9 +1,9 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="telegram" type="js.build_tools.npm" nameIsGenerated="true">
+  <configuration default="false" name="lint &amp; build" type="js.build_tools.npm">
     <package-json value="$PROJECT_DIR$/package.json" />
     <command value="run" />
     <scripts>
-      <script value="telegram" />
+      <script value="lint&amp;build" />
     </scripts>
     <node-interpreter value="project" />
     <envs />

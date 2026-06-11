@@ -197,7 +197,7 @@ error and the list of allowed options, and are not written to the user's state.
 ### [PROMPT-4b] Image Generation
 
 When the user asks to draw, generate, or create a picture, illustration, or photo, the main dialogue model calls
-the `generate_image` tool (`src/pipeline/agent-tools/image/image-generate.js`). The tool sends a `POST` request
+the `generate_image` tool (`src/pipeline/agent-tools/image/generate_image.js`). The tool sends a `POST` request
 with a JSON body to the external image-generation API at `config.imageGen.apiUrl` and receives a public https URL
 of a ready image in return. It is channel-agnostic: it does not render anything itself, it only returns a picture
 descriptor in `structuredContent.image` (the URL, the prompt, the model, and the seed). A delivery channel that

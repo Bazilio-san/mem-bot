@@ -40,8 +40,6 @@ Each check can be run individually via its own npm script.
 |--------|---------|
 | `npm run memory:dedupe` | Deduplicate memory entries. |
 | `npm run delete:user` | Delete a user and all their associated data. |
-| `npm run seed:sandbox` | Seed the sandbox with test data. |
-| `npm run sandbox` | Start the web sandbox on port `3002`. |
 | `npm run skills:list` | List all loaded skills. |
 | `npm run skills:validate` | Validate skills and their schemas. |
 | `npm run skills:sync` | Synchronize skills. |

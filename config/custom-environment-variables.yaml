@@ -47,8 +47,6 @@ db:
           __format: number
         user: DB_USER
 
-debug: DEBUG
-
 globalMemory:
   factsEnabled:
     __name: GLOBAL_MEMORY_ENABLED
@@ -197,11 +195,6 @@ providers:
   groqApiKey: GROQ_API_KEY
   groqBaseURL: GROQ_BASE_URL
   tavilyApiKey: TAVILY_API_KEY
-
-sandbox:
-  port:
-    __name: SANDBOX_PORT
-    __format: number
 
 schema:
   keyEmbedThreshold:

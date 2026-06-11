@@ -27,6 +27,8 @@ export const REQUEST_KINDS = Object.freeze({
   HISTORY_COMPRESS: 'history_compress',
   SKILL_AUTHORING: 'skill_authoring',
   VOICE_SUMMARY: 'voice_summary',
+  // Translation of an image-generation prompt to English before calling the image API (generate_image tool).
+  IMAGE_PROMPT_TRANSLATE: 'image_prompt_translate',
   EMBEDDING: 'embedding',
   STT: 'stt',
   TTS: 'tts',
@@ -51,6 +53,7 @@ export const REQUEST_KIND_DISPLAY = Object.freeze({
   history_compress: 'JSON',
   answer_summary: 'JSON',
   voice_summary: 'JSON',
+  image_prompt_translate: 'JSON',
   // Service/binary metadata.
   embedding: 'JSON',
   tts: 'JSON',

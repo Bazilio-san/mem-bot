@@ -56,8 +56,8 @@ The HTTP layer is built on Express in `src/server/index.js`:
 
 ### Admin JSON API
 
-The API router is a thin layer over data-access functions: the memory pages reuse `src/sandbox/data.js` (the same
-code that backs the memory sandbox), and the log-viewer pages are served by `src/server/llm-log-data.js` and
+The API router is a thin layer over data-access functions: the memory pages are served by
+`src/server/admin-data.js`, and the log-viewer pages are served by `src/server/llm-log-data.js` and
 `src/server/log-analysis.js`. The router itself carries no business logic. Every handler is wrapped so that a
 thrown error becomes a JSON response with HTTP status 500 and an `error` field carrying a human-readable message,
 and the failure is logged on the server.

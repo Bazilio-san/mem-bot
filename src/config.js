@@ -84,11 +84,5 @@ if (config.voiceOutput.enabled) {
   config.voiceOutput.voice = v;
 }
 
-// debug in YAML and the environment is a comma-separated list of categories; we parse it only here.
-export function debugEnabled(category) {
-  const list = String(config.debug || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return list.includes('*') || list.includes(category);
-}
+// Debug categories are configured ONLY via the DEBUG environment variable (including .env) — the standard
+// source for the Debug mechanism from af-tools-ts. See src/debug.js for the list of categories.

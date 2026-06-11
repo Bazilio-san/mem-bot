@@ -2,18 +2,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { loadMcpServers } from './config.js';
-import { debugEnabled } from '../config.js';
+import { debugMcpTool } from '../debug.js';
 import { logAgentEvent, AGENT_EVENTS } from '../pipeline/agent-event-log.js';
 
 const CALL_TIMEOUT_MS = 90_000; // wait limit for an MCP tool response; a hung server doesn't block the agent
-
-// Tracing of MCP tool calls: requests and responses. Enabled by the DEBUG=mcp:tool category (or DEBUG=*).
-// Goes to stderr so it doesn't mix with user output, and is off by default.
-function dbgTool(...args) {
-  if (debugEnabled('mcp:tool')) {
-    console.error('[mcp:tool]', ...args);
-  }
-}
 
 // A single live connection to a server. We keep the client to reuse the connection across calls and to be
 // able to reconnect on a drop without rebuilding the tool registry.
@@ -69,24 +61,23 @@ class McpConnection {
   // which must not be a model-controlled argument.
   async call(name, args, meta) {
     const label = `${this.server.alias}__${name}`;
-    dbgTool(`-> ${label} request:`, JSON.stringify(args || {}));
+    debugMcpTool(`-> ${label} request: ${JSON.stringify(args || {})}`);
     try {
       const res = await this.invokeOnce(name, args, meta);
-      dbgTool(`<- ${label} response`, res?.isError ? '(isError)' : '(ok)', ':', JSON.stringify(res?.content ?? res));
+      debugMcpTool(
+        `<- ${label} response ${res?.isError ? '(isError)' : '(ok)'}: ${JSON.stringify(res?.content ?? res)}`,
+      );
       return res;
     } catch (err) {
       if (!isConnectionError(err)) {
-        dbgTool(`xx ${label} error:`, String(err?.message || err));
+        debugMcpTool(`xx ${label} error: ${String(err?.message || err)}`);
         throw err;
       }
-      dbgTool(`-- ${label} connection dropped, reconnecting and retrying:`, String(err?.message || err));
+      debugMcpTool(`-- ${label} connection dropped, reconnecting and retrying: ${String(err?.message || err)}`);
       await this.reset();
       const res = await this.invokeOnce(name, args, meta);
-      dbgTool(
-        `<- ${label} response after reconnect`,
-        res?.isError ? '(isError)' : '(ok)',
-        ':',
-        JSON.stringify(res?.content ?? res),
+      debugMcpTool(
+        `<- ${label} response after reconnect ${res?.isError ? '(isError)' : '(ok)'}: ${JSON.stringify(res?.content ?? res)}`,
       );
       return res;
     }

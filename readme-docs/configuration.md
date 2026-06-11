@@ -194,14 +194,13 @@ responses are displayed in a particular messenger.
 | `scheduler.maxSleepMs` | `SCHEDULER_MAX_SLEEP_MS`  | Maximum pause in the scheduler loop (milliseconds).         | `30000`       |
 | `scheduler.workerId`   | `SCHEDULER_WORKER_ID`     | Scheduler worker identifier.                                | `scheduler-1` |
 
-## MCP Protocol and Web Sandbox
+## MCP Protocol
 
 MCP (Model Context Protocol) is the protocol for connecting external tools to the model.
 
 | `config` path    | Environment variable | Purpose                                                                                    | Default     |
 |------------------|----------------------|--------------------------------------------------------------------------------------------|-------------|
 | `mcp.configPath` | `MCP_CONFIG_PATH`    | Path to the file listing MCP servers (resolved relative to the working directory).         | `.mcp.json` |
-| `sandbox.port`   | `SANDBOX_PORT`       | Port of the web sandbox.                                                                   | `3000`      |
 
 ## Admin Web Panel
 

@@ -12,7 +12,7 @@ import { globalFactListTool } from './global-fact/global-fact-list.js';
 import { globalKnowledgeSearchTool } from './global-knowledge/global-knowledge-search.js';
 import { globalKnowledgeAddTool } from './global-knowledge/global-knowledge-add.js';
 import { globalKnowledgeDeleteTool } from './global-knowledge/global-knowledge-delete.js';
-import { imageGenerateTool } from './image/image-generate.js';
+import { imageGenerateTool } from './image/generate_image.js';
 import { setReplyModeTool } from './voice/voice-or-text.js';
 import { setVoicePreferenceTool } from './voice/voice-set-preference.js';
 import { skillReadReferenceTool } from './skill-read-reference.js';
