@@ -157,14 +157,12 @@ function enqueueReactionUpdate(reactionUpdate) {
 }
 
 // Base list of commands for the bot menu (the "Menu" button next to the input field and the suggestions when
-// typing "/"). The descriptions are visible to the user, so they are short and in Russian. Proactivity control
-// commands are added to this set dynamically, depending on the global flag and the user's state.
-// Telegram command names allow only lowercase latin letters, digits and underscores, so proactivity_on /
-// proactivity_off are used here rather than hyphenated variants.
+// typing "/"). The descriptions are visible to the user, so they are short and in Russian. When proactivity is
+// globally enabled, the single /proactivity command is appended: it both enables proactivity for the user and
+// opens the trigger submenu, while disabling is a button inside that submenu.
 const BOT_COMMANDS = [
   { command: 'start', description: 'Запустить бота и показать справку' },
   { command: 'help', description: 'Показать справку и список команд' },
-  { command: 'domain', description: 'Сменить домен общения, например work или personal' },
 ];
 
 // Russian labels for the proactivity triggers in the submenu. The technical trigger keys stay in the database
@@ -176,21 +174,13 @@ const TRIGGER_LABELS = {
   welcome_back: 'Возвращение',
 };
 
-// Build the menu command list for a specific user state.
-// Globally disabled — only the base commands. Globally enabled: if the user's master flag is off, we offer to
-// enable proactivity; if it's on, we offer to disable it and to open the trigger settings.
-function buildCommands(masterEnabled) {
+// Build the menu command list. The set no longer depends on the user's state: with proactivity globally
+// disabled — only the base commands, otherwise the base commands plus the single /proactivity entry point.
+function buildCommands() {
   if (!config.proactive.enabled) {
     return BOT_COMMANDS;
   }
-  if (masterEnabled) {
-    return [
-      ...BOT_COMMANDS,
-      { command: 'proactivity_off', description: 'Выключить проактивность' },
-      { command: 'proactivity', description: 'Настроить поводы проактивности' },
-    ];
-  }
-  return [...BOT_COMMANDS, { command: 'proactivity_on', description: 'Включить проактивность' }];
+  return [...BOT_COMMANDS, { command: 'proactivity', description: 'Проактивность: включить и настроить поводы' }];
 }
 
 // Inline keyboard of the proactivity submenu: a button per trigger (a tap toggles it) and a separate button to
@@ -206,12 +196,13 @@ function proactivityKeyboard(triggers) {
   return { inline_keyboard: rows };
 }
 
-// Re-register the menu commands for a specific chat to match its current proactivity state.
+// Re-register the menu commands for a specific chat. The command set is the same for every chat, but chats may
+// still carry a previously registered chat-scoped menu, so we overwrite it with the current set.
 // The menu is optional, so we only log a registration error and continue.
-async function updateChatMenu(chatId, masterEnabled) {
+async function updateChatMenu(chatId) {
   try {
     await tg('setMyCommands', {
-      commands: buildCommands(masterEnabled),
+      commands: buildCommands(),
       scope: { type: 'chat', chat_id: chatId },
     });
   } catch (err) {
@@ -219,18 +210,13 @@ async function updateChatMenu(chatId, masterEnabled) {
   }
 }
 
-// Recompute the chat menu after a regular message: the command set depends on the user's master flag, which
-// may have changed. We do this only when proactivity is globally enabled.
-async function refreshChatMenu(chatId, externalId) {
+// Recompute the chat menu after a regular message: overwrites a possibly stale chat-scoped menu with the
+// current command set. We do this only when proactivity is globally enabled.
+async function refreshChatMenu(chatId) {
   if (!config.proactive.enabled) {
     return;
   }
-  try {
-    const state = await getProactivityState(externalId);
-    await updateChatMenu(chatId, state?.enabled === true);
-  } catch (err) {
-    console.error(`Failed to recompute the menu for chat ${chatId}:`, err.message);
-  }
+  await updateChatMenu(chatId);
 }
 
 // Call an arbitrary Telegram Bot API method. Throws an exception if Telegram returned an error.
@@ -444,64 +430,31 @@ function voiceLimitMessage(reason) {
 // Handle service commands. Returns true if the message was a command and has already been processed.
 async function handleCommand(chatId, externalId, text) {
   if (text === '/start' || text === '/help') {
-    let help = `Привет! Я чат-бот с долговременной памятью. Просто пишите мне — я запоминаю важное и отвечаю с учётом прошлых разговоров.
-
-Команды:
-/domain <ключ> — сменить домен общения (например, work или personal).`;
+    let help = `Привет! Я чат-бот с долговременной памятью. Просто пишите мне — я запоминаю важное и отвечаю с учётом прошлых разговоров. Тему общения (работа, личное и т. п.) я распознаю сам по смыслу сообщений.`;
     if (config.proactive.enabled) {
       help += `
 
 Проактивность (бот сам пишет первым по уместному поводу):
-/proactivity_on — включить проактивность;
-/proactivity_off — выключить проактивность;
-/proactivity — выбрать, по каким поводам бот может писать первым.`;
+/proactivity — включить проактивность и выбрать поводы; там же есть кнопка полного выключения.`;
     }
     await sendMessage(chatId, help);
     return true;
   }
-  if (text.startsWith('/domain')) {
-    const key = text.slice(7).trim() || 'general';
-    chatDomains.set(chatId, key);
-    await sendMessage(chatId, `Домен общения переключён на «${key}».`);
-    return true;
-  }
-  // Proactivity control commands: enable, disable, and open the submenu for choosing triggers.
-  if (text === '/proactivity_on') {
-    if (!config.proactive.enabled) {
-      await sendMessage(chatId, 'Проактивность сейчас выключена глобально администратором, включить её нельзя.');
-      return true;
-    }
-    await setUserProactivity(externalId, true);
-    await updateChatMenu(chatId, true);
-    await sendMessage(
-      chatId,
-      `Проактивность включена. Пока ни один повод не активирован, поэтому бот ещё ничего сам не пришлёт. Откройте команду /proactivity и выберите поводы, по которым бот может писать первым.`,
-    );
-    return true;
-  }
-  if (text === '/proactivity_off') {
-    await setUserProactivity(externalId, false);
-    await updateChatMenu(chatId, false);
-    await sendMessage(chatId, 'Проактивность выключена. Бот больше не будет писать первым.');
-    return true;
-  }
+  // The single proactivity entry point: enables the user's master flag (idempotently provisioning the default
+  // trigger set) and opens the trigger submenu. Disabling lives on a button inside that submenu, so a tap on
+  // the command from a disabled state simply re-enables proactivity with the previously chosen triggers.
   if (text === '/proactivity') {
     if (!config.proactive.enabled) {
       await sendMessage(chatId, 'Проактивность сейчас выключена глобально администратором.');
       return true;
     }
+    await setUserProactivity(externalId, true);
+    await updateChatMenu(chatId);
     const state = await getProactivityState(externalId);
-    if (!state || !state.enabled) {
-      await sendMessage(
-        chatId,
-        'Проактивность у вас выключена. Сначала включите её командой /proactivity_on, затем настройте поводы.',
-      );
-      return true;
-    }
     await tg('sendMessage', {
       chat_id: chatId,
-      text: 'Выберите поводы, по которым бот может писать первым (нажатие переключает повод):',
-      reply_markup: proactivityKeyboard(state.triggers),
+      text: `Проактивность включена. Выберите поводы, по которым бот может писать первым (нажатие переключает повод); пока ни один повод не включён, бот сам ничего не пришлёт. Кнопка внизу выключает проактивность полностью:`,
+      reply_markup: proactivityKeyboard(state ? state.triggers : []),
     });
     return true;
   }
@@ -518,12 +471,12 @@ async function handleCallback(cq) {
   try {
     if (data === 'pa:off') {
       await setUserProactivity(externalId, false);
-      await updateChatMenu(chatId, false);
+      await updateChatMenu(chatId);
       await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Проактивность выключена.' });
       await tg('editMessageText', {
         chat_id: chatId,
         message_id: messageId,
-        text: `Проактивность выключена. Бот больше не будет писать первым. Чтобы снова включить — команда /proactivity_on.`,
+        text: `Проактивность выключена. Бот больше не будет писать первым. Чтобы снова включить — команда /proactivity.`,
       });
       return;
     }
@@ -644,7 +597,7 @@ async function handleUpdate(message) {
       if (delivery.kind === 'reaction') {
         const recorded = await recordReactionTurn({ externalId, userMessage: text, domainKey, delivery });
         await deliverAgentResult(chatId, message.message_id, recorded);
-        await refreshChatMenu(chatId, externalId);
+        await refreshChatMenu(chatId);
         return;
       }
       await sendTyping(chatId);
@@ -696,7 +649,7 @@ async function handleUpdate(message) {
         const sent = await progress.complete(res.answer || '(пустой ответ)');
         await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
         await sendWidgetButtons(chatId, res);
-        await refreshChatMenu(chatId, externalId);
+        await refreshChatMenu(chatId);
       } catch (err) {
         await progress.fail(err);
         throw err; // the common handler below will send the failure text
@@ -711,7 +664,7 @@ async function handleUpdate(message) {
     await deliverAgentResult(chatId, message.message_id, res);
     await sendWidgetButtons(chatId, res);
     // The command menu depends on the proactivity master flag, which may have changed — recompute it.
-    await refreshChatMenu(chatId, externalId);
+    await refreshChatMenu(chatId);
   } catch (err) {
     console.error(`Error handling a message for chat ${chatId}:`, err.message);
     await sendMessage(chatId, 'Не получилось обработать сообщение. Попробуйте ещё раз чуть позже.');
@@ -991,11 +944,11 @@ async function pollLoop() {
 export async function startTelegram() {
   running = true; // in case of a restart after a stop
   const me = await tg('getMe', {}); // at the same time we verify the token is valid
-  // Register the global command menu as a default fallback set (for chats without their own menu).
-  // With proactivity globally enabled this is the base commands plus /proactivity_on; otherwise — base only.
-  // The menu of a specific chat is refined dynamically in updateChatMenu/refreshChatMenu. A failure is not critical.
+  // Register the global command menu. With proactivity globally enabled this is the base commands plus
+  // /proactivity; otherwise — base only. Chat-scoped menus registered earlier are overwritten by
+  // updateChatMenu/refreshChatMenu on the first interaction. A failure is not critical.
   try {
-    await tg('setMyCommands', { commands: buildCommands(false) });
+    await tg('setMyCommands', { commands: buildCommands() });
   } catch (err) {
     console.error('Failed to register the command menu:', err.message);
   }

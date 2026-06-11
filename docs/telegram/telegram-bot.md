@@ -226,16 +226,10 @@ is not lost: the reason is written to the log and the same response is sent to t
 
 ## Bot Commands
 
-Telegram command names allow only lowercase Latin letters, digits, and underscores, so proactivity-control
-commands use underscores (`proactivity_on`) rather than hyphens.
-
 | Command | Purpose | AI bot programmatic API function |
 |---------|---------|----------------------------------|
-| `/start`, `/help` | greeting and help; the list of proactivity commands is shown only when `config.proactive.enabled` is on | — |
-| `/domain <key>` | change the conversation domain for the chat (stored in process memory) | — |
-| `/proactivity_on` | enable proactivity for the user and create a disabled set of triggers | `setUserProactivity(externalId, true)` |
-| `/proactivity_off` | disable proactivity for the user | `setUserProactivity(externalId, false)` |
-| `/proactivity` | open the on-screen trigger-selection submenu | `getProactivityState(externalId)`, `setTrigger(...)` |
+| `/start`, `/help` | greeting and help; the proactivity command is mentioned only when `config.proactive.enabled` is on | — |
+| `/proactivity` | enable proactivity for the user and open the trigger-selection submenu (disabling is a button inside the submenu) | `setUserProactivity(externalId, true)`, `getProactivityState(externalId)`, `setTrigger(...)` |
 
 The global memory commands (`/fact-add`, `/fact-list`, `/fact-del`, `/kb-add`, `/kb-find`, `/kb-del`) are not
 implemented in the Telegram adapter; they are available in the reference interactive CLI (`src/cli.js`).
@@ -246,13 +240,13 @@ The management mirrors the two-level model from the spec (`docs/ai-bot-with-memo
 flag `config.proactive.enabled`, the user master flag `mem.users.proactivity_enabled`, and the per-trigger flag
 `enabled`.
 
-- `/proactivity_on` calls `setUserProactivity(externalId, true)`. The function enables the master flag and
-  idempotently creates the trigger set, all disabled. The bot reports that no triggers are active yet and
-  suggests opening `/proactivity`.
-- `/proactivity_off` calls `setUserProactivity(externalId, false)` — the master flag is disabled and the bot
-  stops messaging first.
-- `/proactivity` reads the state via `getProactivityState(externalId)`. If proactivity is disabled for the user,
-  the bot suggests running `/proactivity_on` first; otherwise it shows the inline trigger submenu.
+- `/proactivity` is the single entry point. It calls `setUserProactivity(externalId, true)` — the function
+  enables the master flag and idempotently creates the trigger set, all disabled — then reads the state via
+  `getProactivityState(externalId)` and shows the inline trigger submenu. Triggers survive disabling (only the
+  master flag is flipped), so invoking the command from a disabled state re-enables proactivity with the
+  previously chosen occasions.
+- Disabling is the `🚫` button inside the submenu: it calls `setUserProactivity(externalId, false)` — the master
+  flag is dropped and the bot stops messaging first.
 
 If proactivity is disabled globally (`config.proactive.enabled` is off), the enable commands respond that enabling
 is not possible.
@@ -309,19 +303,18 @@ effects in Telegram:
 - "запомни навсегда: у меня аллергия на арахис" — the bot pins the fact via `memory_pin`: it never expires,
   survives background cleanup, and changes only when the user explicitly states something new.
 
-## Dynamic Command Menu
+## Command Menu
 
-The set of commands visible in the chat (the "Menu" button and hints shown when typing "/") is recalculated for
-the user's current state via `setMyCommands` scoped to the specific chat
-(`scope: { type: 'chat', chat_id }`). The logic for building the set:
+The set of commands visible in the chat (the "Menu" button and hints shown when typing "/") does not depend on
+the user's state:
 
-- proactivity is disabled globally — only the base commands (`/start`, `/help`, `/domain`);
-- globally enabled, user master flag disabled — base commands plus `/proactivity_on`;
-- globally enabled, master flag enabled — base commands plus `/proactivity_off` and `/proactivity`.
+- proactivity is disabled globally — only the base commands (`/start`, `/help`);
+- proactivity is enabled globally — the base commands plus `/proactivity`.
 
-The menu is recalculated after every ordinary message (because the master flag could have changed) and immediately
-after any toggle. At startup the bot registers a global command set as a fallback for chats without their own
-menu: the base commands plus `/proactivity_on` if proactivity is enabled globally.
+At startup the bot registers this set globally via `setMyCommands`. In addition, after every ordinary message
+and after any toggle in the submenu, the same set is re-registered with the chat scope
+(`scope: { type: 'chat', chat_id }`) — this overwrites a possibly stale chat-scoped menu left from an earlier
+registration.
 
 ## Inline Trigger Submenu
 

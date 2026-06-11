@@ -466,7 +466,7 @@ export async function handleMessage({
 
     // Proactivity triggers are NO longer created on every message: proactivity is off by default.
     // The trigger set is provisioned only when the user enables proactivity themselves via the
-    // /proactivity_on command (see setUserProactivity in src/repo.js and the handler in src/telegram/bot.js).
+    // /proactivity command (see setUserProactivity in src/repo.js and the handler in src/telegram/bot.js).
 
     // Stage 1: classification.
     await emit({ type: 'stage.started', stage: 'classify', title: 'Определяю намерение' });
