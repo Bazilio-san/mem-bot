@@ -396,6 +396,42 @@ async function sendWidgetButtons(chatId, result) {
   }
 }
 
+// Send a photo to a chat. The image-generation API returns a public https URL, so we hand that URL straight to
+// Telegram in the photo field and let Telegram fetch the file itself — no need to download it on our side.
+async function sendPhoto(chatId, imageUrl) {
+  return tg('sendPhoto', { chat_id: chatId, photo: imageUrl });
+}
+
+// Show the "uploading a photo…" indicator. Optional, so a failure is swallowed silently.
+async function sendPhotoAction(chatId) {
+  try {
+    await tg('sendChatAction', { chat_id: chatId, action: 'upload_photo' });
+  } catch {
+    /* the indicator is optional */
+  }
+}
+
+// Deliver images produced by the generate_image tool. Mirrors sendWidgetButtons: it scans the tool results in
+// result.toolsUsed for the structuredContent.image descriptor and sends each picture as a photo. The model's text
+// answer is delivered separately (as a normal message), so the photo goes without a caption — this avoids
+// duplicating the text and sidesteps the 1024-character caption limit.
+async function sendGeneratedImages(chatId, result) {
+  const images = (result.toolsUsed || []).map((t) => t.result?.structuredContent?.image).filter(Boolean);
+  if (!images.length) {
+    return;
+  }
+  await sendPhotoAction(chatId);
+  for (const img of images) {
+    try {
+      const photoMsg = await sendPhoto(chatId, img.url);
+      await saveSentRefs(chatId, [photoMsg], result.assistantMessageId, 'image');
+    } catch (err) {
+      console.error(`Failed to send a generated image to chat ${chatId}:`, err.message);
+      await sendMessage(chatId, `Картинка сгенерирована, но её не удалось отправить. Ссылка: ${img.url}`);
+    }
+  }
+}
+
 // Show the "typing…" indicator while the agent is thinking about the answer.
 async function sendTyping(chatId) {
   try {
@@ -659,6 +695,7 @@ async function handleUpdate(message) {
         const sent = await progress.complete(res.answer || '(пустой ответ)');
         await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
         await sendWidgetButtons(chatId, res);
+        await sendGeneratedImages(chatId, res);
         await refreshChatMenu(chatId);
       } catch (err) {
         await progress.fail(err);
@@ -673,6 +710,7 @@ async function handleUpdate(message) {
     chatDomains.set(chatId, res.domainKey); // the agent may have switched domain by the request's meaning
     await deliverAgentResult(chatId, message.message_id, res);
     await sendWidgetButtons(chatId, res);
+    await sendGeneratedImages(chatId, res);
     // The command menu depends on the proactivity master flag, which may have changed — recompute it.
     await refreshChatMenu(chatId);
   } catch (err) {

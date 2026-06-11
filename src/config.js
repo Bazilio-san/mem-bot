@@ -57,6 +57,18 @@ if (config.historyCompression.shrinkTokens >= config.historyCompression.maxToken
 if (config.voiceOutput.maxChars > 500) {
   throw new Error('voiceOutput.maxChars cannot exceed 500.');
 }
+// Image generation: the default width/height must be among the allowed sizes, otherwise the very first
+// call would request a size the server may reject.
+if (config.imageGen?.enabled) {
+  const allowed = config.imageGen.allowedSizes || [];
+  for (const dim of ['width', 'height']) {
+    if (!allowed.includes(config.imageGen[dim])) {
+      throw new Error(
+        `imageGen.${dim} (${config.imageGen[dim]}) must be one of imageGen.allowedSizes: ${allowed.join(', ')}.`,
+      );
+    }
+  }
+}
 
 // --- Minimal unavoidable normalizations (things that cannot be expressed in YAML) ---
 // An empty baseURL means "direct OpenAI API" — coerce '' to undefined for the OpenAI client.

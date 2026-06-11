@@ -39,6 +39,7 @@
     "test:streaming": "cross-env NODE_ENV=test node tests/streaming.test.mjs",
     "test:progress": "cross-env NODE_ENV=test node tests/progress.test.mjs",
     "test:voice": "cross-env NODE_ENV=test node tests/voice.test.mjs",
+    "test:image-gen": "cross-env NODE_ENV=test node tests/image-generate.test.mjs",
     "test:voice-output": "cross-env NODE_ENV=test node tests/voice-output.test.mjs",
     "test:voice-selector": "cross-env NODE_ENV=test node tests/voice-selector.test.mjs",
     "test:channels": "cross-env NODE_ENV=test node tests/channels.test.mjs",

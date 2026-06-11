@@ -194,6 +194,24 @@ be a specific voice identifier (`nova`, `onyx`, `ash`) or a category (`male`, `f
 Russian equivalents). The handler validates the selection against the voice catalogue; unknown values return an
 error and the list of allowed options, and are not written to the user's state.
 
+### [PROMPT-4b] Image Generation
+
+When the user asks to draw, generate, or create a picture, illustration, or photo, the main dialogue model calls
+the `generate_image` tool (`src/pipeline/agent-tools/image/image-generate.js`). The tool sends a `POST` request
+with a JSON body to the external image-generation API at `config.imageGen.apiUrl` and receives a public https URL
+of a ready image in return. It is channel-agnostic: it does not render anything itself, it only returns a picture
+descriptor in `structuredContent.image` (the URL, the prompt, the model, and the seed). A delivery channel that
+supports pictures **may** present it as an attached image; channels without image support simply show the model's
+text answer and ignore the descriptor.
+
+The tool parameters are `prompt` (a detailed image description; the parameter description asks the model to write
+it in English and enrich it with style, lighting, and quality, since the generation model works best with English),
+`negative_prompt` (what to exclude), and `width`/`height`. The requested size is clamped to
+`config.imageGen.allowedSizes`; an omitted or unsupported value falls back to the configured default
+`config.imageGen.width`/`height`. The request is bounded by `config.imageGen.timeoutMs`: on overrun, on a non-200
+response, or on a missing URL the tool returns a clear error instead of hanging the turn, and the model reports the
+failure to the user in text. The whole capability is gated by `config.imageGen.enabled`.
+
 ### [PROMPT-5] Dialog Topic Extraction (Companion Mode)
 
 In parallel with fact extraction, when `config.companion.enabled` is set, a separate call returns the dialog's

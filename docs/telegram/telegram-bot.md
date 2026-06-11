@@ -224,6 +224,21 @@ the wait looks meaningful. After a successful send, the external `message_id` of
 `mem.message_external_refs` with kind `voice`, just as for text responses. On any synthesis failure the response
 is not lost: the reason is written to the log and the same response is sent to the user as text.
 
+## Generated Images
+
+When the user asks for a picture, the core's `generate_image` tool produces an image and returns its descriptor in
+the tool result (`structuredContent.image` with the public https URL of the file). The adapter delivers it with the
+helper `sendGeneratedImages`, which — just like `sendWidgetButtons` — runs after the answer in both delivery paths
+(streaming and plain). It scans `result.toolsUsed` for image descriptors and sends each picture via `sendPhoto`.
+
+The image-generation API returns a public https URL, so the adapter passes that URL straight to Telegram in the
+`photo` field and lets Telegram fetch the file itself — no intermediate download on our side. The photo is sent
+without a caption: the model's text answer is already delivered as a separate message, which both avoids
+duplicating the text and sidesteps Telegram's 1024-character caption limit. While the picture uploads, the adapter
+shows the action indicator `upload_photo` ("uploading a photo…"). After a successful send, the external
+`message_id` is stored in `mem.message_external_refs` with kind `image`, just as for text and voice responses. If
+`sendPhoto` fails, the picture is not lost: the adapter falls back to a text message containing the image URL.
+
 ## Bot Commands
 
 | Command | Purpose | AI bot programmatic API function |
