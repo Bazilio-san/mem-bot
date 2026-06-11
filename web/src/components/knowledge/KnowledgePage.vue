@@ -327,6 +327,22 @@ onMounted(load);
         </template>
       </Column>
 
+      <Column header="" class="kb-col-actions" :style="{ width: '6rem' }">
+        <template #body="{ data }">
+          <Button icon="pi pi-pencil" text rounded size="small" aria-label="Редактировать" @click="openEdit(data)" />
+          <Button
+            v-if="data.status !== 'deleted'"
+            icon="pi pi-times"
+            severity="danger"
+            text
+            rounded
+            size="small"
+            aria-label="Удалить запись"
+            @click="removeRecord(data)"
+          />
+        </template>
+      </Column>
+
       <Column field="domainLabel" header="Домен" sortable :show-filter-menu="false" :style="{ width: '11rem' }">
         <template #filter="{ filterModel, filterCallback }">
           <MultiSelect
@@ -386,22 +402,6 @@ onMounted(load);
 
       <Column field="updatedAt" header="Обновлено" sortable :style="{ width: '11rem' }">
         <template #body="{ data }">{{ fmtDate(data.updatedAt) }}</template>
-      </Column>
-
-      <Column header="" class="kb-col-actions" :style="{ width: '6rem' }">
-        <template #body="{ data }">
-          <Button icon="pi pi-pencil" text rounded size="small" aria-label="Редактировать" @click="openEdit(data)" />
-          <Button
-            v-if="data.status !== 'deleted'"
-            icon="pi pi-times"
-            severity="danger"
-            text
-            rounded
-            size="small"
-            aria-label="Удалить запись"
-            @click="removeRecord(data)"
-          />
-        </template>
       </Column>
 
       <template #empty>
