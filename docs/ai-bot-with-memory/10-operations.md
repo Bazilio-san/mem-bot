@@ -252,13 +252,19 @@ the general debug-category mechanism is described in section [OPS-5].
   write nothing.
 - **Agent event journal.** Alongside the model calls, the agent journals the events of every conversation turn
   into `log.agent_event` (see [DATA-12]): the turn start, pipeline stages, tool calls with full arguments and
-  results and their durations, connections to external MCP tool servers, the final answer, and failures. The
-  writer (`src/pipeline/agent-event-log.js`) is a separate emitter built on the same buffered batch machinery
+  results and their durations, connections to external MCP tool servers, the final answer, the memory-write
+  outcome (`memory.written` — saveFacts action counters and a compact fact list, journaled even when extraction
+  found nothing), and failures. The duplicate sweep journals its outcome as the service event `memory.sweep`
+  (no request correlation — it runs from the scheduler or a manual script). The writer
+  (`src/pipeline/agent-event-log.js`) is a separate emitter built on the same buffered batch machinery
   (`src/pipeline/log-writer.js`) and the same correlation context as the model-call log, so all events of a turn
   share its `request_id`. It is deliberately independent of the display-channel event callback: journaling works
   with no delivery adapter attached, and — unlike display events — it stores tool arguments and results, because
   the journal is read only by operator tooling. The turn's `request_id` is also written into the `metadata` of
   the saved dialog messages, which lets operator tooling open the full journal of the cycle behind any message.
+  Display formats in the operator log viewer are properties of the record types: the `REQUEST_KIND_DISPLAY` and
+  `EVENT_DISPLAY` dictionaries next to the type taxonomies define the default rendering of each row's content
+  (JSON / RAW / MD, or auto-detection for variable content); the operator can always switch the format manually.
 - **Log retention.** Journal tables are cleaned by age: a background pass right after startup and then once a
   day deletes rows older than the configured thresholds (`config.llmLog.retention`: `llmRequestDays` and
   `agentEventDays` default to 90, `llmUsageDays` defaults to 0 — the narrow cost table is kept forever, as it

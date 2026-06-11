@@ -292,7 +292,22 @@ Incoming user reactions arrive as `message_reaction` updates. The adapter normal
 `mem.message_external_refs`, and calls `recordUserReaction`. A separate user turn of the form "User reacted
 :heart: to the assistant's message: …" appears in the history. If a reaction is removed, the event is also
 saved in history but does not trigger memory recording. If the target assistant message is found and the meaning
-of the reaction is unambiguous, the common memory-extraction pipeline may save a persistent fact.
+of the reaction is unambiguous, the common memory-extraction pipeline may save a durable fact. Such facts are
+recorded with the origin `user_reaction`, which ranks below a direct user statement: a fact inferred from an
+emoji never overwrites something the user said explicitly, and a direct statement can later replace it (the
+rank model is in the spec, `docs/ai-bot-with-memory/06-memory.md`, MEM-5).
+
+## Memory Control in the Dialog
+
+Memory is controlled with plain phrases in the chat; the adapter adds nothing of its own here — the model picks
+the core memory tools described in the spec (`docs/ai-bot-with-memory/06-memory.md`, MEM-7). User-visible
+effects in Telegram:
+
+- "what do you remember about me" — the bot lists the stored facts (`memory_list`);
+- "forget my address" / "delete everything you know about me" — targeted or full deletion
+  (`memory_forget_entity` / `memory_forget_all`, the latter only after an explicit confirmation question);
+- "запомни навсегда: у меня аллергия на арахис" — the bot pins the fact via `memory_pin`: it never expires,
+  survives background cleanup, and changes only when the user explicitly states something new.
 
 ## Dynamic Command Menu
 

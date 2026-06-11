@@ -643,19 +643,28 @@ CREATE TABLE IF NOT EXISTS log.agent_event (
 ```
 
 The `request_kind` field distinguishes the purposes of calls: `main_agent_answer` (the agent's main response),
-`delivery_intent` (choosing the delivery format — text or reaction), `intent_classify`, `fact_extract`,
-`topic_extract`, `event_relevance`, `proactive_message`, `history_compress`, `skill_authoring`, `voice_summary`,
+`delivery_intent` (choosing the delivery format — text or reaction), `intent_classify`, `fact_extract`
+(exactly one extraction call per turn), `answer_summary` (the assistant-reply summary), `topic_extract`,
+`event_relevance`, `proactive_message`, `history_compress`, `skill_authoring`, `voice_summary`,
 `embedding`, `stt`, `tts`, `log_analysis` (an operator-initiated analysis of a logged request). For endpoints with
 a strictly single purpose (embeddings, speech recognition, and synthesis), the kind is derived from the endpoint
 itself. The `chat.completions` endpoint has many purposes, so the calling code must pass the kind explicitly; an
-omission is marked with the special kind `untyped` and serves as a signal of a call-site error.
+omission is marked with the special kind `untyped` and serves as a signal of a call-site error. Next to the kind
+dictionary lives `REQUEST_KIND_DISPLAY` — the default display format of each kind's response content in the log
+viewer (`JSON` for strictly structured chatJSON responses and service metadata, `RAW` for recognized speech,
+`MD` for the log analysis, `null` = auto-detection for variable content such as the main answer).
 
 The `event_type` taxonomy of `log.agent_event` mirrors the turn's event contract: `agent.started`,
 `stage.started`, `tool.started`, `tool.completed`, `mcp.connected`, `mcp.failed`, `assistant.completed`,
-`agent.completed`, `agent.failed`. Unlike the display-channel events delivered through `onEvent`, which
-deliberately omit tool arguments, the journal does store the full arguments and results of tool calls — it is
-read only by the operator tooling. Streaming text deltas are not journaled; the final text arrives with
-`assistant.completed`.
+`agent.completed`, `agent.failed`, plus the memory-write outcomes `memory.written` (the result of saving
+extracted facts — action counters and a compact fact list, written even when extraction found nothing) and
+`memory.sweep` (the result of the duplicate sweep; runs outside a request context, so its correlation fields
+are NULL and the viewer shows it as a service event). The `EVENT_DISPLAY` dictionary next to the taxonomy
+defines the default display format of event data (`tool.*`, `memory.*`, `mcp.*` — JSON;
+`assistant.completed` — auto-detection of the channel-formatted text). Unlike the display-channel events
+delivered through `onEvent`, which deliberately omit tool arguments, the journal does store the full arguments
+and results of tool calls — it is read only by the operator tooling. Streaming text deltas are not journaled;
+the final text arrives with `assistant.completed`.
 
 In both journal tables `created_at` is set by the writing code at the moment the record is built, not by the
 database default at insert time: records are flushed in batches, and a whole batch would otherwise share one

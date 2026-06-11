@@ -245,8 +245,10 @@ the reaction-selection logic.
 
 User reactions to previously delivered messages are saved as separate user turns in the history.
 If a reaction refers to an assistant message and its meaning is obvious from that message, the
-memory extraction loop may save a durable fact. If the reaction is ambiguous or carries no future
-value, it stays as a history event only.
+memory extraction loop may save a durable fact — recorded with `source = 'user_reaction'`, a rank
+below direct user statements, so a reaction-derived fact never overwrites what the user said
+explicitly (see [06-memory.md](06-memory.md), MEM-5). If the reaction is ambiguous or carries no
+future value, it stays as a history event only.
 
 ---
 
