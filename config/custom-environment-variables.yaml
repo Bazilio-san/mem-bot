@@ -65,6 +65,12 @@ globalMemory:
   ragMinRelevance:
     __name: GLOBAL_RAG_MIN_RELEVANCE
     __format: number
+  embeddingRepairEnabled:
+    __name: GLOBAL_RAG_EMBEDDING_REPAIR_ENABLED
+    __format: boolean
+  embeddingRepairIntervalMs:
+    __name: GLOBAL_RAG_EMBEDDING_REPAIR_INTERVAL_MS
+    __format: number
 
 historyCompression:
   enabled:

@@ -24,16 +24,20 @@ started with `npm run server`.
 The combined server starts with `npm run server`. It binds to `config.admin.host` and `config.admin.port`
 (defaults `localhost` and `9019`), prints the listening address, then starts the Telegram channel and reports the
 bot username. Because the channel is started, the process requires `config.telegram.apiKey`; without the token the
-startup aborts, exactly as in standalone Telegram mode. After the channel is up, the server starts the background
-age-based cleanup of the journals in the logs database (`startLogRetention` from
+startup aborts, exactly as in standalone Telegram mode. After the channel is up, the server starts two background
+maintenance loops: the age-based cleanup of the journals in the logs database (`startLogRetention` from
 `src/pipeline/log-retention.js`): one pass immediately and then once a day, with thresholds from
-`config.llmLog.retention`.
+`config.llmLog.retention`; and the recompute of missing knowledge-base embeddings (`startEmbeddingRepair` from
+`src/pipeline/embedding-repair.js`): one pass immediately and then on the
+`config.globalMemory.embeddingRepairIntervalMs` interval, gated by `config.globalMemory.embeddingRepairEnabled`
+and `ragEnabled` (the repair semantics are specified in `docs/ai-bot-with-memory/14-global-memory.md`,
+section [GLOB-4]).
 
 On a stop signal (`SIGINT` or `SIGTERM`) the server shuts down gracefully and in a fixed order so that the shared
-database connection pool is closed exactly once. It first stops the retention timer, then stops accepting HTTP
-requests (`server.close`), then calls `stopTelegram()` to halt the polling and background-worker loops and
-release the delivery-queue listener, and only then closes the database connection pool. A second stop signal
-received while shutdown is already in progress is ignored.
+database connection pool is closed exactly once. It first stops the retention and embedding-repair timers, then
+stops accepting HTTP requests (`server.close`), then calls `stopTelegram()` to halt the polling and
+background-worker loops and release the delivery-queue listener, and only then closes the database connection
+pool. A second stop signal received while shutdown is already in progress is ignored.
 
 ## Backend: Express Server
 
@@ -71,10 +75,23 @@ and the failure is logged on the server.
 | `POST /api/users/:id/chat-message` | send a message on behalf of the user through the full agent pipeline | `handleMessage()` |
 | `GET /api/llm-log/analysis-config` | allowed analysis models and CLI preset names (commands are not exposed) | `analysisConfigPublic()` |
 | `POST /api/llm-log/analyze` | AI analysis of a logged request, streamed as Server-Sent Events | `runAnalysis()` |
+| `GET /api/domains` | agent domains (key and title) — options for the domain select of the knowledge form | `listDomains()` |
+| `GET /api/knowledge` | knowledge-base records with `hasEmbedding` (`?status=` comma list, `deleted`, or `all`; default active+archived) | `listGlobalKnowledge()` |
+| `POST /api/knowledge` | create a knowledge record; the embedding is computed immediately | `addGlobalKnowledge()` |
+| `PUT /api/knowledge/:id` | update a record; a text change resets and recomputes the embedding; restoring from the bin is `status: 'active'` | `updateGlobalKnowledge()` |
+| `DELETE /api/knowledge/:id` | soft delete (`status = 'deleted'`), the record moves to the recycle bin | `deleteGlobalKnowledge()` |
+| `POST /api/knowledge/:id/embed` | manual embedding recompute; 503 when the embedding service is unavailable | `reembedGlobalKnowledge()` |
 
 The `:id` parameter is the user's internal database identifier (the `id` field returned by `GET /api/users`), not
 the external chat identifier. The memory response is grouped into the categories `profile`, `domain`, `dialog`,
 `reminder`, and `secure`; the secure category carries only redacted summaries, never full protected values.
+
+A knowledge-base record in API responses carries `id`, `title`, `content`, `domainKey` (`null` = all domains),
+`tags`, `importance`, `status`, `source`, `hasEmbedding`, `createdAt`, and `updatedAt`. The embedding vector
+itself is never sent to the client — the front-end only needs the `hasEmbedding` flag for the indicator and the
+recompute button. Write requests validate the body (`content` is required, `importance` is a number from 0 to 1,
+`status` is one of `active`/`archived`/`deleted`, an unknown `domainKey` is rejected) and answer 400 with a
+human-readable message on violations.
 
 ## Frontend: Vue 3 + Vite
 
@@ -92,10 +109,11 @@ Project layout:
 |------|------|
 | `web/index.html` | HTML entry point that mounts the app into `#app` |
 | `web/src/main.js` | creates the root Vue application, installs PrimeVue with the Aura preset, and mounts it |
-| `web/src/App.vue` | root component with the section tabs: "Memory" (user list plus selected user's memory) and "LLM Logs" |
+| `web/src/App.vue` | root component with the section tabs: "Память" (user list plus selected user's memory), "Логи LLM", and "База знаний" |
 | `web/src/api.js` | thin `fetch` wrapper over the `/api` endpoints with a readable error contract and the SSE client of the analysis stream |
 | `web/src/styles.css` | base layout styles and the section tabs |
 | `web/src/components/llm-log/` | the LLM log viewer page (components listed in the section below) |
+| `web/src/components/knowledge/` | the knowledge-base page: the table (`KnowledgePage.vue`) and the record form dialog (`KnowledgeDialog.vue`) |
 | `web/vite.config.js` | Vite configuration: the Vue plugin, the dev proxy, and the build output |
 | `web/package.json` | front-end dependencies (`vue`, `primevue`, `@primeuix/themes`, `primeicons`, `marked`, `dompurify`) and dev tooling (`vite`, `@vitejs/plugin-vue`) |
 
@@ -169,6 +187,37 @@ preset. Because this engine executes a command on the server, it is accepted **o
 `config.admin.host` is `localhost`** — otherwise the server answers 403 and the front-end shows the engine as
 unavailable. In both engines the result streams into the dialog as Server-Sent Events and renders as Markdown.
 
+## Knowledge Base Tab
+
+The "База знаний" tab is a full CRUD interface over the shared knowledge base (`mem.global_knowledge` — the
+business rules of the layer live in `docs/ai-bot-with-memory/14-global-memory.md`). The page is full-width, with
+a toolbar above the table: the "Добавить запись" button, the record counter, and a clickable "⚠ без эмбеддинга:
+N" indicator that toggles a filter showing only records without a vector.
+
+**Table.** A PrimeVue `DataTable` (`size="small"`, `removable-sort`, `striped-rows`, `filter-display="row"`, a
+paginator from 50 rows). The base is small, so the whole list — including the recycle bin — is loaded at once
+with `GET /api/knowledge?status=all`, and sorting, filtering, and pagination run on the client. Columns: the
+embedding badge ("✓" or "⚠ нет" with a recompute button; select filter all/есть/нет), title and content (text
+contains-filters; the content cell shows the first ~160 characters, the full text lives in the form dialog),
+domain (multiselect over values present in the data; `null` is rendered as "все домены"), tags (chips;
+multiselect with a custom array-intersection filter), importance, status (multiselect; **defaults to
+active+archived**, so deleted records are hidden until the operator explicitly selects `deleted` — that selection
+is the recycle bin), source (text filter), updated-at (default sort, descending), and the actions column
+(edit, delete). Deleting asks for confirmation with the native `confirm()` and performs the soft delete; the row
+stays in memory with `status = 'deleted'` and disappears from the default view by the status filter. Restoring a
+record is done in the form dialog by switching the status back to `active`.
+
+**Record form.** Creating and editing share `KnowledgeDialog.vue` — a custom dialog (teleported to `body`,
+overlay, ESC to close) that is **resizable from all four sides and corners** by mouse, following the same
+eight-handle pattern as the content dialog of the log viewer; the size persists in `localStorage` under
+`knowledge.dialog.size` (minimum 520×360). The content textarea stretches with the dialog — the main reason it is
+resizable. Fields: title, content (required), domain (select fed by `GET /api/domains` plus "все домены"), tags
+(chips input), importance (number 0–1), source, status. The footer shows the embedding state — "будет пересчитан
+после сохранения" when the text changed, "актуален" when it did not — and the save/cancel buttons. After saving,
+the server answers with the fresh record: when the embedding service is up the row immediately shows "✓"; when
+it is down the row shows "⚠ нет" with the manual recompute button, and the background repair pass fills the
+vector in later.
+
 ## Configuration
 
 | Path | Environment variable | Default | Meaning |
@@ -182,7 +231,9 @@ unavailable. In both engines the result streams into the dialog as Server-Sent E
 
 The journals themselves (the logs database connection, buffer sizes, payload truncation, and retention
 thresholds) are configured under `config.db.postgres.dbs.logs` and `config.llmLog`, which belong to the bot core
-and are described in the specification ([OPS-5]).
+and are described in the specification ([OPS-5]). The knowledge-base layer and the background embedding repair
+(`config.globalMemory.*`, including `embeddingRepairEnabled` and `embeddingRepairIntervalMs`) also belong to the
+core and are specified in `docs/ai-bot-with-memory/14-global-memory.md`, section [GLOB-9].
 
 ## Run Workflows
 

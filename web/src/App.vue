@@ -12,6 +12,7 @@ import Checkbox from 'primevue/checkbox';
 import { FilterMatchMode } from '@primevue/core/api';
 import { fetchUsers, fetchUserMemory, deleteMemoryItem, deleteUser, fetchAuthMe, logoutAdmin } from './api.js';
 import LlmLogPage from './components/llm-log/LlmLogPage.vue';
+import KnowledgePage from './components/knowledge/KnowledgePage.vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
 
 // Гейт авторизации: пока статус не получен — пустой экран, без сессии — экран входа через Telegram.
@@ -50,11 +51,13 @@ const onAuthRequired = () => {
   authState.value = 'login';
 };
 
-// Активный раздел админки: «Память» (исходная страница) или «Логи LLM» (просмотрщик журналов).
+// Активный раздел админки: «Память» (исходная страница), «Логи LLM» (просмотрщик журналов)
+// или «База знаний» (CRUD глобальной RAG-базы).
 const activeTab = ref('memory');
 const TABS = [
   { key: 'memory', title: 'Память' },
   { key: 'llm-log', title: 'Логи LLM' },
+  { key: 'knowledge', title: 'База знаний' },
 ];
 
 const users = ref([]);
@@ -277,6 +280,10 @@ onBeforeUnmount(() => {
 
     <div v-if="activeTab === 'llm-log'" class="page-full">
       <LlmLogPage />
+    </div>
+
+    <div v-if="activeTab === 'knowledge'" class="page-full">
+      <KnowledgePage />
     </div>
 
     <aside v-if="activeTab === 'memory'" class="sidebar">

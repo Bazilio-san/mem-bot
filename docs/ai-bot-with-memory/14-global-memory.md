@@ -67,6 +67,33 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
                                                               WHERE embedding IS NOT NULL;
 ```
 
+The knowledge base additionally carries a **text-to-vector integrity trigger** (migration
+`002_global_knowledge_embedding_trigger.sql`). Any `UPDATE` that changes `title` or `content` without supplying a
+new vector in the same statement resets `embedding` to `NULL`: a stale vector no longer describes the content and
+must not participate in semantic search. This guarantee holds **by construction** — even when a record is edited
+bypassing the application (psql, a script, third-party code) — while the record stays discoverable through the
+full-text fallback until the vector is recomputed. When the application writes the text and a fresh vector in one
+`UPDATE`, no reset happens. The trigger also maintains `updated_at` on every update.
+
+```sql
+CREATE OR REPLACE FUNCTION mem.global_knowledge_reset_embedding()
+RETURNS trigger AS $$
+BEGIN
+    IF (NEW.title IS DISTINCT FROM OLD.title OR NEW.content IS DISTINCT FROM OLD.content)
+       AND NEW.embedding IS NOT DISTINCT FROM OLD.embedding THEN
+        NEW.embedding := NULL;
+    END IF;
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_global_knowledge_reset_embedding
+    BEFORE UPDATE ON mem.global_knowledge
+    FOR EACH ROW
+    EXECUTE FUNCTION mem.global_knowledge_reset_embedding();
+```
+
 With these two tables the total number of tables in the schema is nineteen (including the domain directory
 `mem.agent_domains` and the message external references table `mem.message_external_refs`, see
 [05-data-schema.md](05-data-schema.md)). The `is_admin` column intentionally lives in `mem.users` rather than in a
@@ -105,6 +132,13 @@ export async function setGlobalFactEnabled(id, enabled) { /* ... */ }
 export async function searchGlobalKnowledge({ domainKey, query: userQuery, limit }) { /* ... */ }
 export async function addGlobalKnowledge({ title, content, domainKey, tags, importance, source, createdBy }) { /* ... */ }
 export async function deleteGlobalKnowledge(id) { /* soft delete: status = 'deleted' */ }
+
+// --- Knowledge base CRUD for management interfaces ---
+// The embedding vector never leaves the database: clients only see the hasEmbedding flag.
+export async function listGlobalKnowledge({ statuses }) { /* full records with hasEmbedding, default active+archived */ }
+export async function getGlobalKnowledgeById(id) { /* one record in the same shape, or null */ }
+export async function updateGlobalKnowledge(id, fields) { /* update + immediate embedding recompute */ }
+export async function reembedGlobalKnowledge(id, { force }) { /* fill a missing vector; force recomputes always */ }
 ```
 
 Both `getActiveGlobalFacts` and `searchGlobalKnowledge` always respect the domain: they return records for the
@@ -114,6 +148,22 @@ similarity via embeddings (when available), then full-text matching as a complem
 selection of the top results within the limit. Adding a knowledge entry computes the text embedding via the same
 `embed` function from `src/llm.js`; if embeddings are unavailable the record is still created and remains
 discoverable through full-text search.
+
+**Embedding lifecycle on save.** Saving a record runs in two steps. First, one `UPDATE` writes the text and
+attributes; if the text changed, the database trigger (see `GLOB-3`) resets `embedding` to `NULL`, so from this
+moment a text-vector mismatch is impossible by construction. Second, `updateGlobalKnowledge` immediately computes
+`embed(title + '. ' + content)` and writes the vector with a separate `UPDATE` that does not touch the text, so the
+trigger leaves it alone. When the embedding service is unavailable, the second step quietly ends, the record stays
+with `embedding = NULL` and `hasEmbedding: false`, and the vector is filled in later — by `reembedGlobalKnowledge`
+on demand or by the background repair pass.
+
+**Background embedding repair.** The module `src/pipeline/embedding-repair.js` exposes `runEmbeddingRepairOnce()`
+plus `startEmbeddingRepair()`/`stopEmbeddingRepair()`. A pass selects active knowledge records with
+`embedding IS NULL` (bounded batch, oldest first) and recomputes each vector; after the first failed computation
+the pass stops early — the service is most likely down and the next pass will retry. The long-running server
+process starts the repair on an interval (`config.globalMemory.embeddingRepairIntervalMs`, gated by
+`config.globalMemory.embeddingRepairEnabled` and `ragEnabled`); this covers both embedding-service outages at save
+time and edits made bypassing the application, where nobody triggers a recompute by hand.
 
 ---
 
@@ -257,6 +307,8 @@ globalMemory:
   ragEnabled: true        # shared knowledge base (RAG) and its tools
   ragLimit: 5
   ragMinRelevance: 0.3    # threshold for cutting off weak knowledge-base matches
+  embeddingRepairEnabled: true      # background recompute of missing knowledge-base embeddings
+  embeddingRepairIntervalMs: 600000 # repair pass interval in milliseconds (minimum 60000)
 ```
 
 | Config path | Purpose | Default |
@@ -266,6 +318,8 @@ globalMemory:
 | `globalMemory.ragEnabled` | shared knowledge base (RAG) and its tools | `true` |
 | `globalMemory.ragLimit` | how many knowledge-base fragments to mix in by relevance | `5` |
 | `globalMemory.ragMinRelevance` | relevance threshold: fragments below it are excluded from context | `0.3` |
+| `globalMemory.embeddingRepairEnabled` | background recompute of missing knowledge-base embeddings | `true` |
+| `globalMemory.embeddingRepairIntervalMs` | repair pass interval in milliseconds (minimum 60000) | `600000` |
 
 For the interactive chat (see [03-quickstart.md](03-quickstart.md)) there is a set of commands available to admins
 only. Fact commands (when `config.globalMemory.factsEnabled` is set): `/fact-add <text>` adds a fact,
@@ -314,6 +368,15 @@ code on failure. Fact tests and knowledge-base tests are enabled independently, 
    performs the same actions successfully.
 5. **Privacy.** User secrets do not end up in global memory: sensitive data remains in personal protected memory
    (see [07-secure-privacy.md](07-secure-privacy.md)) and is not transferred to the shared layer.
+6. **Text-to-vector integrity trigger.** The trigger is installed; an `UPDATE` of one vector without the text keeps
+   the vector; an `UPDATE` of the text without a vector resets the vector to `NULL` and bumps `updated_at`; an
+   `UPDATE` writing the text and a fresh vector in one statement causes no false reset.
+7. **Knowledge-base CRUD and embedding lifecycle** (when `config.globalMemory.ragEnabled` is set).
+   `listGlobalKnowledge` returns records with the `hasEmbedding` flag; `updateGlobalKnowledge` applies field
+   changes and recomputes the embedding after a text change; an edit made bypassing the application is visible as
+   `hasEmbedding: false`; `reembedGlobalKnowledge` restores the vector; a `runEmbeddingRepairOnce` pass fills in
+   missing vectors; soft deletion removes the record from the default selection but keeps it reachable by the
+   `deleted` status, and restoring is the same update with status `active`.
 
 ---
 

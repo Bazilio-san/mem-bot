@@ -16,6 +16,7 @@ import { createAuthApi, requireAdminSession, isAdminAuthRequired } from './admin
 import { createNotesApi } from './notes-api.js';
 import { mountNotesMcp } from '../notes-mcp/server.js';
 import { startLogRetention, stopLogRetention } from '../pipeline/log-retention.js';
+import { startEmbeddingRepair, stopEmbeddingRepair } from '../pipeline/embedding-repair.js';
 // Importing bot.js registers the Telegram channel profile and checks that the token is present. The bot
 // itself is not started yet: the auto-start inside bot.js only fires on a direct call (npm run telegram),
 // while here we manage its lifecycle explicitly via startTelegram/stopTelegram.
@@ -112,6 +113,10 @@ async function main() {
   // Age-based cleanup of the journals in the logs DB: a pass now and then once a day (config llmLog.retention).
   startLogRetention();
 
+  // Background recompute of missing knowledge base embeddings: a pass now and then on an interval
+  // (config globalMemory.embeddingRepair*). Covers text edits made bypassing the application.
+  startEmbeddingRepair();
+
   // Graceful shutdown on a signal: stop accepting new HTTP requests, shut down the Telegram part, and only
   // then close the shared DB connection pool. process.exit is called after releasing resources.
   let shuttingDown = false;
@@ -122,6 +127,7 @@ async function main() {
     shuttingDown = true;
     console.log(`\nReceived signal ${signal}. Shutting down the combined server…`);
     stopLogRetention();
+    stopEmbeddingRepair();
     await new Promise((resolve) => server.close(resolve)); // wait for the HTTP server to close
     await stopTelegram();
     try {

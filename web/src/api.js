@@ -73,6 +73,48 @@ export function fetchUserProactivity(userId) {
   return request(`/users/${encodeURIComponent(userId)}/proactivity`);
 }
 
+// --- Вкладка «База знаний» (глобальный RAG) -----------------------------------
+
+// Список доменов агента — опции выпадающего списка «Домен» в форме записи.
+export function fetchDomains() {
+  return request('/domains');
+}
+
+// Записи базы знаний. status: undefined — active и archived, 'all' — все, либо список через запятую
+// (например 'deleted' — корзина). Вектор эмбеддинга не передаётся, только флаг hasEmbedding.
+export function fetchKnowledge(status) {
+  return request(`/knowledge${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+// Создание записи. Сервер сразу считает эмбеддинг; в ответе — созданная запись с hasEmbedding.
+export function createKnowledge(record) {
+  return request('/knowledge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
+// Обновление записи. При изменении текста сервер сбрасывает и пересчитывает эмбеддинг;
+// восстановление из корзины — тот же запрос со status: 'active'.
+export function updateKnowledge(id, record) {
+  return request(`/knowledge/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
+// Мягкое удаление записи (status = 'deleted', запись попадает в корзину).
+export function deleteKnowledge(id) {
+  return request(`/knowledge/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// Ручной пересчёт эмбеддинга записи. В ответе — обновлённая запись.
+export function reembedKnowledge(id) {
+  return request(`/knowledge/${encodeURIComponent(id)}/embed`, { method: 'POST' });
+}
+
 // --- Страница «Логи LLM» -----------------------------------------------------
 
 // Подсказки поиска пользователя: по имени, внешнему (Telegram) id или точному внутреннему UUID.

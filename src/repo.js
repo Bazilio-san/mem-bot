@@ -39,6 +39,12 @@ export async function getDomainId(domainKey) {
   return id;
 }
 
+// List all agent domains (key and title) — options for domain selects in the admin panel.
+export async function listDomains() {
+  const { rows } = await query('SELECT domain_key, title FROM mem.agent_domains ORDER BY domain_key');
+  return rows.map((r) => ({ domainKey: r.domain_key, title: r.title }));
+}
+
 // Find or create the user's active conversation in the given domain.
 export async function ensureConversation(userId, domainKey = 'general') {
   const domainId = await getDomainId(domainKey);

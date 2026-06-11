@@ -149,10 +149,104 @@ export async function addGlobalKnowledge({
 export async function deleteGlobalKnowledge(id) {
   const { rowCount } = await query(
     `UPDATE mem.global_knowledge SET status = 'deleted', updated_at = now()
-     WHERE id = $1 AND status = 'active'`,
+     WHERE id = $1 AND status <> 'deleted'`,
     [id],
   );
   return rowCount > 0;
+}
+
+// ------------------- Admin CRUD over the knowledge base ---------------------
+// Functions for the admin panel (REST API /api/knowledge*). The embedding vector itself never leaves the
+// database — clients only see the hasEmbedding flag, which the table uses to show the "no vector" badge.
+
+// Shared SELECT: all client-visible fields plus the domain key resolved through agent_domains.
+const KNOWLEDGE_SELECT = `
+  SELECT k.id, k.title, k.content, d.domain_key, k.tags, k.importance, k.status, k.source,
+         (k.embedding IS NOT NULL) AS has_embedding, k.created_at, k.updated_at
+  FROM mem.global_knowledge k
+  LEFT JOIN mem.agent_domains d ON d.id = k.domain_id`;
+
+function mapKnowledgeRow(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    content: r.content,
+    domainKey: r.domain_key || null,
+    tags: r.tags || [],
+    importance: Number(r.importance),
+    status: r.status,
+    source: r.source,
+    hasEmbedding: r.has_embedding,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+// List knowledge base records for the admin table. The base is small (tens to hundreds of records), so the
+// whole filtered set is returned at once and sorting/filtering/pagination happen on the client.
+export async function listGlobalKnowledge({ statuses = ['active', 'archived'] } = {}) {
+  const { rows } = await query(
+    `${KNOWLEDGE_SELECT}
+     WHERE k.status = ANY($1::mem.memory_status[])
+     ORDER BY k.updated_at DESC`,
+    [statuses],
+  );
+  return rows.map(mapKnowledgeRow);
+}
+
+// One record by id (admin shape with hasEmbedding), or null if it does not exist.
+export async function getGlobalKnowledgeById(id) {
+  const { rows } = await query(`${KNOWLEDGE_SELECT} WHERE k.id = $1`, [id]);
+  return rows.length ? mapKnowledgeRow(rows[0]) : null;
+}
+
+// Update a record from the admin form. The UPDATE deliberately does not touch the embedding column: if the
+// text changed, the database trigger resets the vector to NULL, after which we immediately try to compute a
+// fresh one (second UPDATE writes only the vector, so the trigger leaves it alone). When the embedding
+// service is unavailable the record simply stays with hasEmbedding = false and is picked up later by the
+// manual "recompute" button or the background repair pass. Returns the updated record or null if not found.
+export async function updateGlobalKnowledge(
+  id,
+  { title = null, content, domainKey = null, tags = [], importance = 0.5, source = null, status = 'active' },
+) {
+  const domainId = domainKey ? await getDomainId(domainKey) : null;
+  if (domainKey && !domainId) {
+    throw new Error(`Неизвестный домен: ${domainKey}`);
+  }
+  const { rowCount } = await query(
+    `UPDATE mem.global_knowledge
+     SET title = $2, content = $3, domain_id = $4, tags = $5, importance = $6, source = $7, status = $8
+     WHERE id = $1`,
+    [id, title, content, domainId, tags, importance, source, status],
+  );
+  if (!rowCount) {
+    return null;
+  }
+  await reembedGlobalKnowledge(id);
+  return getGlobalKnowledgeById(id);
+}
+
+// Recompute the embedding from the current title/content. By default only fills a missing vector (the
+// normal save path); force = true recomputes even when a vector is present (manual admin button). The
+// UPDATE writes only the embedding, so the reset trigger does not interfere. Returns false when the record
+// does not exist or the embedding service returned nothing.
+export async function reembedGlobalKnowledge(id, { force = false } = {}) {
+  const { rows } = await query(
+    `SELECT title, content, (embedding IS NOT NULL) AS has_embedding FROM mem.global_knowledge WHERE id = $1`,
+    [id],
+  );
+  if (!rows.length) {
+    return false;
+  }
+  if (rows[0].has_embedding && !force) {
+    return true;
+  }
+  const vec = await embed([rows[0].title, rows[0].content].filter(Boolean).join('. '));
+  if (!vec) {
+    return false;
+  }
+  await query('UPDATE mem.global_knowledge SET embedding = $2 WHERE id = $1', [id, vectorToSql(vec)]);
+  return true;
 }
 
 // GLOBAL_KNOWLEDGE reference block for the prompt. Returns an empty string if RAG is disabled by a flag or

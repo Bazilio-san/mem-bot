@@ -8,6 +8,68 @@ import { listUsers, getUserMemory, getProactivity, deleteItem, deleteUser } from
 import { searchUsers, getTimeline, getCycle, getSingleRequest, getUserById } from './llm-log-data.js';
 import { analysisConfigPublic, runAnalysis } from './log-analysis.js';
 import { handleMessage } from '../agent.js';
+import { listDomains } from '../repo.js';
+import {
+  addGlobalKnowledge,
+  deleteGlobalKnowledge,
+  getGlobalKnowledgeById,
+  listGlobalKnowledge,
+  reembedGlobalKnowledge,
+  updateGlobalKnowledge,
+} from '../pipeline/global-memory.js';
+
+// Statuses of mem.global_knowledge available to the admin panel. pending_confirmation/rejected also exist
+// in the enum but are not used by the knowledge base UI, so they are accepted only in the list filter.
+const KNOWLEDGE_LIST_STATUSES = ['active', 'archived', 'deleted', 'pending_confirmation', 'rejected'];
+const KNOWLEDGE_WRITE_STATUSES = ['active', 'archived', 'deleted'];
+
+// Parse the ?status= parameter of the knowledge list: a comma-separated list of statuses or 'all'.
+// Default (no parameter) — active and archived records, i.e. everything except the recycle bin.
+function parseKnowledgeStatuses(raw) {
+  if (!raw) {
+    return ['active', 'archived'];
+  }
+  if (raw === 'all') {
+    return KNOWLEDGE_LIST_STATUSES;
+  }
+  const statuses = String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!statuses.length || statuses.some((s) => !KNOWLEDGE_LIST_STATUSES.includes(s))) {
+    return null;
+  }
+  return statuses;
+}
+
+// Validate and normalize the knowledge record body from the admin form. Returns { error } with a
+// human-readable message or { value } with fields ready for the data layer.
+function parseKnowledgeBody(body) {
+  const content = String(body?.content || '').trim();
+  if (!content) {
+    return { error: 'Поле «содержимое» обязательно.' };
+  }
+  const importance = body?.importance == null || body.importance === '' ? 0.5 : Number(body.importance);
+  if (!Number.isFinite(importance) || importance < 0 || importance > 1) {
+    return { error: 'Важность должна быть числом от 0 до 1.' };
+  }
+  const status = body?.status || 'active';
+  if (!KNOWLEDGE_WRITE_STATUSES.includes(status)) {
+    return { error: `Недопустимый статус: ${status}.` };
+  }
+  const tags = Array.isArray(body?.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean) : [];
+  return {
+    value: {
+      title: String(body?.title || '').trim() || null,
+      content,
+      domainKey: String(body?.domainKey || '').trim() || null,
+      tags,
+      importance,
+      source: String(body?.source || '').trim() || null,
+      status,
+    },
+  };
+}
 
 // A small wrapper: catches an async handler's exception and returns it as a JSON 500 error.
 // Without it, a rejected promise in an express handler would not turn into a response and the request would hang.
@@ -143,6 +205,86 @@ export function createAdminApi() {
       }
       const result = await handleMessage({ externalId: user.external_id, userMessage: text, channel: 'admin' });
       res.json({ answer: result.answer, requestId: result.requestId });
+    }),
+  );
+
+  // --- Knowledge base (global RAG) -----------------------------------------
+
+  // List of agent domains — options for the domain select in the knowledge record form.
+  router.get(
+    '/domains',
+    wrap(async (_req, res) => {
+      res.json(await listDomains());
+    }),
+  );
+
+  // Knowledge base records. By default active and archived; ?status=deleted shows the recycle bin,
+  // ?status=all — everything (the embedding vector itself is never sent to the client, only hasEmbedding).
+  router.get(
+    '/knowledge',
+    wrap(async (req, res) => {
+      const statuses = parseKnowledgeStatuses(req.query.status);
+      if (!statuses) {
+        return res.status(400).json({ error: 'Недопустимое значение параметра status.' });
+      }
+      res.json(await listGlobalKnowledge({ statuses }));
+    }),
+  );
+
+  // Create a record. The embedding is computed right away inside addGlobalKnowledge; if the embedding
+  // service is unavailable, the record is created without a vector and the client sees hasEmbedding: false.
+  router.post(
+    '/knowledge',
+    wrap(async (req, res) => {
+      const parsed = parseKnowledgeBody(req.body);
+      if (parsed.error) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      const created = await addGlobalKnowledge(parsed.value);
+      res.status(201).json(await getGlobalKnowledgeById(created.id));
+    }),
+  );
+
+  // Update a record. If the text changed, the database trigger resets the embedding and the data layer
+  // immediately computes a fresh one; restoring from the recycle bin is the same PUT with status: 'active'.
+  router.put(
+    '/knowledge/:id',
+    wrap(async (req, res) => {
+      const parsed = parseKnowledgeBody(req.body);
+      if (parsed.error) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      const updated = await updateGlobalKnowledge(req.params.id, parsed.value);
+      if (!updated) {
+        return res.status(404).json({ error: 'Запись не найдена.' });
+      }
+      res.json(updated);
+    }),
+  );
+
+  // Soft delete (status = 'deleted'), like everywhere else in the system; the record goes to the recycle bin.
+  router.delete(
+    '/knowledge/:id',
+    wrap(async (req, res) => {
+      const ok = await deleteGlobalKnowledge(req.params.id);
+      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Запись не найдена.' });
+    }),
+  );
+
+  // Manual embedding recompute (the "⟳" button next to records without a vector). force — so the button
+  // also works for records whose vector exists but is suspected stale.
+  router.post(
+    '/knowledge/:id/embed',
+    wrap(async (req, res) => {
+      const record = await getGlobalKnowledgeById(req.params.id);
+      if (!record) {
+        return res.status(404).json({ error: 'Запись не найдена.' });
+      }
+      const ok = await reembedGlobalKnowledge(req.params.id, { force: true });
+      if (!ok) {
+        return res.status(503).json({ error: 'Сервис эмбеддингов недоступен, попробуйте позже.' });
+      }
+      res.json(await getGlobalKnowledgeById(req.params.id));
     }),
   );
 

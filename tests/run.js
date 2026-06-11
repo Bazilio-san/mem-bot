@@ -31,7 +31,12 @@ import {
   searchGlobalKnowledge,
   addGlobalKnowledge,
   deleteGlobalKnowledge,
+  listGlobalKnowledge,
+  getGlobalKnowledgeById,
+  updateGlobalKnowledge,
+  reembedGlobalKnowledge,
 } from '../src/pipeline/global-memory.js';
+import { runEmbeddingRepairOnce } from '../src/pipeline/embedding-repair.js';
 import { buildTemporalContext } from '../src/utils/temporal.js';
 import { getTopicContext, upsertTopicMentions } from '../src/pipeline/topics.js';
 import { shouldFire, fire, checkProactiveTriggers } from '../src/pipeline/proactive.js';
@@ -2016,7 +2021,9 @@ async function layerGlobalMemory() {
       'Факт от не-администратора (не должен сохраниться)',
       'Факт от администратора (должен сохраниться)')`);
   await query(`DELETE FROM mem.global_knowledge WHERE content LIKE 'Возврат товара возможен%'
-      OR content LIKE 'Правило доставки номер %'`);
+      OR content LIKE 'Правило доставки номер %'
+      OR content LIKE 'Триггерная запись для проверки сброса эмбеддинга%'
+      OR content LIKE 'Запись для проверки админ-CRUD%'`);
 
   // Сделать пользователя администратором (ручная пометка is_admin).
   async function freshAdmin(extId) {
@@ -2137,6 +2144,148 @@ async function layerGlobalMemory() {
     check(`8.3. Лимит фрагментов соблюдён (${many.length} ≤ ${GM.ragLimit})`, many.length <= GM.ragLimit);
   } else {
     console.log('   (8.3 пропущен: GLOBAL_RAG_ENABLED выключен.)');
+  }
+
+  // 8.5. Триггер целостности «текст ↔ эмбеддинг» (миграция 002): правка текста в обход приложения
+  // обнуляет вектор, запись текста и вектора одним UPDATE — нет. Проверяется чистым SQL без сервиса
+  // эмбеддингов: вектор подставляется вручную.
+  {
+    const { rows: trg } = await query(`SELECT 1 FROM pg_trigger WHERE tgname = 'trg_global_knowledge_reset_embedding'`);
+    check('8.5. Триггер trg_global_knowledge_reset_embedding установлен', trg.length === 1);
+
+    const { rows: ins } = await query(
+      `INSERT INTO mem.global_knowledge (content) VALUES ('Триггерная запись для проверки сброса эмбеддинга, версия 1.')
+       RETURNING id`,
+    );
+    const [{ id }] = ins;
+    const fakeVec = vectorToSql(Array.from({ length: 1536 }, () => 0.001));
+
+    // UPDATE только вектора (текст не меняется) — триггер вектор не трогает.
+    await query('UPDATE mem.global_knowledge SET embedding = $2 WHERE id = $1', [id, fakeVec]);
+    const afterVec = await query(
+      'SELECT embedding IS NOT NULL AS has, updated_at FROM mem.global_knowledge WHERE id=$1',
+      [id],
+    );
+    check('8.5. UPDATE одного вектора без текста вектор сохраняет', afterVec.rows[0].has);
+
+    // UPDATE текста без вектора — триггер обнуляет embedding и обновляет updated_at.
+    await query(
+      `UPDATE mem.global_knowledge SET content = 'Триггерная запись для проверки сброса эмбеддинга, версия 2.' WHERE id = $1`,
+      [id],
+    );
+    const afterText = await query(
+      'SELECT embedding IS NULL AS empty, updated_at FROM mem.global_knowledge WHERE id=$1',
+      [id],
+    );
+    check('8.5. Правка текста через SQL сбрасывает эмбеддинг', afterText.rows[0].empty);
+    check(
+      '8.5. Триггер поддерживает updated_at при правке',
+      new Date(afterText.rows[0].updated_at) > new Date(afterVec.rows[0].updated_at),
+    );
+
+    // UPDATE текста и свежего вектора одним оператором — ложного сброса нет.
+    await query(
+      `UPDATE mem.global_knowledge SET content = 'Триггерная запись для проверки сброса эмбеддинга, версия 3.', embedding = $2
+       WHERE id = $1`,
+      [id, fakeVec],
+    );
+    const afterBoth = await query('SELECT embedding IS NOT NULL AS has FROM mem.global_knowledge WHERE id=$1', [id]);
+    check('8.5. Запись текста и вектора одним UPDATE не сбрасывает вектор', afterBoth.rows[0].has);
+  }
+
+  // 8.6. Админ-CRUD базы знаний: список с hasEmbedding, обновление с пересчётом вектора, ручной пересчёт,
+  // фоновый ремонт и корзина. Шаги, требующие сервиса эмбеддингов, проверяются только при его доступности.
+  if (GM.ragEnabled) {
+    const embedAvailable = !!(await embed('проверка доступности сервиса эмбеддингов'));
+    const admin = await freshAdmin('tgmadmin');
+    const created = await addGlobalKnowledge({
+      title: 'Админ-CRUD',
+      content: 'Запись для проверки админ-CRUD базы знаний, исходный текст.',
+      tags: ['тест', 'crud'],
+      importance: 0.7,
+      source: 'тест',
+      createdBy: admin.id,
+    });
+
+    const listed = (await listGlobalKnowledge()).find((r) => r.id === created.id);
+    check(
+      '8.6. listGlobalKnowledge возвращает запись с hasEmbedding и доменом',
+      !!listed && typeof listed.hasEmbedding === 'boolean' && listed.domainKey === null && listed.tags.includes('crud'),
+    );
+    if (embedAvailable) {
+      check('8.6. Эмбеддинг рассчитан при создании', listed.hasEmbedding);
+    }
+
+    // Обновление с изменением текста: триггер сбрасывает вектор, слой данных сразу пересчитывает.
+    const updated = await updateGlobalKnowledge(created.id, {
+      title: 'Админ-CRUD (обновлено)',
+      content: 'Запись для проверки админ-CRUD базы знаний, обновлённый текст.',
+      tags: ['тест'],
+      importance: 0.9,
+      source: 'тест-2',
+      status: 'active',
+    });
+    check(
+      '8.6. updateGlobalKnowledge обновляет поля записи',
+      updated &&
+        updated.title === 'Админ-CRUD (обновлено)' &&
+        updated.importance === 0.9 &&
+        updated.source === 'тест-2',
+    );
+    if (embedAvailable) {
+      check('8.6. Эмбеддинг пересчитан после обновления текста', updated.hasEmbedding);
+    }
+
+    // Ручной пересчёт: ломаем вектор правкой текста через SQL (триггер обнуляет), затем reembed.
+    await query(
+      `UPDATE mem.global_knowledge SET content = 'Запись для проверки админ-CRUD базы знаний, правка мимо приложения.'
+       WHERE id = $1`,
+      [created.id],
+    );
+    const broken = await getGlobalKnowledgeById(created.id);
+    check('8.6. Правка мимо приложения видна как hasEmbedding = false', broken && !broken.hasEmbedding);
+    if (embedAvailable) {
+      const ok = await reembedGlobalKnowledge(created.id, { force: true });
+      const repaired = await getGlobalKnowledgeById(created.id);
+      check('8.6. Ручной пересчёт восстанавливает эмбеддинг', ok && repaired.hasEmbedding);
+
+      // Фоновый ремонт: снова обнуляем вектор и даём проходу runEmbeddingRepairOnce добить запись.
+      await query(
+        `UPDATE mem.global_knowledge SET content = 'Запись для проверки админ-CRUD базы знаний, ещё одна правка.'
+         WHERE id = $1`,
+        [created.id],
+      );
+      const pass = await runEmbeddingRepairOnce();
+      const afterRepair = await getGlobalKnowledgeById(created.id);
+      check(
+        `8.6. Фоновый проход пересчитывает недостающие эмбеддинги (${pass.repaired} из ${pass.pending})`,
+        pass.repaired >= 1 && afterRepair.hasEmbedding,
+      );
+    } else {
+      console.log('   (8.6: сервис эмбеддингов недоступен — проверки пересчёта пропущены.)');
+    }
+
+    // Корзина: мягкое удаление убирает запись из выборки по умолчанию, но она видна по статусу deleted.
+    const okDel = await deleteGlobalKnowledge(created.id);
+    const defaults = await listGlobalKnowledge();
+    const trash = await listGlobalKnowledge({ statuses: ['deleted'] });
+    check(
+      '8.6. Мягкое удаление: записи нет в выборке по умолчанию, но она есть в корзине',
+      okDel && !defaults.some((r) => r.id === created.id) && trash.some((r) => r.id === created.id),
+    );
+
+    // Восстановление из корзины — тот же update со status = 'active'.
+    const restored = await updateGlobalKnowledge(created.id, {
+      title: broken.title,
+      content: broken.content,
+      tags: broken.tags,
+      importance: broken.importance,
+      source: broken.source,
+      status: 'active',
+    });
+    check('8.6. Восстановление из корзины через update со status = active', restored?.status === 'active');
+  } else {
+    console.log('   (8.6 пропущен: GLOBAL_RAG_ENABLED выключен.)');
   }
 
   // 8.4. Права администратора: запись закрыта для не-администратора и открыта для администратора.
