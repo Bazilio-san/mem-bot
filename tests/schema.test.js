@@ -1,15 +1,11 @@
-// Проверка слоя схем доменной памяти: мета-валидация определения, валидация data и канонизация entity_key
-// при записи факта, интеграция в контур записи и строгий второй проход извлечения по схеме сущности.
+// Проверка слоя схем доменной памяти: мета-валидация определения, валидация data и канонизация
+// entity_key. Схемы используются инструментами skill authoring (schema-edit/schema-generate);
+// в конвейер записи фактов (mem.user_facts) они больше не входят.
 // Источник схемы — реестр skills (skills/<name>/domain-schema.json). Запуск: npm run test:schema.
-// Требует доступной БД; разделы с LLM пропускаются при SCHEMA_SKIP_LLM=1.
-import { query, closePool } from '../src/db.js';
-import { ensureUser } from '../src/repo.js';
+import { closePool } from '../src/db.js';
 import { validateDefinition } from '../src/schema/meta.js';
 import { getEntitySpec, loadDomainDefinition } from '../src/schema/registry.js';
 import { validateAndCanonicalize, slugify } from '../src/schema/validate.js';
-import { processCandidate } from '../src/pipeline/merge.js';
-import { extractCandidates } from '../src/pipeline/extract.js';
-import { buildDedupeIdentity } from '../src/pipeline/memory-dedupe.js';
 
 let passed = 0;
 let failed = 0;
@@ -136,10 +132,6 @@ async function layerValidate() {
     syn.candidate.entity_key === 'departure',
     syn.candidate.entity_key,
   );
-  check(
-    '3.4b. Канонический ключ даёт тот же dedupe_key для синонима',
-    buildDedupeIdentity(DOMAIN, valid.candidate).dedupeKey === buildDedupeIdentity(DOMAIN, syn.candidate).dedupeKey,
-  );
 
   // Кодовая нормализация: лишний ключ убирается, строка-число приводится к integer, отсутствующее поле — null.
   const fixed = await validateAndCanonicalize(DOMAIN, {
@@ -209,103 +201,12 @@ async function layerValidate() {
   );
 }
 
-// ---- 4. Интеграция в запись факта (processCandidate) ------------------------
-async function layerIntegration() {
-  section('4. Интеграция в контур записи памяти');
-
-  await query('DELETE FROM mem.users WHERE external_id = $1', ['tschema']);
-  const u = await ensureUser('tschema');
-
-  const res = await processCandidate(u.id, DOMAIN, {
-    scope: 'domain',
-    memory_kind: 'preference',
-    entity_type: 'city',
-    entity_key: 'откуда',
-    memory_text: 'Пользователь вылетает из Казани',
-    data: { city_name: 'Казань' },
-    importance: 0.8,
-    confidence: 0.9,
-    sensitivity: 'normal',
-    requires_confirmation: false,
-  });
-  check('4.1. Факт создан', res.action === 'created' && !!res.id);
-
-  const { rows } = await query('SELECT entity_key, data, metadata, dedupe_key FROM mem.memory_items WHERE id = $1', [
-    res.id,
-  ]);
-  const row = rows[0];
-  check('4.2. entity_key канонизирован в «departure»', row.entity_key === 'departure', row.entity_key);
-  check(
-    '4.3. metadata.schema_version помечен источником',
-    row.metadata?.schema_version === 'skill',
-    JSON.stringify(row.metadata),
-  );
-  check('4.4. data сохранён валидным', row.data.city_name === 'Казань');
-  check(
-    '4.4b. dedupe_key сохранён в строке памяти',
-    row.dedupe_key === 'flight_search:domain:city:departure',
-    row.dedupe_key,
-  );
-
-  // Повторный кандидат другим синонимом обновляет тот же факт (дедуп по каноническому ключу), без дубля.
-  await processCandidate(u.id, DOMAIN, {
-    scope: 'domain',
-    memory_kind: 'preference',
-    entity_type: 'city',
-    entity_key: 'город вылета',
-    memory_text: 'Пользователь вылетает из Казани',
-    data: { city_name: 'Казань' },
-    importance: 0.8,
-    confidence: 0.9,
-    sensitivity: 'normal',
-    requires_confirmation: false,
-  });
-  const { rows: dup } = await query(
-    `SELECT count(*)::int c FROM mem.memory_items WHERE user_id = $1 AND entity_type = 'city' AND status = 'active'`,
-    [u.id],
-  );
-  check('4.5. Дедуп по каноническому ключу: дубля нет', dup[0].c === 1, `активных: ${dup[0].c}`);
-}
-
-// ---- 5. Строгий второй проход извлечения (LLM) ------------------------------
-async function layerRefine() {
-  section('5. Строгий второй проход извлечения по схеме сущности');
-  const cands = await extractCandidates({
-    skillName: 'flight-search',
-    domainKey: DOMAIN,
-    recentMessages: 'user: Обычно вылетаю из Казани и не люблю ночные рейсы.',
-    assistantResponse: 'Понял, учту при поиске.',
-  });
-  const subject = cands.find((c) => c.entity_type && ['city', 'flight_preference', 'trip'].includes(c.entity_type));
-  if (!subject) {
-    console.log(`     · модель не выделила предметную сущность (вариативность); кандидатов: ${cands.length}`);
-    check('5.1. Извлечён хотя бы один кандидат', cands.length > 0, 'нет кандидатов');
-    return;
-  }
-  const spec = await getEntitySpec(DOMAIN, subject.entity_type);
-  const allowed = new Set(Object.keys(spec.data_schema.properties || {}));
-  const keys = Object.keys(subject.data || {});
-  check(
-    '5.1. data заполнен строго по полям схемы сущности',
-    keys.length > 0 && keys.every((k) => allowed.has(k)),
-    `сущность ${subject.entity_type}, ключи: ${keys.join(', ')}`,
-  );
-  const v = await validateAndCanonicalize(DOMAIN, subject);
-  check('5.2. Уточнённый кандидат валиден по схеме', v.ok, JSON.stringify(v.issues));
-}
-
 async function main() {
   console.log('Проверка слоя схем доменной памяти.\n');
   try {
     layerMeta();
     await layerSource();
     await layerValidate();
-    await layerIntegration();
-    if (process.env.SCHEMA_SKIP_LLM === '1') {
-      console.log('\n(5 пропущен: SCHEMA_SKIP_LLM=1.)');
-    } else {
-      await layerRefine();
-    }
   } catch (err) {
     console.error('\nКритическая ошибка прогона:', err);
     failed++;

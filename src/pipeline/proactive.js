@@ -64,8 +64,9 @@ export async function shouldFire(trigger, userId) {
       return false;
     }
     const { rows } = await query(
-      `SELECT 1 FROM mem.memory_items
-        WHERE user_id = $1 AND status = 'active' AND memory_kind = 'goal' LIMIT 1`,
+      `SELECT 1 FROM mem.user_facts
+        WHERE user_id = $1 AND status = 'active' AND fact_type = 'goal'
+          AND (expires_at IS NULL OR expires_at > now()) LIMIT 1`,
       [userId],
     );
     return rows.length > 0;

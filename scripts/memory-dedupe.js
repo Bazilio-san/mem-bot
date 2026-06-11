@@ -1,6 +1,9 @@
 #!/usr/bin/env node
+// Ручной запуск семантической чистки дубликатов в плоской таблице фактов mem.user_facts.
+// Дубликаты одного пользователя и типа (косинусное сходство выше facts.confirmSimilarity) сливаются:
+// остаётся строка с большим числом подтверждений, дубликат архивируется. Dry-run — по умолчанию.
 import { query, closePool } from '../src/db.js';
-import { runMemoryDedupe } from '../src/pipeline/memory-dedupe.js';
+import { dedupeFactsSweep } from '../src/pipeline/facts.js';
 
 function parseArgs(argv) {
   const args = { dryRun: true, apply: false, json: false, limit: 500, allUsers: false, userId: null };
@@ -41,50 +44,21 @@ async function usersFor(args) {
   if (args.userId) {
     return [args.userId];
   }
-  if (!args.allUsers) {
-    throw new Error('Pass --user <uuid> or --all-users.');
+  if (args.allUsers) {
+    const { rows } = await query(`SELECT DISTINCT user_id FROM mem.user_facts WHERE status = 'active'`);
+    return rows.map((r) => r.user_id);
   }
-  const { rows } = await query(`SELECT DISTINCT user_id FROM mem.memory_items WHERE status='active' ORDER BY user_id`);
-  return rows.map((r) => r.user_id);
+  throw new Error('Set --user <uuid> or --all-users. See --help.');
 }
 
-function formatHuman(result) {
-  const lines = [];
-  lines.push(`user=${result.userId} mode=${result.dryRun ? 'dry-run' : 'apply'} groups=${result.groups.length}`);
-  for (const group of result.groups) {
-    lines.push(`\n[${group.dedupeKey}] items=${group.items.length}`);
-    lines.push(`  canonical: ${group.canonical.id} ${group.canonical.memory_text}`);
-    for (const dup of group.duplicates) {
-      lines.push(`  duplicate: ${dup.id} ${dup.memory_text}`);
-    }
-  }
-  if (!result.groups.length) {
-    lines.push('No duplicate groups found.');
+function formatHuman(userId, result) {
+  const lines = [
+    `user ${userId}: checked ${result.checked}, ${result.merged ? `merged ${result.merged}` : `pairs found ${result.pairs.length}`}`,
+  ];
+  for (const pair of result.pairs) {
+    lines.push(`  keep ${pair.keepId} <- drop ${pair.dropId} (similarity ${pair.similarity.toFixed(3)})`);
   }
   return lines.join('\n');
-}
-
-function compact(result) {
-  return {
-    userId: result.userId,
-    dryRun: result.dryRun,
-    groups: result.groups.map((group) => ({
-      dedupeKey: group.dedupeKey,
-      canonical: {
-        id: group.canonical.id,
-        memory_text: group.canonical.memory_text,
-        scope: group.canonical.scope,
-        memory_kind: group.canonical.memory_kind,
-      },
-      duplicates: group.duplicates.map((dup) => ({
-        id: dup.id,
-        memory_text: dup.memory_text,
-        scope: dup.scope,
-        memory_kind: dup.memory_kind,
-      })),
-    })),
-    applied: result.applied,
-  };
 }
 
 async function main() {
@@ -96,12 +70,13 @@ async function main() {
   const userIds = await usersFor(args);
   const results = [];
   for (const userId of userIds) {
-    results.push(await runMemoryDedupe({ userId, dryRun: args.dryRun, limit: args.limit }));
+    const result = await dedupeFactsSweep({ userId, dryRun: args.dryRun, limit: args.limit });
+    results.push({ userId, ...result });
   }
   if (args.json) {
-    console.log(JSON.stringify(results.map(compact), null, 2));
+    console.log(JSON.stringify(results, null, 2));
   } else {
-    console.log(results.map(formatHuman).join('\n\n'));
+    console.log(results.map((r) => formatHuman(r.userId, r)).join('\n\n'));
   }
 }
 
@@ -110,6 +85,4 @@ main()
     console.error(err.message || err);
     process.exitCode = 1;
   })
-  .finally(async () => {
-    await closePool();
-  });
+  .finally(() => closePool());

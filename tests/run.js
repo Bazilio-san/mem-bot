@@ -9,8 +9,7 @@ import { query, queryLog, closePool, vectorToSql } from '../src/db.js';
 import { embed } from '../src/llm.js';
 import { ensureUser, getDomainId, ensureDefaultTriggers, ensureConversation, getRecentMessages } from '../src/repo.js';
 import { handleMessage } from '../src/agent.js';
-import { extractCandidates } from '../src/pipeline/extract.js';
-import { processCandidate, persistCandidates } from '../src/pipeline/merge.js';
+import { extractFacts, saveFact, saveFacts, dedupeFactsSweep, mapKindToType } from '../src/pipeline/facts.js';
 import { retrieveMemory, buildMemoryContext, LIMITS } from '../src/pipeline/retrieve.js';
 import { saveSecureRecord, grantConsent, getSecureValue, listSecureSummaries } from '../src/pipeline/secure.js';
 import {
@@ -48,7 +47,6 @@ import {
   recordUserInboundForContactPolicy,
   classifyTriggerCandidate,
 } from '../src/pipeline/proactiveContactPolicy.js';
-import { runMemoryDedupe } from '../src/pipeline/memory-dedupe.js';
 import { flushLlmLog } from '../src/pipeline/llm-log.js';
 import { flushAgentEventLog } from '../src/pipeline/agent-event-log.js';
 
@@ -80,57 +78,33 @@ function section(title) {
   console.log(`\n=== ${title} ===`);
 }
 
-const SENS = ['public', 'low', 'normal', 'high', 'secret'];
-const sensRank = (s) => SENS.indexOf(s);
-
 // Создать чистого пользователя для теста (удаляет прежние данные).
 async function freshUser(extId) {
   await query('DELETE FROM mem.users WHERE external_id = $1', [extId]);
   return ensureUser(extId);
 }
 
-// Прямой посев факта памяти (без LLM), для проверок выборки.
-async function seedFact(
-  userId,
-  domainKey,
-  {
-    scope,
-    kind = 'fact',
-    text,
-    entityType = null,
-    entityKey = null,
-    importance = 0.7,
-    confidence = 0.8,
-    sensitivity = 'normal',
-  },
-) {
-  const domainId = await getDomainId(domainKey);
+// Прямой посев факта памяти (без LLM), для проверок выборки. Описания фактов остаются в старой
+// форме (scope/kind) и отображаются на плоскую таблицу: kind → fact_type, scope 'domain' → домен.
+async function seedFact(userId, domainKey, { scope, kind = 'fact', text, confidence = 0.8 }) {
   await query(
-    `INSERT INTO mem.memory_items (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text, importance, confidence, sensitivity)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [userId, domainId, scope, kind, entityType, entityKey, text, importance, confidence, sensitivity],
+    `INSERT INTO mem.user_facts (user_id, domain_key, fact_type, fact_text, confidence)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [userId, scope === 'domain' ? domainKey : 'general', mapKindToType(kind) || 'profile', text, confidence],
   );
 }
 
 async function seedEmbeddedFact(userId, domainKey, fact) {
   const vec = await embed(fact.text);
-  const domainId = await getDomainId(domainKey);
   await query(
-    `INSERT INTO mem.memory_items
-       (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text,
-        importance, confidence, sensitivity, embedding)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::vector)`,
+    `INSERT INTO mem.user_facts (user_id, domain_key, fact_type, fact_text, confidence, embedding)
+     VALUES ($1,$2,$3,$4,$5,$6::vector)`,
     [
       userId,
-      domainId,
-      fact.scope,
-      fact.kind || 'fact',
-      fact.entityType || null,
-      fact.entityKey || null,
+      fact.scope === 'domain' ? domainKey : 'general',
+      mapKindToType(fact.kind || 'fact') || 'profile',
       fact.text,
-      fact.importance || 0.7,
       fact.confidence || 0.8,
-      fact.sensitivity || 'normal',
       vec ? vectorToSql(vec) : null,
     ],
   );
@@ -145,7 +119,7 @@ async function layerStructure() {
     'conversations',
     'conversation_messages',
     'conversation_summaries',
-    'memory_items',
+    'user_facts',
     'secure_records',
     'memory_secure_links',
     'scheduled_tasks',
@@ -170,7 +144,7 @@ async function layerStructure() {
   check('Индекс по expires_at есть', /expires_at/.test(defs));
   check('Векторный HNSW-индекс есть', /hnsw/.test(defs));
   check('Полнотекстовый GIN-индекс есть', /search_tsv/.test(defs));
-  check('Индекс смысловой дедупликации есть', /idx_memory_dedupe_key/.test(defs));
+  check('Индексы user_facts есть', /idx_user_facts_lookup/.test(defs) && /idx_user_facts_embedding/.test(defs));
 
   // Внешние ключи.
   const { rows: fks } = await query(
@@ -189,18 +163,18 @@ async function layerStructure() {
     (colMap[c.table_name] ||= new Set()).add(c.column_name);
   }
   check(
-    'memory_items имеет created_at и updated_at',
-    colMap.memory_items?.has('created_at') && colMap.memory_items?.has('updated_at'),
+    'user_facts имеет created_at и updated_at',
+    colMap.user_facts?.has('created_at') && colMap.user_facts?.has('updated_at'),
   );
 
-  const { rows: dedupeCols } = await query(
+  const { rows: factCols } = await query(
     `SELECT column_name FROM information_schema.columns
-      WHERE table_schema='mem' AND table_name='memory_items'
-        AND column_name IN ('dedupe_key','canonical_group_id','dedupe_status')`,
+      WHERE table_schema='mem' AND table_name='user_facts'
+        AND column_name IN ('fact_type','fact_text','confidence','evidence_count','expires_at','last_confirmed_at')`,
   );
-  check('memory_items имеет поля смысловой дедупликации', dedupeCols.length === 3);
+  check('user_facts имеет координаты хранения и поля устаревания', factCols.length === 6);
 
-  // Чувствительные данные — отдельная таблица, не в memory_items.
+  // Чувствительные данные — отдельная таблица, не в user_facts.
   const { rows: secCols } = await query(
     `SELECT column_name FROM information_schema.columns WHERE table_schema='mem' AND table_name='secure_records' AND column_name='encrypted_payload'`,
   );
@@ -209,13 +183,7 @@ async function layerStructure() {
   // Минимальный CRUD round-trip: создать пользователя и по записи каждого вида, прочитать обратно.
   const u = await freshUser('test-crud');
   await seedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text: 'CRUD профиль' });
-  await seedFact(u.id, 'flight_search', {
-    scope: 'domain',
-    kind: 'preference',
-    text: 'CRUD домен',
-    entityType: 'city',
-    entityKey: 'crud_city',
-  });
+  await seedFact(u.id, 'flight_search', { scope: 'domain', kind: 'preference', text: 'CRUD домен' });
   const sec = await saveSecureRecord({ userId: u.id, recordType: 'passport', rawValue: '0000 000000' });
   const task = await createTask({
     userId: u.id,
@@ -229,7 +197,7 @@ async function layerStructure() {
     },
   });
   const { rows: back } = await query(
-    `SELECT (SELECT count(*) FROM mem.memory_items WHERE user_id=$1)::int AS m,
+    `SELECT (SELECT count(*) FROM mem.user_facts WHERE user_id=$1)::int AS m,
             (SELECT count(*) FROM mem.secure_records WHERE user_id=$1)::int AS s,
             (SELECT count(*) FROM mem.scheduled_tasks WHERE user_id=$1)::int AS t`,
     [u.id],
@@ -352,22 +320,16 @@ async function layerExtraction() {
   const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'memory_cases.json'), 'utf8'));
   let okCases = 0;
   for (const tc of cases) {
-    const cands = await extractCandidates({
+    const facts = await extractFacts({
       domainKey: 'general',
-      recentMessages: `user: ${tc.input}`,
-      assistantResponse: 'Понял.',
+      userMessages: [tc.input],
+      assistantSummary: 'Короткий ответ ассистента по теме разговора.',
     });
-    const savable = cands.filter(
-      (c) =>
-        !c.requires_confirmation &&
-        sensRank(c.sensitivity) <= sensRank('normal') &&
-        Number(c.importance) >= 0.6 &&
-        Number(c.confidence) >= 0.7,
-    );
-    const sensitive = cands.filter((c) => c.requires_confirmation || sensRank(c.sensitivity) >= sensRank('high'));
+    const savable = facts.filter((f) => Number(f.confidence) >= config.facts.minConfidence);
     let ok;
     if (tc.expect_requires_confirmation) {
-      ok = sensitive.length >= 1 && savable.length === 0;
+      // Чувствительные данные новая система не сохраняет вовсе: промпт требует пропускать их целиком.
+      ok = savable.length === 0;
     } else if (tc.expect_save) {
       ok = savable.length >= 1;
     } else {
@@ -376,9 +338,7 @@ async function layerExtraction() {
     if (ok) {
       okCases++;
     } else {
-      console.log(
-        `     · спорный кейс: "${tc.input}" → кандидатов ${cands.length}, сохраняемых ${savable.length}, чувствительных ${sensitive.length}`,
-      );
+      console.log(`     · спорный кейс: "${tc.input}" → фактов ${facts.length}, сохраняемых ${savable.length}`);
     }
   }
   // Допускаем небольшую вариативность модели: не менее 80% кейсов верны.
@@ -411,74 +371,60 @@ async function mandatory() {
     check('2. Не сохраняет мусорные фразы', mem.length === 0, `активных фактов: ${mem.length}`);
   }
 
-  // 3. Чувствительные данные требуют подтверждения.
+  // 3. Чувствительные данные не сохраняются как обычный факт.
   {
     const u = await freshUser('t3');
-    const cands = await extractCandidates({
+    const facts = await extractFacts({
       domainKey: 'general',
-      recentMessages: 'user: Мой паспорт 1234 567890.',
-      assistantResponse: 'Принято.',
+      userMessages: ['Мой паспорт 1234 567890.'],
+      assistantSummary: 'Принято.',
     });
-    const results = await persistCandidates(u.id, 'general', cands, null);
+    await saveFacts(u.id, 'general', facts, null);
     const savedPlain = await listMemory(u.id);
-    const needsConfirm =
-      results.some((r) => r.action === 'needs_confirmation') ||
-      cands.some((c) => c.requires_confirmation || sensRank(c.sensitivity) >= sensRank('high'));
-    const leakedAsFact = savedPlain.some((m) => /\d{4}\s?\d{6}/.test(m.memory_text));
-    check(
-      '3. Чувствительные данные требуют подтверждения и не сохраняются как обычный факт',
-      needsConfirm && !leakedAsFact,
-    );
+    const leakedAsFact = savedPlain.some((m) => /\d{4}\s?\d{6}/.test(m.fact_text));
+    check('3. Чувствительные данные не сохраняются как обычный факт', !leakedAsFact);
   }
 
-  // 4. Обновляет факт, а не плодит дубли.
+  // 4. Обновляет факт, а не плодит дубли (та же тема, новое значение).
   {
     const u = await freshUser('t4');
-    const base = {
-      scope: 'domain',
-      memory_kind: 'state',
-      entity_type: 'city',
-      entity_key: 'home_city',
-      data: {},
-      importance: 0.8,
+    await saveFact(u.id, 'general', {
+      type: 'profile',
+      fact_text: 'Текущий город пользователя: Москва.',
       confidence: 0.9,
-      sensitivity: 'normal',
-      ttl_days: null,
-      requires_confirmation: false,
-      reason: 'город',
-    };
-    await processCandidate(u.id, 'flight_search', { ...base, memory_text: 'Текущий город пользователя: Москва.' });
-    await processCandidate(u.id, 'flight_search', { ...base, memory_text: 'Текущий город пользователя: Казань.' });
+    });
+    await saveFact(u.id, 'general', {
+      type: 'profile',
+      fact_text: 'Текущий город пользователя: Казань.',
+      confidence: 0.9,
+    });
     const { rows } = await query(
-      `SELECT memory_text, status FROM mem.memory_items WHERE user_id=$1 AND entity_key='home_city'`,
+      `SELECT fact_text, status FROM mem.user_facts WHERE user_id=$1 AND fact_text ILIKE '%город%'`,
       [u.id],
     );
     const active = rows.filter((r) => r.status === 'active');
     check(
       '4. Обновляет факт, а не создаёт дубль',
-      active.length === 1 && /Казан/.test(active[0].memory_text),
+      active.length === 1 && /Казан/.test(active[0].fact_text),
       `активных: ${active.length}`,
     );
   }
 
-  // 4b. Смысловой дедуп объединяет разные формулировки стиля в разных scope.
+  // 4b. Смысловой дедуп объединяет разные формулировки стиля общения.
   {
     const u = await freshUser('t4b');
-    const base = { data: {}, importance: 0.8, confidence: 0.9, sensitivity: 'low', requires_confirmation: false };
-    await processCandidate(u.id, 'general', {
-      ...base,
-      scope: 'profile',
-      memory_kind: 'communication_style',
-      memory_text: 'Пользователь предпочитает короткие, прямые ответы без лишней церемонии.',
+    await saveFact(u.id, 'general', {
+      type: 'communication_style',
+      fact_text: 'Пользователь предпочитает короткие и прямые ответы.',
+      confidence: 0.9,
     });
-    await processCandidate(u.id, 'general', {
-      ...base,
-      scope: 'system',
-      memory_kind: 'instruction',
-      memory_text: 'Пользователю комфортен сухой прямой тон без смягчителей.',
+    await saveFact(u.id, 'general', {
+      type: 'communication_style',
+      fact_text: 'Пользователь предпочитает короткие прямые ответы без долгих вступлений.',
+      confidence: 0.9,
     });
     const { rows } = await query(
-      `SELECT status, dedupe_key FROM mem.memory_items WHERE user_id=$1 AND dedupe_key LIKE 'profile:communication_style:%'`,
+      `SELECT status FROM mem.user_facts WHERE user_id=$1 AND fact_type='communication_style'`,
       [u.id],
     );
     const active = rows.filter((r) => r.status === 'active');
@@ -489,79 +435,58 @@ async function mandatory() {
     );
   }
 
-  // 4c. Feature request, пришедший как goal/reminder/constraint, сводится к одной canonical-группе.
+  // 4c. Один и тот же запрос на функцию в разных формулировках сводится к одному факту-цели.
   {
     const u = await freshUser('t4c');
-    const base = { data: {}, importance: 0.82, confidence: 0.9, sensitivity: 'low', requires_confirmation: false };
-    await processCandidate(u.id, 'general', {
-      ...base,
-      scope: 'domain',
-      memory_kind: 'goal',
-      memory_text: 'Пользователь хочет добавить глобальную память.',
+    await saveFact(u.id, 'general', {
+      type: 'goal',
+      fact_text: 'Пользователь хочет добавить глобальную память.',
+      confidence: 0.9,
     });
-    await processCandidate(u.id, 'general', {
-      ...base,
-      scope: 'dialog',
-      memory_kind: 'reminder',
-      memory_text: 'Напоминание: добавить глобальную память.',
+    await saveFact(u.id, 'general', {
+      type: 'goal',
+      fact_text: 'Пользователь просил добавить ассистенту глобальную память.',
+      confidence: 0.9,
     });
-    await processCandidate(u.id, 'general', {
-      ...base,
-      scope: 'profile',
-      memory_kind: 'constraint',
-      memory_text: 'Ассистенту не хватает глобальной памяти.',
+    await saveFact(u.id, 'general', {
+      type: 'goal',
+      fact_text: 'Пользователь хочет, чтобы у ассистента появилась глобальная память.',
+      confidence: 0.9,
     });
-    const { rows } = await query(
-      `SELECT status, canonical_group_id FROM mem.memory_items
-        WHERE user_id=$1 AND dedupe_key='feature_request:global_memory'`,
-      [u.id],
-    );
+    const { rows } = await query(`SELECT status FROM mem.user_facts WHERE user_id=$1 AND fact_type='goal'`, [u.id]);
     const active = rows.filter((r) => r.status === 'active');
-    const groups = new Set(rows.map((r) => String(r.canonical_group_id)));
     check(
-      '4c. Feature request не размножается между goal/reminder/constraint',
-      active.length === 1 && groups.size === 1,
-      `активных: ${active.length}, групп: ${groups.size}`,
+      '4c. Запрос на функцию не размножается между формулировками',
+      active.length === 1,
+      `активных: ${active.length}, всего: ${rows.length}`,
     );
   }
 
-  // 4d. Одинаковый поиск билетов не размножается между dialog open_loop, domain goal и progress.
+  // 4d. Одинаковый поиск билетов не размножается между формулировками (goal/open_loop одного смысла).
   {
     const u = await freshUser('t4d');
-    const base = {
-      scope: 'domain',
-      memory_kind: 'goal',
-      entity_type: 'trip',
-      entity_key: 'sgn-moscow-2026-06-16',
-      data: { origin: 'Хошимин', destination: 'Москва', date: '2026-06-16', passengers: 2, status: 'searching' },
-      importance: 0.82,
+    await saveFact(u.id, 'flight_search', {
+      type: 'goal',
+      fact_text: 'Пользователь ищет билеты из Хошимина в Москву на 16 июня для 2 взрослых с багажом.',
       confidence: 0.92,
-      sensitivity: 'normal',
-      requires_confirmation: false,
-    };
-    await processCandidate(u.id, 'flight_search', {
-      ...base,
-      memory_text: 'Пользователь ищет билеты из Хошимина в Москву на 16 июня для 2 взрослых с багажом.',
     });
-    await processCandidate(u.id, 'flight_search', {
-      ...base,
-      scope: 'dialog',
-      memory_kind: 'open_loop',
-      memory_text: 'Пользователь искал билеты из Хошимина в Москву на 16 июня для 2 взрослых с багажом.',
+    await saveFact(u.id, 'flight_search', {
+      type: 'goal',
+      fact_text: 'Пользователь искал билеты из Хошимина в Москву на 16 июня для 2 взрослых с багажом.',
+      confidence: 0.92,
     });
-    await processCandidate(u.id, 'flight_search', {
-      ...base,
-      scope: 'domain',
-      memory_kind: 'progress',
-      memory_text: 'Пользователь искал билеты Хошимин → Москва 16 июня, 2 взрослых, с багажом.',
+    await saveFact(u.id, 'flight_search', {
+      type: 'goal',
+      fact_text: 'Пользователь искал билеты Хошимин → Москва 16 июня, 2 взрослых, с багажом.',
+      confidence: 0.92,
     });
     const { rows } = await query(
-      `SELECT status FROM mem.memory_items WHERE user_id=$1 AND dedupe_key LIKE 'flight_search:trip:%'`,
+      `SELECT status FROM mem.user_facts WHERE user_id=$1 AND fact_type='goal' AND domain_key='flight_search'`,
       [u.id],
     );
     const active = rows.filter((r) => r.status === 'active');
     check(
-      '4d. Контекст одной поездки не размножается между видами памяти',
+      '4d. Контекст одной поездки не размножается между формулировками',
       active.length === 1,
       `активных: ${active.length}, всего: ${rows.length}`,
     );
@@ -570,32 +495,30 @@ async function mandatory() {
   // 4e. Ретроактивный maintenance-dedup: dry-run не меняет БД, apply архивирует дубли.
   {
     const u = await freshUser('t4e');
-    await seedFact(u.id, 'general', {
+    await seedEmbeddedFact(u.id, 'general', {
       scope: 'profile',
       kind: 'communication_style',
-      text: 'Пользователь предпочитает короткие прямые ответы.',
+      text: 'Пользователь предпочитает получать ответы частями, а не одним большим блоком.',
     });
-    await seedFact(u.id, 'general', {
-      scope: 'system',
-      kind: 'instruction',
-      text: 'Пользователю комфортен короткий прямой стиль без лишней церемонии.',
+    await seedEmbeddedFact(u.id, 'general', {
+      scope: 'profile',
+      kind: 'communication_style',
+      text: 'Пользователь предпочитает, чтобы ответы были частями/стримингом, а не одним блоком.',
     });
-    const dry = await runMemoryDedupe({ userId: u.id, dryRun: true });
+    const dry = await dedupeFactsSweep({ userId: u.id, dryRun: true });
     const before = (
-      await query(`SELECT count(*)::int c FROM mem.memory_items WHERE user_id=$1 AND status='active'`, [u.id])
+      await query(`SELECT count(*)::int c FROM mem.user_facts WHERE user_id=$1 AND status='active'`, [u.id])
     ).rows[0].c;
-    const applied = await runMemoryDedupe({ userId: u.id, dryRun: false });
+    const applied = await dedupeFactsSweep({ userId: u.id, dryRun: false });
     const afterRows = (
-      await query(`SELECT status, metadata FROM mem.memory_items WHERE user_id=$1 ORDER BY updated_at DESC`, [u.id])
+      await query(`SELECT status, metadata FROM mem.user_facts WHERE user_id=$1 ORDER BY updated_at DESC`, [u.id])
     ).rows;
     const activeAfter = afterRows.filter((r) => r.status === 'active').length;
-    const archivedWithAudit = afterRows.some(
-      (r) => r.status === 'archived' && r.metadata?.dedupe?.role === 'duplicate',
-    );
-    check('4e. memory:dedupe dry-run находит группу и ничего не меняет', dry.groups.length === 1 && before === 2);
+    const archivedWithAudit = afterRows.some((r) => r.status === 'archived' && r.metadata?.merged_into);
+    check('4e. memory:dedupe dry-run находит пару и ничего не меняет', dry.pairs.length === 1 && before === 2);
     check(
-      '4f. memory:dedupe apply архивирует дубли и пишет metadata.dedupe',
-      applied.applied.length === 1 && activeAfter === 1 && archivedWithAudit,
+      '4f. memory:dedupe apply архивирует дубли и пишет metadata.merged_into',
+      applied.merged === 1 && activeAfter === 1 && archivedWithAudit,
       `activeAfter=${activeAfter}`,
     );
   }
@@ -1024,27 +947,15 @@ async function mandatory() {
     );
   }
 
-  // 13. Удаление по названию сущности находит нужную запись и не трогает остальные.
+  // 13. Удаление по фрагменту текста находит нужную запись и не трогает остальные.
   {
     const u = await freshUser('t13');
-    await seedFact(u.id, 'general', {
-      scope: 'profile',
-      kind: 'fact',
-      text: 'Адрес: Москва, ул. Ленина, 1',
-      entityType: 'address',
-      entityKey: 'адрес',
-    });
-    await seedFact(u.id, 'general', {
-      scope: 'profile',
-      kind: 'fact',
-      text: 'Любимый цвет — синий',
-      entityType: 'preference',
-      entityKey: 'цвет',
-    });
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: 'Адрес: Москва, ул. Ленина, 1' });
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: 'Любимый цвет — синий' });
     const res = await deleteByEntity(u.id, 'адрес');
     const left = await listMemory(u.id);
-    const addrGone = !left.some((m) => m.entity_key === 'адрес');
-    const colorKept = left.some((m) => m.entity_key === 'цвет');
+    const addrGone = !left.some((m) => /Ленина/.test(m.fact_text));
+    const colorKept = left.some((m) => /синий/.test(m.fact_text));
     check(
       '13. Удаление по названию помечает нужную запись и сохраняет остальные',
       res.deleted === 1 && addrGone && colorKept,
@@ -1055,18 +966,12 @@ async function mandatory() {
   {
     const u = await freshUser('t13b');
     const text = 'Пользователь предпочитает обращаться к ассистенту как «Бобик».';
-    await seedFact(u.id, 'general', {
-      scope: 'profile',
-      kind: 'preference',
-      text,
-      entityType: 'assistant',
-      entityKey: 'assistant_name',
-    });
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text });
     const res = await deleteByEntity(u.id, text);
     const left = await listMemory(u.id);
     check(
-      '13b. Удаление по точному тексту memory_text удаляет показанный факт',
-      res.deleted === 1 && !left.some((m) => m.memory_text === text),
+      '13b. Удаление по точному тексту fact_text удаляет показанный факт',
+      res.deleted === 1 && !left.some((m) => m.fact_text === text),
     );
   }
 
@@ -1084,7 +989,7 @@ async function mandatory() {
     const left = await listMemory(u.id);
     check(
       '13c. Semantic delete удаляет уверенный смысловой матч',
-      res.deleted === 1 && res.strategy === 'semantic' && !left.some((m) => m.memory_text === text),
+      res.deleted === 1 && res.strategy === 'semantic' && !left.some((m) => m.fact_text === text),
     );
   }
 
@@ -1099,8 +1004,8 @@ async function mandatory() {
     await seedEmbeddedFact(u.id, 'general', { scope: 'profile', kind: 'preference', text: unrelated });
     const res = await deleteByEntity(u.id, 'сотри всё про имя Бобик у ассистента');
     const left = await listMemory(u.id);
-    const bobikGone = !left.some((m) => m.memory_text === bobik1 || m.memory_text === bobik2);
-    const unrelatedKept = left.some((m) => m.memory_text === unrelated);
+    const bobikGone = !left.some((m) => m.fact_text === bobik1 || m.fact_text === bobik2);
+    const unrelatedKept = left.some((m) => m.fact_text === unrelated);
     check(
       '13d. Semantic topic delete удаляет группу сильных совпадений',
       res.deleted === 2 && res.strategy === 'semantic_group' && bobikGone && unrelatedKept,
@@ -1116,7 +1021,7 @@ async function mandatory() {
     const left = await listMemory(u.id);
     check(
       '13e. Semantic delete не удаляет слабое совпадение',
-      res.deleted === 0 && left.some((m) => m.memory_text === text),
+      res.deleted === 0 && left.some((m) => m.fact_text === text),
     );
   }
 
@@ -1140,16 +1045,10 @@ async function mandatory() {
     const u = await freshUser('t14');
     const conv = await ensureConversation(u.id, 'general');
     const ctx = { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false };
-    await seedFact(u.id, 'general', {
-      scope: 'profile',
-      kind: 'fact',
-      text: 'Машина — Lada',
-      entityType: 'car',
-      entityKey: 'машина',
-    });
+    await seedFact(u.id, 'general', { scope: 'profile', kind: 'fact', text: 'Машина пользователя — Lada' });
 
-    const listed = await executeTool(ctx, 'memory_list', { scope: null, include_archived: false });
-    const sawCar = Array.isArray(listed.items) && listed.items.some((i) => i.entity_key === 'машина');
+    const listed = await executeTool(ctx, 'memory_list', { fact_type: null, include_archived: false });
+    const sawCar = Array.isArray(listed.items) && listed.items.some((i) => /Lada/.test(i.fact_text));
 
     const forgot = await executeTool(ctx, 'memory_forget_entity', { entity_name: 'машина', entity_type: null });
 
@@ -1238,14 +1137,14 @@ async function layerScenario() {
 
   const u = await ensureUser(ext);
   const mem = await listMemory(u.id);
-  const hasTopic = mem.some((m) => /квадратн|уравнен/i.test(m.memory_text));
-  const hasStyle = mem.some((m) => /прост|термин|коротк/i.test(m.memory_text));
+  const hasTopic = mem.some((m) => /квадратн|уравнен/i.test(m.fact_text));
+  const hasStyle = mem.some((m) => /прост|термин|коротк/i.test(m.fact_text));
   const tasks = (await query(`SELECT count(*)::int c FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].c;
   check(
     'Сценарий: сохранена тема (квадратные уравнения)',
     hasTopic,
     `факты: ${mem
-      .map((m) => m.memory_text)
+      .map((m) => m.fact_text)
       .join(' | ')
       .slice(0, 160)}`,
   );
@@ -1841,11 +1740,11 @@ async function layerHistory() {
         sensitivity: 'normal',
       },
     ]);
-    const results = await persistCandidates(u.id, 'general', cands, null);
+    const results = await saveFacts(u.id, 'general', cands, null);
     const saved = await listMemory(u.id);
-    const highSaved = saved.some((m) => /Markdown/.test(m.memory_text));
-    const lowIgnored = results.some((r) => r.action === 'ignored');
-    check('7.12. facts_to_memory идут обычным контуром (порог важности соблюдён)', highSaved && lowIgnored);
+    const highSaved = saved.some((m) => /Markdown/.test(m.fact_text));
+    const lowIgnored = results.some((r) => r.action === 'skipped');
+    check('7.12. facts_to_memory идут обычным контуром (порог уверенности соблюдён)', highSaved && lowIgnored);
   }
 }
 

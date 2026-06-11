@@ -14,7 +14,7 @@ import {
   getContactState,
   recordProactiveSent,
 } from './proactiveContactPolicy.js';
-import { runMemoryDedupe } from './memory-dedupe.js';
+import { dedupeFactsSweep } from './facts.js';
 
 const WORKER_ID = config.scheduler.workerId;
 const { rrulestr } = rrulePkg;
@@ -385,12 +385,12 @@ export async function runTask(task, { onReminder } = {}) {
       }
     } else if (task.task_type === 'memory_cleanup') {
       await query(
-        `UPDATE mem.memory_items SET status='archived', updated_at=now()
+        `UPDATE mem.user_facts SET status='archived', updated_at=now()
          WHERE user_id=$1 AND status='active' AND expires_at IS NOT NULL AND expires_at < now()`,
         [task.user_id],
       );
     } else if (task.task_type === 'memory_dedupe_cleanup') {
-      await runMemoryDedupe({
+      await dedupeFactsSweep({
         userId: task.user_id,
         dryRun: false,
         limit: Number(task.payload?.limit || 500),

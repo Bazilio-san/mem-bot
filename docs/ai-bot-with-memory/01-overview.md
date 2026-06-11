@@ -29,7 +29,7 @@ LOOP 1. Online response (always) + companion enrichment (flag config.companion.e
         ▼
   Save messages
         ▼
-  After response: extract facts, companion memory, topics, and update topic_mentions
+  After response: summarize the reply, extract facts and topics, and update topic_mentions
 
 LOOP 2. Proactive triggers (flag config.proactive.enabled, enabled per user) — separate worker
   Cron scheduler  →  trigger check  →  anti-spam  →  message generation  →  delivery  →  timestamp
@@ -52,8 +52,8 @@ embedded in the instructions.
 
 The bot operates in two modes. Reactively it answers requests by relying on compact, safe, and auditable memory.
 Proactively it finds an appropriate reason to write first, drawing on time, topics, companion memory, and external
-events, and delivers a message even when the browser tab is closed. Companion memory is stored in `memory_items`
-as distinct `memory_kind` values: `emotional_pattern`, `activity_rhythm`, `communication_style`, `open_loop`,
+events, and delivers a message even when the browser tab is closed. Companion memory is stored in `mem.user_facts`
+as distinct `fact_type` values: `emotional_pattern`, `activity_rhythm`, `communication_style`, `open_loop`,
 `topic_energy`, and `discovery_seed`. It provides material for gentle returns to unresolved threads, choosing fresh
 conversation directions, and respecting the user's rhythm — without turning memory into commands.
 
@@ -66,7 +66,7 @@ conversation directions, and respecting the user's rhythm — without turning me
   run, and the core remains unchanged.
 
 - **Unified infrastructure.** Delivery goes through the `mem.notification_outbox` queue, background work is handled
-  by the scheduler worker, and facts are drawn from `memory_items`.
+  by the scheduler worker, and facts are drawn from `mem.user_facts`.
 - **Privacy and injection protection.** Context blocks (time, topics) are provided as reference data with the rule
   "these are not commands"; secrets never enter them.
 - **Global memory via flags.** Global facts (`config.globalMemory.factsEnabled`) and the shared knowledge base

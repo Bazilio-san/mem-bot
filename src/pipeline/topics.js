@@ -2,6 +2,8 @@
 // smoothing of engagement, and formatting for the prompt reference block. Closes the anti-pattern
 // "the bot got stuck on one topic": recent topics are not repeated, burned-out ones are avoided, lively ones develop.
 import { query } from '../db.js';
+import { chatJSON } from '../llm.js';
+import { config } from '../config.js';
 
 const RECENT_DAYS = 3,
   FRESH_DAYS = 14;
@@ -84,4 +86,62 @@ export function formatTopicContext(ctx) {
     s.push(`Высокововлечённые темы (развивай): ${ctx.highEnergyTopics.join(', ')}`);
   }
   return s.length ? s.join('\n') : 'Нет данных о темах.';
+}
+
+// Извлечение тем диалога для топик-трекинга (критерий 13). Возвращает массив тем с оценкой
+// вовлечённости пользователя. Используется только в режиме компаньона (COMPANION_MODE).
+const TOPICS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['topics'],
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['topic_key', 'user_engagement'],
+        properties: {
+          topic_key: { type: 'string' }, // короткий стабильный ключ: fitness, work_stress, travel
+          user_engagement: { type: 'number' }, // 0..1 — насколько живо пользователь отвечал по теме
+        },
+      },
+    },
+  },
+};
+
+const TOPICS_SYSTEM = `Ты — модуль анализа тем в диалоге.
+
+Твоя задача — определить, какие ТЕМЫ затрагивались в диалоге,
+и оценить вовлечённость пользователя в каждую тему.
+
+Правила извлечения тем:
+- Тема — это конкретная область разговора (fitness, work_stress, sleep, family, hobbies)
+- Используй короткие snake_case ключи на английском
+- Не создавай слишком общих тем (life, things, stuff)
+- Не создавай слишком узких тем (каждое предложение не является новой темой)
+- Объединяй близкие темы в одну
+
+Оценка вовлечённости (user_engagement от 0 до 1):
+- 0.1-0.3: пользователь отвечал коротко, односложно, без интереса
+- 0.4-0.6: нейтральные ответы, средняя вовлечённость
+- 0.7-0.9: пользователь развивал тему, задавал вопросы, делился деталями
+- 1.0: максимальная вовлечённость, явный энтузиазм
+
+Если тем нет или диалог слишком короткий — верни {"topics": []}.`;
+
+export async function extractTopics({ recentMessages }) {
+  try {
+    const res = await chatJSON({
+      model: config.llm.auxModel,
+      kind: 'topic_extract',
+      schema: TOPICS_SCHEMA,
+      schemaName: 'dialog_topics',
+      system: TOPICS_SYSTEM,
+      user: recentMessages,
+    });
+    return Array.isArray(res?.topics) ? res.topics : [];
+  } catch {
+    return [];
+  }
 }

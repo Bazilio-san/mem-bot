@@ -12,7 +12,7 @@ import {
   getColdPendingMessages,
   saveConversationSummary,
 } from '../repo.js';
-import { persistCandidates } from './merge.js';
+import { saveFacts, mapKindToType } from './facts.js';
 import { estimateTokens, sumMessageTokens, estimateSummaryTokens } from './token-counter.js';
 
 function dbg(...args) {
@@ -68,7 +68,10 @@ const SUMMARY_SYSTEM = `Ты сжимаешь старую часть истор
 3. Не дублировать факты, которые уже есть в active_memory.
 4. Ближний к текущему моменту контекст описывать подробнее.
 5. Дальний контекст сжимать сильнее.
-6. Устойчивые факты, которые стоит сохранить в долговременную память, вынести в facts_to_memory.
+6. Устойчивые факты О ПОЛЬЗОВАТЕЛЕ (из его реплик), которые стоит сохранить в долговременную память,
+   вынести в facts_to_memory: объекты вида {"type": "profile|preference|habit|goal|emotional_pattern|
+   activity_rhythm|communication_style|open_loop|topic_energy|discovery_seed", "fact_text": "короткая
+   фраза от третьего лица", "confidence": 0..1}. Факты из реплик ассистента не выносить.
 7. Не сохранять секретные данные в открытом виде (паспорта, телефоны, адреса, платёжные и медицинские данные).
 8. Не сохранять мусор: приветствия, повторы, эмоции без последствий, одноразовые фразы.
 9. Не выдумывать факты, которых не было в сообщениях.
@@ -249,25 +252,24 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
   return { text, dropped };
 }
 
-// Convert summarizer facts into memory-candidate shape and run them through the normal persistCandidates
-// flow (importance threshold, sensitivity check, deduplication, update instead of duplicates).
+// Convert summarizer facts into the flat fact shape and run them through the normal saveFacts flow
+// (confidence threshold, semantic deduplication, update instead of duplicates). The summarizer may emit
+// either the new shape (type/fact_text) or the legacy one (memory_kind/memory_text) — both are accepted.
 function factsToCandidates(facts = []) {
   return facts
     .map((f) => ({
-      scope: f.scope || 'profile',
-      memory_kind: f.memory_kind || 'fact',
-      entity_type: f.entity_type ?? null,
-      entity_key: f.entity_key ?? null,
-      memory_text: f.memory_text || '',
-      data: f.data || {},
-      importance: Number(f.importance ?? 0.6),
+      type: f.type || mapKindToType(f.memory_kind) || 'profile',
+      fact_text: f.fact_text || f.memory_text || '',
       confidence: Number(f.confidence ?? 0.7),
-      sensitivity: f.sensitivity || 'normal',
       ttl_days: f.ttl_days ?? null,
-      requires_confirmation: !!f.requires_confirmation,
-      reason: f.reason || 'вынесено из истории диалога',
     }))
-    .filter((c) => c.memory_text);
+    .filter((c) => c.fact_text && !f_isSensitive(c.fact_text));
+}
+
+// Страховка от секретов в фактах суммаризатора: системный промпт запрещает их, но при срабатывании
+// эвристики факт просто не пишется в долговременную память (в дайджест он тоже не попадает).
+function f_isSensitive(text) {
+  return /паспорт|карт[аы]\s*№|cvv|пин-?код/i.test(text);
 }
 
 // Compress the cold zone: split into zones, call the summarizer, assemble the final digest with
@@ -387,10 +389,10 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
     memoryDedupe: { dropped_because_in_memory: result.droppedBecauseInMemory },
   });
 
-  // Durable facts from history go into long-term memory via the normal flow (thresholds, sensitivity, dedup).
+  // Durable facts from history go into long-term memory via the normal flow (thresholds, dedup).
   if (result.factsToMemory.length) {
     try {
-      await persistCandidates(userId, domainKey, result.factsToMemory, conversationId);
+      await saveFacts(userId, domainKey, result.factsToMemory, conversationId);
     } catch (err) {
       dbg('writing facts_to_memory failed:', err.message);
     }

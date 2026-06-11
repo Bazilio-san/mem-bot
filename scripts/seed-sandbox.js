@@ -8,6 +8,7 @@ import { embed } from '../src/llm.js';
 import { getDomainId, ensureDefaultTriggers } from '../src/repo.js';
 import { saveSecureRecord } from '../src/pipeline/secure.js';
 import { createTask } from '../src/pipeline/scheduler.js';
+import { mapKindToType } from '../src/pipeline/facts.js';
 
 const DAY = 86400000;
 const HOUR = 3600000;
@@ -26,31 +27,28 @@ async function recreateUser(externalId, displayName, timezone) {
   return rows[0];
 }
 
-// Вставить один факт памяти. Эмбеддинг считается по тексту (если прокси доступен), иначе остаётся пустым —
-// тогда выборка опирается на полнотекстовый и структурный поиск.
+// Вставить один факт памяти в плоскую таблицу mem.user_facts. Описания фактов в сидах остались
+// в старой форме (scope/kind) — здесь они отображаются на новые координаты: kind → fact_type,
+// scope 'domain' → domain_key текущего домена, остальное → general. Эмбеддинг считается по тексту
+// (если прокси доступен), иначе остаётся пустым — тогда выборка опирается на полнотекстовый поиск.
 async function insertMemory(userId, domainKey, m) {
-  const domainId = m.scope === 'domain' ? await getDomainId(domainKey) : null;
   const vector = await embed(m.text);
   const updatedAt = iso(-(m.daysAgo || 0) * DAY);
+  const factType = mapKindToType(m.kind) || 'profile';
   await query(
-    `INSERT INTO mem.memory_items
-       (user_id, domain_id, scope, memory_kind, entity_type, entity_key, memory_text, data,
-        importance, confidence, sensitivity, usage_count, embedding, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14)`,
+    `INSERT INTO mem.user_facts
+       (user_id, domain_key, fact_type, fact_text, confidence, evidence_count, embedding,
+        expires_at, last_confirmed_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
     [
       userId,
-      domainId,
-      m.scope,
-      m.kind,
-      m.entityType || null,
-      m.entityKey || null,
+      m.scope === 'domain' ? domainKey : 'general',
+      factType,
       m.text,
-      JSON.stringify(m.data || {}),
-      m.importance,
       m.confidence,
-      m.sensitivity || 'normal',
-      m.usage || 0,
+      Math.max(1, m.usage || 1),
       vector ? `[${vector.join(',')}]` : null,
+      factType === 'open_loop' ? iso(30 * DAY) : null,
       updatedAt,
     ],
   );

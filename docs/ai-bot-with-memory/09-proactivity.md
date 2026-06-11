@@ -49,11 +49,11 @@ export async function upsertTopicMentions(userId, domainId, topics) {
 ```
 
 Topics should be extracted after the response with a separate model call (recommended function `extractTopics` in the
-module `src/pipeline/extract.js`) and supplied to the prompt as reference data, not as commands, to preserve
+module `src/pipeline/topics.js`) and supplied to the prompt as reference data, not as commands, to preserve
 injection protection.
 
-Alongside the aggregated topic table, long-term memory stores companion facts with `memory_kind = 'topic_energy'` and
-`memory_kind = 'discovery_seed'`. `topic_energy` records topics where the user becomes more animated or loses
+Alongside the aggregated topic table, long-term memory stores companion facts with `fact_type = 'topic_energy'` and
+`fact_type = 'discovery_seed'`. `topic_energy` records topics where the user becomes more animated or loses
 interest, while `discovery_seed` stores directions the user wants to try or explore. These facts do not replace
 `topic_mentions`: the table provides counts and recency, while memory provides human-readable material for natural
 connections.

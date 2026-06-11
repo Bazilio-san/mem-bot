@@ -80,7 +80,7 @@ const MEMORY_GROUPS = [
 const META_COLUMNS = [
   { field: 'kind', header: 'Вид', filter: 'multi', width: '11rem' },
   { field: 'domain', header: 'Домен', filter: 'multi', width: '11rem' },
-  { field: 'importance', header: 'Важность', width: '7rem' },
+  { field: 'confidence', header: 'Уверенность', width: '7rem' },
   { field: 'due', header: 'Срок', width: '11rem' },
   { field: 'consent', header: 'Согласие', width: '11rem' },
 ];

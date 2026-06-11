@@ -8,7 +8,7 @@ The skill registry is file-based. Each skill lives in its own directory:
 skills/
   <name>/
     SKILL.md            machine fields + prompt blocks
-    domain-schema.json  closed schema for data and entity_key vocabularies (optional)
+    domain-schema.json  closed description of the domain's subject entities (optional)
     references/         heavy reference files, read on demand (optional)
 ```
 
@@ -65,10 +65,11 @@ else is optional: `positive_signals` and `negative_signals` are hints to the rou
 `memory.scopes` hints at which memory sections are typically needed; `model.main` and `model.extract` override
 the models for this skill; `references` enables reading of the `references/**` directory.
 
-## [SKILL-2] Domain memory schema
+## [SKILL-2] Domain entity schema
 
 The schema source is a file next to the skill: `domain-schema.json` or an embedded `## Domain Schema` block.
-Each entity has a closed JSON schema for `data` (`additionalProperties: false`, all fields in `required`,
+The schema is a closed, machine-checkable description of the subject entities the domain works with. Each entity
+declares a closed JSON schema for its `data` fields (`additionalProperties: false`, all fields in `required`,
 specific types and `enum` where needed) and an `entity_key` formation rule:
 
 ```jsonc
@@ -107,36 +108,12 @@ specific types and `enum` where needed) and an `entity_key` formation rule:
 }
 ```
 
-The key idea: the schema declares what fields exist in `data`. As a result, both the model during extraction knows
-what to populate, and the SQL query during lookup knows what to search for.
-
-```text
-DOMAIN SCHEMA = list of entities + closed schema of data fields + entity_key formation rule.
-  on write:  build a strict closed schema per entity → model fills exactly those fields → data validated by ajv.
-  key is normalized to vocabulary/slug → `dedupe_key` and deduplication by (entity_type, entity_key) are reliable.
-  on lookup: load schema from skill registry by domain_key → know the field names → filter data via @> in SQL.
-  into prompt: memory_text (text) goes in; data stays for tools and filters.
-```
-
-When a user says "I keep getting confused by the discriminant and often drop the minus sign", the second extraction
-pass takes the `student_skill` entity schema and asks the model to fill exactly its fields. The model returns a
-strictly validated object:
-
-```json
-{ "entity_key": "quadratic_equations",
-  "memory_text": "User gets confused by the discriminant and often drops the minus sign",
-  "data": { "topic": "quadratic_equations", "level": "weak", "last_errors": ["sign_errors"] } }
-```
-
-During lookup, knowing the schema means knowing the field names, so it is possible to filter directly inside `data`
-using the `@>` operator and the `idx_memory_data_gin` GIN index — programmatically, not via text search:
-
-```sql
-SELECT entity_key, memory_text, data
-FROM mem.memory_items
-WHERE user_id = $1 AND entity_type = 'student_skill'
-  AND data @> '{"last_errors": ["sign_errors"]}';
-```
+The schema serves the skill-authoring toolset ([SKILL-4]): it gives the part generators a precise, validatable
+definition of what the domain is about, lets schema edits be applied surgically entity by entity, and lets the
+meta-validator reject a malformed definition before it is written to disk. The memory pipeline does not consume
+these schemas: long-term memory stores flat one-sentence facts in `mem.user_facts`, addressed by `domain_key`
+and `fact_type` (see [06-memory.md](06-memory.md)). What domain knowledge reaches memory is steered by the
+skill's `## Fact Extraction Prompt` block, not by the entity schema.
 
 ---
 
@@ -163,17 +140,17 @@ and whether a schema is present. After adding the skill directory, the router se
 for memory addressing is derived from the selected skill by code, not from the model's response. If no specialized
 skill fits, the fallback `general` skill is selected.
 
-**Canonicalization of `entity_key`** has two modes. `fixed_vocab` mode requires the key to come from the vocabulary:
-an exact match passes through as-is, a submitted synonym is mapped to the canonical key, a semantically close value
-is matched by embedding if similarity exceeds the threshold, otherwise the fact is flagged and the key is stored as
-a slug. `slug` mode normalizes the key to a Latin slug by transliteration and lowercasing ("Nizhniy Novgorod"
-becomes `nizhniy-novgorod`).
-
-**Validation of `data`.** First, cheap code-level normalization runs: extra keys are dropped, a single value is
-wrapped in an array where the schema expects an array, a numeric string is coerced to a number, missing fields are
-filled with `null`. If `data` still does not match the schema after this normalization, the fact is rejected and not
-saved — there is no "save anyway" mode. The schema source marker and canonicalization notes are written to the
-`metadata` of the fact row.
+**Schema layer utilities.** The `src/schema/` module gives the authoring toolset a deterministic contract for
+working with entity definitions. `meta.js` holds the meta-schema and the shared `ajv` validator that every
+definition must pass; `registry.js` resolves a domain schema and an entity specification through the skills
+registry (`getEntitySpec`); `validate.js` provides `validateAndCanonicalize` for checking a candidate entity
+object against its schema: code-level normalization runs first (extra keys are dropped, a single value is wrapped
+in an array where the schema expects one, a numeric string is coerced to a number, missing fields are filled with
+`null`), and an object that still does not match the schema is rejected. Canonicalization of `entity_key` has two
+modes: `fixed_vocab` requires the key to come from the vocabulary — an exact match passes through as-is, a
+synonym is mapped to the canonical key, a semantically close value is matched by embedding above a threshold,
+and anything else is flagged and stored as a slug; `slug` mode normalizes the key to a Latin slug by
+transliteration and lowercasing ("Nizhniy Novgorod" becomes `nizhniy-novgorod`).
 
 **Tools and references.** Base system tools (memory, scheduler, global memory, response form) are always available
 if permitted by flags and permissions. A domain-specific tool is available only if it is listed in `tools.allowed`
@@ -184,13 +161,11 @@ This enables progressive disclosure: the router sees a short description, the ma
 
 **Integration points.** When generating a response, `src/agent.js` determines the active skill, derives the domain
 key from it, injects the `ACTIVE_SKILL_CONTEXT` block containing the `# Skill Prompt` content, and restricts tools
-to those in `tools.allowed`. When writing, the `processCandidate` function in `src/pipeline/merge.js` calls
-`validateAndCanonicalize` before searching for duplicates: a domain fact with no domain schema, with an entity type
-outside the schema, or with invalid `data` is rejected. During extraction, the stage in `src/pipeline/extract.js`
-operates in two passes: the first determines what to remember and the `entity_type` (with the active skill's
-`## Fact Extraction Prompt` block injected), and the second re-populates `data` and `entity_key` for each domain
-candidate that has a schema, strictly following the closed schema of its entity
-(see [08-prompts-and-models.md](08-prompts-and-models.md)).
+to those in `tools.allowed`. Fact extraction after the response receives the active skill's
+`## Fact Extraction Prompt` block inside the single `extractFacts` call, and the resulting facts are stored as
+flat rows in `mem.user_facts` (see [06-memory.md](06-memory.md) and
+[08-prompts-and-models.md](08-prompts-and-models.md)). The domain entity schema enters the picture only through
+the skill-authoring tools ([SKILL-4]), which create, edit, and validate it.
 
 ---
 

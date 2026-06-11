@@ -77,7 +77,7 @@ are assembled into the final `HISTORY_CONTEXT`.
 ## [HIST-4] Memory vs. history: separation of roles
 
 The roles of the three data sources are strictly separated to prevent duplication. Long-term memory answers
-"what do we durably know about the user, domain, and tasks" and lives in `memory_items`. Compressed history
+"what do we durably know about the user, domain, and tasks" and lives in `mem.user_facts`. Compressed history
 answers "what happened in this specific conversation and where did we leave off" and lives in
 `conversation_summaries`. Topic tracking (`topic_mentions`, criterion 13, see [09-proactivity.md](09-proactivity.md))
 answers "which topics were discussed and how actively" — so the digest **does not need to re-list topics** if
@@ -303,10 +303,10 @@ computed by the code:
 ### Candidates for long-term memory
 
 The `facts_to_memory` field contains durable facts that are better stored in long-term memory rather than in
-the history. They cannot be written directly: they go through the same `extractCandidates` / `merge` /
-`persistCandidates` pipeline as ordinary fact extraction (see [06-memory.md](06-memory.md)). This preserves
-the unified logic of "importance threshold → sensitivity check → deduplication → update instead of duplicate"
-and does not bypass the auto-save thresholds.
+the history, in the same flat `{type, fact_text, confidence}` form that fact extraction produces. They cannot
+be written directly: they go through the same `saveFacts` flow as ordinary fact extraction (see
+[06-memory.md](06-memory.md)). This preserves the unified logic of "confidence threshold → write-time semantic
+deduplication → confirm or replace instead of duplicating" and does not bypass the auto-save rules.
 
 ---
 
@@ -348,7 +348,7 @@ verifies twelve points:
 | 4 | Hot window | the last eight messages are included in the request verbatim |
 | 5 | Old messages | are not passed as a raw large block |
 | 6 | Gradient | the near portion is more detailed than the far portion |
-| 7 | Deduplication with memory | a fact from `memory_items` is not repeated in `summary_text` |
+| 7 | Deduplication with memory | a fact from `user_facts` is not repeated in `summary_text` |
 | 8 | Conflict | recent messages take precedence over the old summary |
 | 9 | Secrets | protected data does not appear in the plain-text summary |
 | 10 | Hysteresis | a couple of new messages after compression do not trigger re-compression |

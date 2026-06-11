@@ -157,9 +157,7 @@ src/pipeline/skills/writer.js    assemble SKILL.md, validate, atomic write, and 
 src/pipeline/skills/authoring-support.js  helpers for skill-authoring tools
 src/pipeline/agent-tools/skill-authoring/  admin tools for creating and editing skills (skill_author_*)
 src/pipeline/retrieve.js     memory retrieval, ranking, minimization, MEMORY_CONTEXT assembly
-src/pipeline/extract.js      extract memory candidates, companion memories, and topics after a reply
-src/pipeline/merge.js        privacy filter, similarity search, deduplication, write
-src/pipeline/memory-dedupe.js  semantic dedupe_key, scoring, dry-run/apply duplicate cleanup
+src/pipeline/facts.js        fact extraction, assistant-reply summary, write with semantic dedupe, dedupe sweep
 src/pipeline/secure.js       protected memory: encryption, consent, masking
 src/pipeline/scheduler.js    task creation, worker, retries, rescheduling
 src/pipeline/tools.js        tool registry: build definitions, permissions, logging, call handler, initTools
@@ -169,7 +167,7 @@ src/mcp/client.js            connect to MCP servers, wrap their tools for the re
 .mcp.json                    external MCP server configuration (not version-controlled; may be absent)
 src/pipeline/admin.js        user memory view and deletion, administrator permission check (isAdmin)
 src/pipeline/global-memory.js  global memory: facts (always-on) and shared knowledge base (RAG) (criteria 19–21)
-src/pipeline/topics.js       topic tracking (criterion 13)
+src/pipeline/topics.js       dialog topic extraction (extractTopics) and topic tracking (criterion 13)
 src/pipeline/proactive.js    proactivity triggers and anti-spam (criteria 15, 16)
 src/pipeline/proactiveMessage.js  proactive message generator
 src/pipeline/events.js       external events and relevance filter (criterion 17)
@@ -206,7 +204,7 @@ scripts/memory-dedupe.js     CLI dry-run/apply for retroactive memory deduplicat
    migration idempotent, and implement `src/migrate.js`. Verify the structure before writing business logic.
 3. **Infrastructure.** `src/db.js`, `src/config.js`, `src/llm.js`, `src/repo.js`.
 4. **Memory retrieval.** `src/pipeline/retrieve.js` — see [06-memory.md](06-memory.md).
-5. **Write pipeline.** `src/pipeline/extract.js` and `src/pipeline/merge.js` — see [06-memory.md](06-memory.md).
+5. **Write pipeline.** `src/pipeline/facts.js` — see [06-memory.md](06-memory.md).
 6. **Privacy.** `src/pipeline/secure.js` — see [07-secure-privacy.md](07-secure-privacy.md).
 7. **Scheduler.** `src/pipeline/scheduler.js` and the worker — see [10-operations.md](10-operations.md).
 8. **Tools and agent.** The `src/pipeline/agent-tools/*` modules, the `src/pipeline/tools.js` registry, and
@@ -216,7 +214,7 @@ scripts/memory-dedupe.js     CLI dry-run/apply for retroactive memory deduplicat
    (`src/mcp/*` modules, `.mcp.json` file, lazy `initTools` initialization) — see
    [10-operations.md](10-operations.md), section `OPS-4a`.
 9. **Tests.** `tests/run.js` in layers — see [10-operations.md](10-operations.md).
-10. **Proactivity and companion mode.** Proactivity tables and companion `memory_kind` values from the single
+10. **Proactivity and companion mode.** Proactivity tables and companion `fact_type` values from the single
     initialization, the `topics`, `temporal`, `proactive`, and `events` modules, and flag-gated branches in
     `agent.js` — see [09-proactivity.md](09-proactivity.md). Code lives in the `src/` directory.
 11. **History compression.** The `conversation_summaries` service columns, the `token-counter`, `history-compress`,

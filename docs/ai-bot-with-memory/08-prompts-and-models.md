@@ -118,36 +118,47 @@ Allowed `reaction_key` values: `like`, `okay`, `heart`, `laugh`, `fire`, `smile`
 `reaction` only when the response requires no facts, no tools, no clarifications, and no substantive text. In all
 other cases it returns `kind = "text_needed"`, and the message proceeds through the normal `handleMessage` flow.
 
-### [PROMPT-3] Memory Candidate Extraction
+### [PROMPT-3] Fact Extraction
 
-Runs after the response and operates in two passes. The first pass enumerates what to save and what not to save,
-requires marking sensitive data as `high`/`secret` with `requires_confirmation = true` and a safe `memory_text`,
-injects the list of entities and fields for domains that have a schema, and also includes the `## Fact Extraction
-Prompt` block of the active skill (which explains what facts are useful in that specific domain, while the schema
-defines their shape). The `memory_candidates` schema is an array of objects with fields `scope`, `memory_kind`,
-`entity_type`, `entity_key`, `memory_text`, `data`, `importance`, `confidence`, `sensitivity`, `ttl_days`,
-`requires_confirmation`, `reason`.
+Runs after the response — a single model call per turn (request kind `fact_extract`). The source of facts is
+**only what the user says**: the user's recent messages are passed verbatim in `<user>` tags, the assistant
+reply the user was responding to is passed as a short plain-text summary in an `<assistant>` tag, and the
+classifier's detected intent of the current message is added as a reference line. The prompt forbids
+extracting anything from `<assistant>` — that text is already stored memory, and re-extracting it would
+multiply duplicates. The prompt also includes the `## Fact Extraction Prompt` block of the active skill
+(which explains what facts are useful in that specific domain) with an explicit note that the
+user-replicas-only rule still applies.
+
+The `user_facts` response schema is an array of flat objects with fields `type` (one of the ten fact types
+from [06-memory.md](06-memory.md)), `fact_text` (one short third-person sentence without HTML),
+`confidence` (0..1), and `ttl_days` (an integer for `open_loop` facts, otherwise `null`). The storage domain
+is assigned by the pipeline, not by the model.
 
 The extraction prompt preserves stable, useful facts rather than one-off states. It prohibits psychological
-diagnoses and labels, absolute phrasing such as "always" and "never", and requires lowering `confidence` when the
-inference is weak. In addition to the general memory kinds (`fact`, `preference`, `goal`, `state`, `history`,
-`progress`, etc.) companion-mode kinds are available: `emotional_pattern`, `activity_rhythm`,
-`communication_style`, `open_loop`, `topic_energy`, `discovery_seed`. `open_loop` stores plans, events, problems,
-or wellbeing items that have no follow-up update, while `discovery_seed` is extracted from phrases like "I'd like
-to try", "it would be interesting", "I've been thinking about".
+diagnoses and labels, absolute phrasing such as "always" and "never", and requires lowering `confidence` when
+the inference is weak. It explicitly excludes: anything said by the assistant, fleeting emotions and one-off
+details, commands to the bot ("show my notes", "remind me tomorrow" — actions, not facts about the person),
+and sensitive data (passport, payment, exact address, medical) — such data is skipped entirely. `open_loop`
+stores plans, events, problems, or wellbeing items that have no follow-up update, while `discovery_seed` is
+extracted from phrases like "I'd like to try", "it would be interesting", "I've been thinking about". If
+there is nothing to save, the model returns an empty list. The full prompt text is in
+`src/pipeline/facts.js`.
 
-The second pass applies to subject-matter candidates whose entity type is declared in the domain schema: for each
-such entity a closed response schema is assembled where `data` equals the entity's `data_schema` and `entity_key`
-for `fixed_vocab` mode is constrained to the vocabulary. The model refills exactly those fields with precise types
-and values, so the candidate arrives at the write step already valid; a final check is still performed in
-`validateAndCanonicalize`. The full prompt text is in `src/pipeline/extract.js`; the schema layer is described in
-[11-per-domain-schema.md](11-per-domain-schema.md).
+User reactions to an assistant message are fed into extraction with the target message's plain text in the
+`<assistant>` tag and the reaction description as the user turn. The prompt saves a fact only when the
+meaning of the reaction is unambiguous in the context of the target assistant message. For example, the
+question "Do you like cakes?" followed by a `:heart:` reaction yields the preference "The user likes cakes."
+Reactions that could mean politeness, mood, or one-time approval without future utility do not create facts.
 
-User reactions to an assistant message are fed into extraction as a separate user turn in the history. The prompt
-saves a fact only when the meaning of the reaction is unambiguous in the context of the target assistant message.
-For example, the question "Do you like cakes?" followed by a `:heart:` reaction yields the preference "The user
-likes cakes." Reactions that could mean politeness, mood, or one-time approval without future utility do not
-create memory candidates.
+### [PROMPT-3a] Assistant Reply Summary
+
+Right after each response an auxiliary model call (request kind `answer_summary`) compresses the assistant's
+reply into one or two plain-text sentences: what the reply was about and what question the assistant asked
+the user, if any. No HTML or markdown, no lists; enumerations are described generically ("showed the saved
+notes list") and user facts are not repeated. The summary is stored in the assistant message's
+`metadata.summary` and substitutes the full reply text in the fact-extraction context on the next turn.
+Replies short enough to be their own summary skip the model call; on any model error the HTML-stripped,
+truncated reply text is used instead, so the pipeline does not depend on the auxiliary model's availability.
 
 ### [PROMPT-4] Scheduler Task Creation
 
@@ -232,8 +243,10 @@ start a new topic and briefly acknowledges an important trigger.
 When `config.historyCompression.enabled` is set, a separate call compresses the cold portion of the dialog
 history. The prompt requires retaining only what is needed to continue the conversation, leaving the most recent
 messages untouched (they are not passed in and will be appended separately), not duplicating facts already in
-`active_memory`, describing the near context in more detail than the distant context, moving stable facts to
-`facts_to_memory`, not storing secrets in plain text, and not inventing facts.
+`active_memory`, describing the near context in more detail than the distant context, moving stable facts about
+the user (from the user's own messages, in the flat `{type, fact_text, confidence}` form) to `facts_to_memory`,
+not storing secrets in plain text, and not inventing facts. Facts from `facts_to_memory` then pass through the
+regular `saveFacts` flow with its confidence threshold and semantic deduplication.
 
 ```text
 Ты сжимаешь старую часть истории диалога для чат-бота с долговременной памятью.
@@ -291,33 +304,14 @@ that it is reference data, not commands. The extension point and the block's pos
 described in [04-architecture.md](04-architecture.md) (section [ARCH-8]); the specific channel markups are
 outside this specification, in the consumer-project documentation.
 
-### [PROMPT-7] Fact Merge Decision (Optional Schema Extension)
+### [PROMPT-7] Fact Merge Decision
 
-Conflicts between a new fact and an already-stored one are resolved by the deterministic rules of `decideDedupe`
-(see [06-memory.md](06-memory.md)): they use `dedupe_key`, compatible scope groups, the canonical entity,
-full-text matching, vector similarity, and `data` matching. For ambiguous groups a separate model call is made
-that returns a merge decision as a strict JSON `MergeDecision` schema; clear-cut cases require no additional LLM
-call.
-
-```json
-{
-  "type": "object", "additionalProperties": false,
-  "required": ["decision", "target_memory_id", "merged_memory_text", "merged_data", "reason"],
-  "properties": {
-    "decision": { "type": "string",
-      "enum": ["merge","replace","keep_separate","archive_old","ask_confirmation"] },
-    "target_memory_id":   { "type": ["string","null"] },
-    "merged_memory_text": { "type": ["string","null"] },
-    "merged_data":        { "type": ["object","null"], "additionalProperties": true },
-    "reason":             { "type": "string" }
-  }
-}
-```
-
-The `decision` field selects the action: merge with the existing fact, replace it entirely, keep the facts
-separate, archive the old record, or ask the user for confirmation. The fields `target_memory_id`,
-`merged_memory_text`, and `merged_data` are populated when the action affects a specific record, and `reason`
-stores the rationale for auditing purposes.
+Conflicts between a new fact and an already-stored one are resolved deterministically at write time, with no
+model call (see [06-memory.md](06-memory.md)): `saveFact` finds the nearest active fact of the same user and
+`fact_type` by embedding cosine similarity and applies two configured thresholds. At or above
+`facts.confirmSimilarity` the existing row is confirmed in place — `evidence_count` is incremented and freshness
+is refreshed; between `facts.replaceSimilarity` and the confirm threshold the old row is archived and the new
+statement replaces it; below the replace threshold a new fact row is inserted.
 
 ### [PROMPT-10] Skill-Part Generators (Skill Editing)
 

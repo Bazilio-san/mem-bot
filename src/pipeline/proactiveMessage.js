@@ -11,14 +11,14 @@ import { getTopicContext, formatTopicContext } from './topics.js';
 
 async function loadFacts(userId, domainId) {
   const { rows } = await query(
-    `SELECT memory_kind, memory_text FROM mem.memory_items
+    `SELECT fact_type, fact_text FROM mem.user_facts
       WHERE user_id = $1 AND status = 'active'
-        AND sensitivity IN ('public','low','normal')
-        AND (scope = 'profile' OR (scope = 'domain' AND domain_id = $2))
-      ORDER BY importance DESC, updated_at DESC LIMIT 15`,
+        AND (expires_at IS NULL OR expires_at > now())
+        AND domain_key IN ('general', (SELECT domain_key FROM mem.agent_domains WHERE id = $2))
+      ORDER BY confidence DESC, last_confirmed_at DESC LIMIT 15`,
     [userId, domainId],
   );
-  return rows.length ? rows.map((r) => `- (${r.memory_kind}) ${r.memory_text}`).join('\n') : '(фактов почти нет)';
+  return rows.length ? rows.map((r) => `- (${r.fact_type}) ${r.fact_text}`).join('\n') : '(фактов почти нет)';
 }
 
 const TASK_BY_TRIGGER = {

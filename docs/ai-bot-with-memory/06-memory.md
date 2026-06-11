@@ -2,31 +2,50 @@
 
 ## [MEM-1] Five Types of Memory
 
-1. **Short-term dialog memory.** The last eight messages (via `getRecentMessages`) plus facts with
-   `scope = 'dialog'`. Compressed summaries of long conversation history are stored in `conversation_summaries`.
-2. **Profile memory.** Stable facts about the person and their communication style (`scope = 'profile'`). Needed
-   for almost every response, but strictly capped — by default no more than seven facts in the prompt (configurable
-   via the `MEMORY_LIMIT_PROFILE` env var).
-3. **Universal domain memory.** Depends on the specialization but shares a common structure. Everything lives in
-   a single `memory_items` table with `scope = 'domain'` and a domain binding via `domain_id`; specifics are
-   determined by `entity_type`, `entity_key`, and `data jsonb`. Retrieval is always filtered by the current domain.
+1. **Short-term dialog memory.** The last eight messages (via `getRecentMessages`) plus open conversation
+   loops (`fact_type = 'open_loop'`). Compressed summaries of long conversation history are stored in
+   `conversation_summaries`.
+2. **Profile memory.** Stable facts about the person — profile, preferences, habits, communication style,
+   emotional patterns, activity rhythm, topic energy, discovery seeds — stored with `domain_key = 'general'`.
+   Needed for almost every response, but strictly capped — by default no more than seven facts in the prompt
+   (configurable via the `MEMORY_LIMIT_PROFILE` env var).
+3. **Domain memory.** Facts bound to a specific conversation domain (`domain_key` of the current skill):
+   goals and open loops of that specialization. Retrieval always covers the current domain plus `general`.
 4. **Secure memory.** Secret data stored separately, encrypted; only a summary is included in the prompt. See
    [07-secure-privacy.md](07-secure-privacy.md).
 5. **Task, reminder, and background-check memory.** Executed by the scheduler. See
    [10-operations.md](10-operations.md).
+
+All facts live in the single flat table `mem.user_facts` (see [05-data-schema.md](05-data-schema.md), DATA-4).
+Each fact is one short third-person sentence with three storage coordinates — user, domain, fact type — plus
+`confidence`, `evidence_count` (how many times the fact was re-confirmed), freshness (`last_confirmed_at`),
+an optional `expires_at`, and an embedding. The ten fact types are chosen to make the bot a great
+conversational partner:
+
+| `fact_type` | What it captures |
+|---|---|
+| `profile` | Basic facts: name, family, city, work, important people |
+| `preference` | Tastes and preferences |
+| `habit` | Habits and routines |
+| `goal` | Goals and long-term tasks |
+| `emotional_pattern` | Recurring emotional patterns |
+| `activity_rhythm` | Activity rhythm (when the user is active) |
+| `communication_style` | How the user likes to communicate |
+| `open_loop` | Unfinished threads: plans/events without a follow-up (always with a TTL) |
+| `topic_energy` | Topics that energize or bore the user |
+| `discovery_seed` | Topics the user would like to try or explore |
 
 All five types are bound to the user via `user_id`: this is personal memory. Alongside it exists **global memory**,
 shared across all users and not tied to any `user_id`. It is structured differently and lives as a separate layer:
 global facts are injected into every request, and the shared knowledge base (RAG) is injected by relevance. Only
 an administrator can populate it. Full coverage is in [14-global-memory.md](14-global-memory.md).
 
-Examples of domain memory records for different domains:
+Examples of facts for different domains:
 
 ```json
-{ "domain_key": "joke_teller", "entity_type": "joke_preference", "memory_kind": "preference",
-  "data": { "liked_categories": ["programmers"], "disliked_topics": ["politics"], "told_joke_ids": ["j-101"] } }
-{ "domain_key": "math_tutor", "entity_type": "student_skill", "memory_kind": "progress",
-  "data": { "topic": "quadratic_equations", "level": "weak", "last_errors": ["confuses discriminant"] } }
+{ "domain_key": "general",    "fact_type": "preference", "fact_text": "Пользователь не любит шутки о политике" }
+{ "domain_key": "math_tutor", "fact_type": "goal",       "fact_text": "Пользователь готовится к экзамену по математике" }
+{ "domain_key": "math_tutor", "fact_type": "open_loop",  "fact_text": "Пользователь обещал прорешать 10 примеров на дискриминант" }
 ```
 
 ---
@@ -34,37 +53,44 @@ Examples of domain memory records for different domains:
 ## [MEM-2] Memory Retrieval and Three Relevance Signals
 
 Retrieval (`src/pipeline/retrieve.js`) fetches only what the model needs right now. First, a cheap structural
-database filter is applied (only active, non-expired, non-sensitive records from the required scopes, up to 100
-candidates). Relevance is then boosted by semantic similarity via embeddings (when available) and full-text
-matching. The final score is computed using a weighted formula, after which hard limits are enforced.
+database filter is applied (only active, non-expired facts of the `general` domain and the current domain, up
+to 100 candidates). Relevance is then boosted by semantic similarity via embeddings (when available) and
+full-text matching. The final score is computed using a weighted formula, after which hard limits are
+enforced. Core types that are needed in almost every reply (`profile`, `communication_style`) receive a
+relevance floor so that a semantically unrelated query does not push the user's name and style out of the
+prompt. Open loops are ranked by freshness rather than query relevance: a recent "I'll tell you how it went"
+deserves a follow-up regardless of the current topic.
 
 ```js
 // Hard minimization limits. Values come from config (config.memoryLimits),
 // which reads MEMORY_LIMIT_* env vars and defaults to 7/5/12/3/3/30.
 const LIMITS = config.memoryLimits; // { profile: 7, dialog: 5, domain: 12, reminder: 3, secure: 3, total: 30 }
 
-function scoreItem(it, relevance) {
-  const recency = it.updated_at ? recencyScore(it.updated_at) : 0.5;
-  return relevance * 0.45 + Number(it.importance) * 0.25 + recency * 0.10 +
-         Number(it.confidence) * 0.10 + (it.entity_match ? 1 : 0) * 0.07 +
-         Math.min(Number(it.usage_count || 0) / 10, 1) * 0.03;
+function scoreFact(it, relevance) {
+  const boosted = CORE_TYPES.has(it.fact_type) ? Math.max(relevance, 0.6) : relevance;
+  return boosted * 0.5 + Number(it.confidence) * 0.25 +
+         recencyScore(it.last_confirmed_at) * 0.15 +
+         Math.min(Number(it.evidence_count || 1) / 5, 1) * 0.1;
 }
 ```
 
-The structural candidate filter and vector search share a single scope-and-privacy predicate:
+The structural candidate filter and vector search share a single privacy-safe predicate (secret data never
+reaches this table — it lives encrypted in `secure_records`):
 
 ```sql
-SELECT id, scope, memory_kind, entity_type, entity_key, memory_text, data,
-       importance, confidence, sensitivity, usage_count, updated_at
-FROM mem.memory_items
+SELECT id, domain_key, fact_type, fact_text, confidence, evidence_count, last_confirmed_at
+FROM mem.user_facts
 WHERE user_id = $1
   AND status = 'active'
   AND (expires_at IS NULL OR expires_at > now())
-  AND sensitivity IN ('public','low','normal')
-  AND (scope = 'profile' OR (scope = 'domain' AND domain_id = $2) OR scope = 'dialog')
-ORDER BY importance DESC, updated_at DESC
+  AND domain_key IN ('general', $2)
+ORDER BY confidence DESC, last_confirmed_at DESC
 LIMIT 100;
 ```
+
+The retrieval result is grouped for the prompt: `profile` (facts of the `general` domain), `dialog` (open
+loops), and `domain` (facts of the current domain), plus reminders and secure summaries when the classifier
+requested those scopes.
 
 An important resilience detail: if the embedding service is unavailable, the `embed` function returns `null` and
 the system continues on full-text and structural search without crashing. The vector layer is optional.
@@ -87,14 +113,14 @@ Memory usage rules:
 - Do not disclose sensitive data without explicit necessity and consent.
 - If a fact is outdated or questionable, use it with caution.
 
-User profile:
+User profile and communication style:
 - User prefers short answers
 
-Current dialog:
+Open conversation loops (may be gently revisited when appropriate):
 - (no relevant facts)
 
 Domain memory (domain math_tutor):
-- User has a weak understanding of quadratic equations
+- User is preparing for a math exam
 
 Secure references to protected records:
 - (no relevant facts)
@@ -112,65 +138,80 @@ beginning of the prompt for caching purposes, and knowledge-base fragments next 
 
 ## [MEM-4] Write Pipeline: Extraction, Filtering, and Deduplication
 
-After the response, the system extracts candidates for long-term memory from the dialog
-(`src/pipeline/extract.js`) and merges them with existing facts (`src/pipeline/merge.js`). The extraction prompt
-lists what to save (stable preferences, style, goals, domain facts, progress, long-term tasks, and companion-mode
-facts) and what not to save (fleeting emotions, one-off details, obvious information, uncertain guesses, secrets
-as plain text). For companion mode there are dedicated `memory_kind` values: `emotional_pattern`,
-`activity_rhythm`, `communication_style`, `open_loop`, `topic_energy`, and `discovery_seed`. They store recurring
-emotional patterns, activity rhythm, communication style, unresolved threads, topic energy, and potential new
-conversation directions. The prompt requires capturing patterns rather than one-off states, avoiding
-psychological labels, avoiding absolute wording such as "always" and "never", and lowering `confidence` when the
-inference is weak. User reactions to assistant messages are treated as ordinary history events: they produce a
-memory candidate only when the target message makes the meaning of the reaction unambiguous. If there is nothing
-to save, the model returns an empty list.
+After the response, the system extracts facts for long-term memory from the dialog
+(`src/pipeline/facts.js`, function `extractFacts`) and saves them with write-time deduplication (`saveFacts`).
+The whole write path takes a single LLM call per turn.
+
+**Facts are extracted ONLY from what the user says.** The extraction context is built so that the
+assistant's own words cannot be mistaken for new information about the user:
+
+- the user's recent messages are passed verbatim inside `<user>` tags (the current message plus up to two
+  previous ones for pattern detection);
+- the assistant reply the user was responding to is passed as a short plain-text summary (no HTML) inside an
+  `<assistant>` tag — never as full text;
+- the classifier's detected intent of the current message is included as a reference line;
+- the prompt states explicitly that nothing inside `<assistant>` may produce a fact: that text is already
+  stored memory, and re-extracting it would create an avalanche of duplicates (for example, when the
+  assistant lists the user's saved facts and the user says "show them again").
+
+The assistant-reply summary is produced right after each response by an auxiliary model call
+(`summarizeAnswer`, request kind `answer_summary`): one or two plain sentences, no HTML or markdown, lists
+described generically ("showed the saved notes list") without repeating user facts. The summary is stored in
+the assistant message `metadata.summary` and reused on the next turn; when a summary is missing, the
+HTML-stripped truncated reply text serves as a fallback. Short replies are their own summary without a model
+call.
+
+The extraction prompt lists what to save (stable facts of the ten types from MEM-1, phrased as one short
+third-person sentence) and what not to save: anything from assistant messages, fleeting emotions, one-off
+details, obvious information, commands to the bot ("show my notes", "remind me tomorrow" — actions, not facts
+about the person), uncertain guesses, and sensitive data (passport, payment, exact address, medical) — such
+data is skipped entirely rather than stored. The prompt requires capturing patterns rather than one-off
+states, avoiding psychological labels, and avoiding absolute wording such as "always" and "never". User
+reactions to assistant messages produce a fact only when the target message makes the meaning of the reaction
+unambiguous. If there is nothing to save, the model returns an empty list — and most turns yield exactly that.
+
+The model returns flat fact objects; the pipeline assigns the storage domain itself (person-level types go to
+`general`, `goal` and `open_loop` to the current domain):
+
+```json
+{ "facts": [ { "type": "preference", "fact_text": "Пользователь любит капучино на овсяном молоке",
+               "confidence": 0.9, "ttl_days": null } ] }
+```
 
 ### [MEM-5] Auto-save Threshold and Privacy
 
-```js
-// Importance ≥ 0.6, confidence ≥ 0.7, not sensitive, and no confirmation required.
-function passesAutoSave(c) {
-  if (c.requires_confirmation) return false;
-  if (c.sensitivity === 'high' || c.sensitivity === 'secret') return false;
-  return Number(c.importance) >= 0.6 && Number(c.confidence) >= 0.7;
-}
-```
+A fact is saved automatically only when `confidence >= config.facts.minConfidence` (0.7 by default);
+weaker candidates are skipped. Sensitive data does not reach this filter at all — the extraction prompt drops
+it, and the secure storage path ([07-secure-privacy.md](07-secure-privacy.md)) remains the only place where
+secrets are kept, encrypted.
 
 ### [MEM-6] Deduplication and Updating Instead of Creating Duplicates
 
-To avoid accumulating three contradictory facts such as "lives in Moscow / Kazan / Sochi" and semantic
-duplicates like "short answers" stored under different `scope` values, the system builds a stable `dedupe_key`
-for each candidate. This key captures the meaning of the assertion:
-`profile:communication_style:short_direct_answers`, `feature_request:global_memory`,
-`flight_search:trip:sgn_mow_2026_06_16_2_adults_baggage`. The original `scope` and `memory_kind` values are
-preserved, but duplicate search spans compatible groups: profile preferences are compared against system-level
-style instructions, feature requests are compared across `profile`, `domain`, and `dialog`, and a single trip's
-context is compared across `dialog open_loop`, `domain goal`, and `progress`.
+Deduplication happens at write time and is purely semantic: before inserting, `saveFact` finds the nearest
+active fact of the same user and the same `fact_type` by embedding cosine similarity (with an exact-text
+fallback when the embedding service is unavailable). Two thresholds from configuration
+(`facts.confirmSimilarity` = 0.85 and `facts.replaceSimilarity` = 0.7, calibrated for
+`text-embedding-3-small`) split the outcome into three cases:
 
-Similarity search uses several signals: exact `dedupe_key`, canonical entity (`entity_type` + `entity_key`),
-full-text match, vector proximity, matching of key `data` fields, scope-group compatibility, and `memory_kind`
-proximity. Clear-cut matches are resolved locally: the record is updated or replaces the old one, and the
-redundant row is soft-archived. Ambiguous cases remain an extension point for `MergeDecision`, but the base
-pipeline does not depend on an additional model call and degrades gracefully to a rule-based decision.
+- **similarity ≥ confirmSimilarity — confirmation.** The same statement in a different wording. The existing
+  row is updated in place: the newer wording wins, `confidence` is raised to the maximum of the two,
+  `evidence_count` is incremented, `last_confirmed_at` is refreshed, and an `open_loop` fact gets its
+  `expires_at` extended. Repeatedly confirmed facts therefore rank higher and never multiply.
+- **replaceSimilarity ≤ similarity < confirmSimilarity — replacement.** The same topic with a new value
+  ("current city: Moscow" → "current city: Kazan"). The new row is inserted with `metadata.replaces`, the old
+  one is archived with `metadata.replaced_by` — conflicts resolve toward the newest statement while the
+  history stays auditable.
+- **below replaceSimilarity — a new fact.** Inserted as a new row.
 
-Each group of duplicates receives a `canonical_group_id`. The canonical row is chosen by importance, confidence,
-freshness, text specificity, `data` completeness, and `usage_count`; a more specific record beats a general one.
-The `metadata` field stores `last_update`, `replaced_by`, and a `dedupe` block containing the key, score,
-decision source, and timestamp.
+Aging is driven by `expires_at`: `open_loop` facts always receive a TTL (`facts.openLoopTtlDays`, 30 days by
+default, model-overridable via `ttl_days`), expired rows are excluded from retrieval and archived by the
+scheduler's `memory_cleanup` task.
 
-```js
-const identity = buildDedupeIdentity(domainKey, candidate);
-const similar = await findDedupeCandidates({ userId, domainKey, candidate, candidateVector });
-const merge = decideDedupe(candidate, similar);
-if (merge.decision === 'replace_existing') {
-  const newId = await insertMemory(...);
-  await archiveMemory(merge.targetId, newId, { dedupe: merge.audit });
-}
-```
-
-Retroactive cleanup of already-accumulated duplicates is performed by the same deduplication module. A dry-run
-shows groups, the canonical row, and candidates for archiving; applying the run sets duplicates to
-`status='archived'` and writes an audit entry.
+Retroactive cleanup of accumulated duplicates is the `dedupeFactsSweep` function (the scheduler's
+`memory_dedupe_cleanup` task and the manual `memory:dedupe` script): pairs of same-type facts above the
+confirmation threshold are merged — the row with more confirmations survives and absorbs the duplicate's
+`evidence_count`, the duplicate is archived with `metadata.merged_into`. A dry run reports the pairs without
+changing anything.
 
 ---
 
@@ -187,11 +228,12 @@ tool lives in its own module under `src/pipeline/agent-tools/`, which co-locates
 definition, and the handler. The user controls their memory using natural phrases, and the agent selects the
 appropriate tool automatically:
 
-- **`memory_list`** — "show me what you remember about me". Relies on `listMemory`. High-sensitivity protected
-  values (passport, phone number, etc.) are not disclosed: only the generic entity name is shown for them.
+- **`memory_list`** — "show me what you remember about me". Relies on `listMemory`; supports an optional
+  `fact_type` filter. Secrets never appear here: they live only in secure storage as redacted summaries.
 - **`memory_forget_entity`** — "forget my address", "delete the data about my car". Relies on `deleteByEntity`:
-  finds active records by fuzzy-matching the name against the entity key or entity type and soft-sets them to
-  `status='deleted'`. If the name matches records of different types, the tool returns a list of candidates and
+  finds active facts by exact id, exact fact text, a case-insensitive text fragment, or — when exact methods
+  find nothing — semantic embedding search with cautious thresholds, and soft-sets matches to
+  `status='deleted'`. If the name matches facts of different types, the tool returns a list of candidates and
   deletes nothing until the agent clarifies with the user exactly what to forget.
 - **`memory_forget_all`** — "delete everything you know about me". Relies on `forgetAll` and only fires when
   `confirm=true`. The agent's system prompt requires it to ask the user for confirmation before calling this tool —

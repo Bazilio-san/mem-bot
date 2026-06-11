@@ -9,10 +9,6 @@ CREATE SCHEMA IF NOT EXISTS mem;
 
 CREATE TYPE mem.memory_status     AS ENUM ('active','archived','deleted','pending_confirmation','rejected');
 CREATE TYPE mem.sensitivity_level AS ENUM ('public','low','normal','high','secret');
-CREATE TYPE mem.memory_kind       AS ENUM
-  ('fact','preference','constraint','goal','history','state','progress','instruction','relationship',
-   'reminder','secure_reference','emotional_pattern','activity_rhythm','communication_style','open_loop',
-   'topic_energy','discovery_seed');
 CREATE TYPE mem.task_status        AS ENUM ('active','paused','completed','cancelled','failed');
 CREATE TYPE mem.task_schedule_kind AS ENUM ('one_time','interval','cron','rrule');
 CREATE TYPE mem.task_run_status    AS ENUM ('queued','running','success','failed','skipped');
@@ -145,81 +141,65 @@ The conversation history compression layer populates `conversation_summaries`. I
 
 ---
 
-## [DATA-4] The Primary Memory Table `memory_items`
+## [DATA-4] The Primary Memory Table `user_facts`
 
-A single universal table covers both profile memory and domain memory. The difference is expressed by the `scope`
-field: `profile`, `domain`, `dialog`, `system`. The human-readable text of a fact goes in `memory_text` (it is
-included in the prompt), and structured domain data goes in `data jsonb`. The `search_tsv` column is an
-automatically generated full-text vector; `embedding` is a 1536-dimensional vector for semantic search. The fields
-`dedupe_key`, `canonical_group_id`, and `dedupe_status` link semantic duplicates into a single canonical group: one
-row stays active while replaced rows are archived with an audit trail in `metadata`.
+Long-term memory is a single flat table of facts about the user. Each row is one short human-readable
+statement (`fact_text`) with three storage coordinates: the user (`user_id`), the conversation domain
+(`domain_key`, with `'general'` holding facts about the person that are valid in any domain), and the fact
+type (`fact_type`, a closed set of ten types oriented at conversational quality — see
+[06-memory.md](06-memory.md)). There is no per-entity structured payload and no separate importance score:
+ranking relies on `confidence`, freshness (`last_confirmed_at`), and the number of repeated confirmations
+(`evidence_count`). The `search_tsv` column is an automatically generated full-text vector; `embedding` is a
+1536-dimensional vector for semantic search and write-time deduplication. Aging is expressed by
+`expires_at` (always set for `open_loop` facts and refreshed when the fact is re-confirmed).
 
 ```sql
-CREATE TABLE IF NOT EXISTS mem.memory_items (
+CREATE TABLE IF NOT EXISTS mem.user_facts (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     uuid NOT NULL REFERENCES mem.users(id) ON DELETE CASCADE,
-    domain_id   uuid REFERENCES mem.agent_domains(id),
-    scope       text NOT NULL CHECK (scope IN ('profile','domain','dialog','system')),
-    memory_kind mem.memory_kind NOT NULL,
-    entity_type text,
-    entity_key  text,
-    title       text,
-    memory_text text NOT NULL,
-    data        jsonb NOT NULL DEFAULT '{}'::jsonb,
-    importance  numeric(3,2) NOT NULL DEFAULT 0.50 CHECK (importance >= 0 AND importance <= 1),
-    confidence  numeric(3,2) NOT NULL DEFAULT 0.70 CHECK (confidence >= 0 AND confidence <= 1),
-    sensitivity mem.sensitivity_level NOT NULL DEFAULT 'normal',
-    status      mem.memory_status     NOT NULL DEFAULT 'active',
-    source_conversation_id uuid REFERENCES mem.conversations(id)        ON DELETE SET NULL,
-    source_message_id      uuid REFERENCES mem.conversation_messages(id) ON DELETE SET NULL,
-    valid_from   timestamptz,
-    expires_at   timestamptz,
-    last_used_at timestamptz,
-    usage_count  integer NOT NULL DEFAULT 0,
-    embedding    vector(1536),
-    search_tsv   tsvector GENERATED ALWAYS AS (
-        to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(memory_text,''))
-    ) STORED,
-    dedupe_key         text,
-    canonical_group_id uuid,
-    dedupe_status      text NOT NULL DEFAULT 'candidate',
-    metadata   jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    domain_key  text NOT NULL DEFAULT 'general',
+    fact_type   text NOT NULL CHECK (fact_type IN (
+        'profile','preference','habit','goal','emotional_pattern','activity_rhythm',
+        'communication_style','open_loop','topic_energy','discovery_seed')),
+    fact_text   text NOT NULL,
+    confidence  numeric(3,2) NOT NULL DEFAULT 0.80 CHECK (confidence >= 0 AND confidence <= 1),
+    evidence_count integer NOT NULL DEFAULT 1,
+    status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','deleted')),
+    source_conversation_id uuid REFERENCES mem.conversations(id) ON DELETE SET NULL,
+    embedding   vector(1536),
+    search_tsv  tsvector GENERATED ALWAYS AS (to_tsvector('simple', fact_text)) STORED,
+    metadata    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    expires_at        timestamptz,
+    last_confirmed_at timestamptz NOT NULL DEFAULT now(),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_memory_user_scope_status  ON mem.memory_items (user_id, scope, status);
-CREATE INDEX IF NOT EXISTS idx_memory_user_domain_status ON mem.memory_items (user_id, domain_id, status);
-CREATE INDEX IF NOT EXISTS idx_memory_entity             ON mem.memory_items (user_id, domain_id, entity_type, entity_key);
-CREATE INDEX IF NOT EXISTS idx_memory_expires            ON mem.memory_items (expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memory_importance         ON mem.memory_items (user_id, importance DESC, updated_at DESC)
-                                                          WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_memory_search_tsv         ON mem.memory_items USING gin (search_tsv);
-CREATE INDEX IF NOT EXISTS idx_memory_data_gin           ON mem.memory_items USING gin (data jsonb_path_ops);
-CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw     ON mem.memory_items USING hnsw (embedding vector_cosine_ops)
-                                                          WHERE embedding IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memory_dedupe_key         ON mem.memory_items (user_id, dedupe_key)
-                                                          WHERE status = 'active' AND dedupe_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memory_canonical_group    ON mem.memory_items (user_id, canonical_group_id)
-                                                          WHERE canonical_group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_facts_lookup    ON mem.user_facts (user_id, status, domain_key, fact_type);
+CREATE INDEX IF NOT EXISTS idx_user_facts_rank      ON mem.user_facts (user_id, confidence DESC, last_confirmed_at DESC)
+                                                    WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_user_facts_expires   ON mem.user_facts (expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_facts_tsv       ON mem.user_facts USING gin (search_tsv);
+CREATE INDEX IF NOT EXISTS idx_user_facts_embedding ON mem.user_facts USING hnsw (embedding vector_cosine_ops)
+                                                    WHERE embedding IS NOT NULL;
 ```
 
 The `vector(1536)` dimensionality matches the `<EMBED_MODEL>` model. If vector search is not needed, the `embedding`
-field and the HNSW index can be removed — the system gracefully falls back to full-text and structural search.
+field and the HNSW index can be removed — the system gracefully falls back to full-text and structural search, and
+write-time deduplication degrades to exact-text matching.
 
-`dedupe_key` is built from the stable semantic identity of the fact, not from arbitrary text. Examples:
-`profile:communication_style:short_direct_answers`, `feature_request:global_memory`, and
-`flight_search:trip:sgn_mow_2026_06_16_2_adults_baggage`. `canonical_group_id` groups rows that belong to the same
-cluster; `dedupe_status` shows the role of a row within the group (`canonical`, `duplicate`, `superseded`,
-`candidate`).
+Deduplication works at write time and leaves an audit trail in `metadata`: a confirming write bumps
+`evidence_count` and `last_confirmed_at` on the existing row; a replacing write archives the old row with
+`metadata.replaced_by` and stores `metadata.replaces` on the new one; the background sweep merges residual
+duplicates and marks archived rows with `metadata.merged_into`.
 
 ---
 
 ## [DATA-5] Secure Memory
 
 Secret data is stored in `mem.secure_records` in encrypted form (`encrypted_payload bytea`), while only the safe
-description `redacted_summary` is written to regular memory and included in the prompt. The
-`memory_secure_links` table links a regular memory fact to a secure record. For details on how this works, see
-[07-secure-privacy.md](07-secure-privacy.md).
+description `redacted_summary` is included in the prompt. The table is self-contained: secure records carry their
+own addressing (`record_type`, `subject_key`, `display_name`) and are never linked to rows in `user_facts`. For
+details on how this works, see [07-secure-privacy.md](07-secure-privacy.md).
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.secure_records (
@@ -244,14 +224,6 @@ CREATE TABLE IF NOT EXISTS mem.secure_records (
 CREATE INDEX IF NOT EXISTS idx_secure_user_type ON mem.secure_records (user_id, record_type);
 CREATE INDEX IF NOT EXISTS idx_secure_subject   ON mem.secure_records (user_id, domain_id, subject_key);
 CREATE INDEX IF NOT EXISTS idx_secure_expires   ON mem.secure_records (expires_at) WHERE expires_at IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS mem.memory_secure_links (
-    memory_item_id   uuid NOT NULL REFERENCES mem.memory_items(id)   ON DELETE CASCADE,
-    secure_record_id uuid NOT NULL REFERENCES mem.secure_records(id) ON DELETE CASCADE,
-    relation_type    text NOT NULL DEFAULT 'references',
-    created_at       timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (memory_item_id, secure_record_id)
-);
 ```
 
 ---
@@ -371,9 +343,9 @@ CREATE TABLE IF NOT EXISTS mem.memory_jobs (
 CREATE INDEX IF NOT EXISTS idx_memory_jobs_pending ON mem.memory_jobs (created_at) WHERE status = 'pending';
 ```
 
-The base schema totals thirteen tables: `users`, `agent_domains`, `conversations`, `conversation_messages`,
-`conversation_summaries`, `memory_items`, `secure_records`, `memory_secure_links`, `scheduled_tasks`,
-`scheduled_task_runs`, `notification_outbox`, `tool_calls`, `memory_jobs`.
+The base schema totals twelve tables: `users`, `agent_domains`, `conversations`, `conversation_messages`,
+`conversation_summaries`, `user_facts`, `secure_records`, `scheduled_tasks`, `scheduled_task_runs`,
+`notification_outbox`, `tool_calls`, `memory_jobs`.
 
 ---
 
@@ -457,7 +429,7 @@ The `enabled` flag on an individual trigger selects active reasons for outreach,
 triggers is created in a disabled state when the user enables proactivity. The `proactive_contact_state` table stores
 the overall contact mode; see [09-proactivity.md](09-proactivity.md).
 
-With proactivity, the total is seventeen tables.
+With proactivity, the total is sixteen tables.
 
 ---
 
@@ -513,13 +485,13 @@ The global tables contain no `user_id`: records are shared across all users. Wri
 
 ---
 
-## [DATA-10] Domain `data` Schema
+## [DATA-10] Domain Entity Schemas
 
-The closed schema for `data` fields and the `entity_key` canonicalization rules per domain are not stored in the
-database — they live in a file alongside the skill (`skills/<name>/domain-schema.json`) and are loaded into memory
-by the skills registry at startup. The database only applies the result: the validated `data` and the canonicalized
-`entity_key` are written to `mem.memory_items`, while the schema source marker and canonicalization notes go into
-its `metadata`. The layer is described in detail in [11-per-domain-schema.md](11-per-domain-schema.md).
+The closed per-domain entity schemas are not stored in the database — each lives in a file alongside its skill
+(`skills/<name>/domain-schema.json`) and is loaded by the skills registry at startup. These schemas describe the
+subject entities of a domain for the skill-authoring toolset (generation, surgical edits, and meta-validation of
+skills); they do not participate in the memory write or read paths — long-term memory stores flat facts in
+`mem.user_facts` ([DATA-4]). The layer is described in detail in [11-per-domain-schema.md](11-per-domain-schema.md).
 
 ## [DATA-11] Message External References
 

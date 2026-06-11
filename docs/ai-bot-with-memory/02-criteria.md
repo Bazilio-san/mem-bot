@@ -5,11 +5,11 @@
 | ID | Criterion | Reference Module (recommendation) |
 |--------|----------|-------------------------------|
 | CRIT-1 | Five memory types, each with its own logic | `mem.*` schema tables in `migrations/001_init.sql` |
-| CRIT-2 | Does not save noise (an important fact is not the same as a random phrase) | `passesAutoSave` threshold in `src/pipeline/merge.js` |
+| CRIT-2 | Does not save noise (an important fact is not the same as a random phrase) | `confidence >= config.facts.minConfidence` threshold in `saveFacts` (`src/pipeline/facts.js`) |
 | CRIT-3 | Does not bloat the prompt (10–30 facts) | hard `LIMITS` in `src/pipeline/retrieve.js` |
 | CRIT-4 | A new message takes precedence over old memory | rule in the `MAIN_SYSTEM` system prompt (`src/agent.js`) |
-| CRIT-5 | Updates a fact without duplicates | `dedupe_key`, `decideDedupe`, update and archival in `merge.js` |
-| CRIT-6 | Distinguishes a fact, an intention, and a task | `scope` / `memory_kind` fields plus a dedicated scheduler |
+| CRIT-5 | Updates a fact without duplicates | write-time semantic deduplication in `saveFact` (`src/pipeline/facts.js`): confirm and replace similarity thresholds |
+| CRIT-6 | Distinguishes a fact, an intention, and a task | `fact_type` and `domain_key` fields plus a dedicated scheduler |
 | CRIT-7 | Sensitive data — only with confirmation | `src/pipeline/secure.js` (encryption, consent) |
 | CRIT-8 | Does not expose unnecessary data | only `redacted_summary` is included in the prompt |
 | CRIT-9 | Calls tools (built-in and external via MCP) | `src/pipeline/agent-tools/*` modules, external MCP servers from `.mcp.json` (`src/mcp/*`), and the tool loop in `agent.js` |

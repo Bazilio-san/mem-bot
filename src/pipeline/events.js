@@ -99,13 +99,14 @@ function nextEvent() {
 
 async function loadFactsText(userId, domainId) {
   const { rows } = await query(
-    `SELECT memory_kind, memory_text FROM mem.memory_items
-      WHERE user_id = $1 AND status = 'active' AND sensitivity IN ('public','low','normal')
-        AND (scope = 'profile' OR (scope = 'domain' AND domain_id = $2))
-      ORDER BY importance DESC LIMIT 20`,
+    `SELECT fact_type, fact_text FROM mem.user_facts
+      WHERE user_id = $1 AND status = 'active'
+        AND (expires_at IS NULL OR expires_at > now())
+        AND domain_key IN ('general', (SELECT domain_key FROM mem.agent_domains WHERE id = $2))
+      ORDER BY confidence DESC, last_confirmed_at DESC LIMIT 20`,
     [userId, domainId],
   );
-  return rows.map((r) => `- (${r.memory_kind}) ${r.memory_text}`).join('\n');
+  return rows.map((r) => `- (${r.fact_type}) ${r.fact_text}`).join('\n');
 }
 
 // Assessment of an event's relevance to the user. Strict JSON.

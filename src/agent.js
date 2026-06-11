@@ -7,6 +7,7 @@ import {
   ensureUser,
   ensureConversation,
   saveMessage,
+  setMessageSummary,
   getRecentMessages,
   getDomainId,
   getLastUserMessageTime,
@@ -14,12 +15,11 @@ import {
 } from './repo.js';
 import { classifyIntent } from './pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext } from './pipeline/retrieve.js';
-import { extractCandidates, extractTopics } from './pipeline/extract.js';
-import { persistCandidates } from './pipeline/merge.js';
+import { extractFacts, saveFacts, summarizeAnswer, stripHtml } from './pipeline/facts.js';
 import { buildToolDefs, executeTool, toolTitle, initTools } from './pipeline/tools.js';
 import { getChannelProfile } from './pipeline/channels.js';
 import { buildTemporalContext, formatTemporalContext, formatDateTime } from './utils/temporal.js';
-import { getTopicContext, formatTopicContext, upsertTopicMentions } from './pipeline/topics.js';
+import { getTopicContext, formatTopicContext, upsertTopicMentions, extractTopics } from './pipeline/topics.js';
 import { buildHistoryContext } from './pipeline/history-context.js';
 import { buildGlobalFactsBlock } from './pipeline/global-memory.js';
 import { formatReactionToken } from './pipeline/reactions.js';
@@ -705,20 +705,46 @@ ${activeSkill.skillPrompt}`,
     });
 
     // Stage 5: extracting and writing facts. Asynchronous by default (does not slow down the response).
-    const recentText = [...history, { role: 'user', content: userMessage }, { role: 'assistant', content: answer }]
-      .map((m) => `${m.role}: ${m.content}`)
-      .join('\n');
+    // Источник фактов — ТОЛЬКО реплики пользователя. Полный текст ответа ассистента в контекст
+    // извлечения не попадает: вместо него используется короткое саммари без HTML (защита от
+    // лавинообразного повторного извлечения фактов, которые бот сам перечислил в ответе).
     const writeJob = (async () => {
       try {
-        const candidates = await extractCandidates({
+        // Саммари ТЕКУЩЕГО ответа — в metadata сообщения ассистента; пригодится на следующем ходе.
+        const answerSummary = await summarizeAnswer(answer);
+        if (answerSummary) {
+          await setMessageSummary(assistantMessageRow.id, answerSummary);
+        }
+        // Контекст реплики пользователя — ответ ассистента, на который он отвечал (последний
+        // assistant из истории ДО текущего хода): саммари из metadata, фолбэк — очищенный текст.
+        const prevAssistant = [...history].reverse().find((m) => m.role === 'assistant');
+        const prevSummary = prevAssistant
+          ? prevAssistant.metadata?.summary || stripHtml(prevAssistant.content).slice(0, config.facts.summaryMaxChars)
+          : '';
+        const prevUserMessages = history
+          .filter((m) => m.role === 'user')
+          .slice(-2)
+          .map((m) => m.content);
+        const facts = await extractFacts({
           skillName: ctx.skillName,
           domainKey: effectiveDomain,
-          recentMessages: recentText,
-          assistantResponse: answer,
+          userMessages: [...prevUserMessages, userMessage],
+          assistantSummary: prevSummary,
+          intent,
         });
-        const result = await persistCandidates(user.id, effectiveDomain, candidates, conversation.id);
+        const result = await saveFacts(user.id, effectiveDomain, facts, conversation.id);
         // Extracting and updating dialog topics — only in companion mode.
         if (config.companion.enabled) {
+          const recentText = [
+            ...history,
+            { role: 'user', content: userMessage },
+            { role: 'assistant', content: answer },
+          ]
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .map(
+              (m) => `${m.role}: ${m.role === 'assistant' ? m.metadata?.summary || stripHtml(m.content) : m.content}`,
+            )
+            .join('\n');
           const topics = await extractTopics({ recentMessages: recentText });
           if (topics.length) {
             await upsertTopicMentions(user.id, await getDomainId(effectiveDomain), topics);
@@ -832,15 +858,16 @@ export async function recordUserReaction({
 
     let memoryWrites = null;
     if (reactionKey && targetMessage?.role === 'assistant') {
-      const recentMessages = `assistant: ${targetText}\nuser: ${content}`;
+      // Цель реакции — сообщение ассистента: оно подаётся как контекст в теге <assistant> (без HTML),
+      // а извлечение работает только по реплике пользователя с описанием реакции.
       const writeJob = (async () => {
         try {
-          const candidates = await extractCandidates({
+          const facts = await extractFacts({
             domainKey,
-            recentMessages,
-            assistantResponse: targetText,
+            userMessages: [content],
+            assistantSummary: stripHtml(targetText).slice(0, config.facts.summaryMaxChars),
           });
-          return persistCandidates(user.id, domainKey, candidates, conversation.id);
+          return saveFacts(user.id, domainKey, facts, conversation.id);
         } catch (err) {
           return { error: String(err.message || err) };
         }

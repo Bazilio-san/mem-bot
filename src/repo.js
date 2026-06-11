@@ -208,7 +208,7 @@ export async function saveConversationSummary({
 // Get the latest conversation messages in chronological order.
 export async function getRecentMessages(conversationId, limit = 10) {
   const { rows } = await query(
-    `SELECT role, content, tool_name, created_at
+    `SELECT role, content, tool_name, metadata, created_at
      FROM mem.conversation_messages
      WHERE conversation_id = $1
      ORDER BY created_at DESC
@@ -216,6 +216,17 @@ export async function getRecentMessages(conversationId, limit = 10) {
     [conversationId, limit],
   );
   return rows.reverse();
+}
+
+// Дописать саммари ответа ассистента в metadata сообщения. Саммари считается асинхронно после
+// доставки ответа, поэтому это отдельный UPDATE, а не часть saveMessage.
+export async function setMessageSummary(messageId, summary) {
+  await query(
+    `UPDATE mem.conversation_messages
+        SET metadata = metadata || jsonb_build_object('summary', $2::text)
+      WHERE id = $1`,
+    [messageId, summary],
+  );
 }
 
 // Record a tool call in the log (for debugging and auditing).

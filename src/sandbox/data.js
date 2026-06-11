@@ -33,8 +33,8 @@ const TRIGGER_LABELS = {
 export async function listUsers() {
   const { rows } = await query(
     `SELECT u.id, u.external_id, u.display_name, u.timezone, u.is_admin,
-            (SELECT count(*) FROM mem.memory_items mi
-              WHERE mi.user_id = u.id AND mi.status = 'active') AS memory_count
+            (SELECT count(*) FROM mem.user_facts uf
+              WHERE uf.user_id = u.id AND uf.status = 'active') AS memory_count
        FROM mem.users u
       ORDER BY (u.display_name IS NULL), memory_count DESC, u.created_at`,
   );
@@ -50,34 +50,26 @@ export async function listUsers() {
 
 // All active memory of the user, split into the prototype's five categories.
 // Fields are mapped to names the page understands, so the frontend does not depend on DB column names.
+// Группировка плоских фактов: open_loop → dialog (незакрытые линии), факты непустого домена → domain,
+// остальное (домен general) → profile.
 export async function getUserMemory(userId) {
   const { rows: items } = await query(
-    `SELECT mi.id, mi.scope, mi.memory_kind, mi.entity_type, mi.entity_key, mi.title,
-            mi.memory_text, mi.data, mi.importance, mi.confidence, mi.sensitivity,
-            mi.usage_count, mi.updated_at, ad.domain_key
-       FROM mem.memory_items mi
-       LEFT JOIN mem.agent_domains ad ON ad.id = mi.domain_id
-      WHERE mi.user_id = $1 AND mi.status = 'active' AND mi.scope IN ('profile','dialog','domain')
-      ORDER BY mi.importance DESC, mi.updated_at DESC`,
+    `SELECT id, domain_key, fact_type, fact_text, confidence, evidence_count, last_confirmed_at, updated_at
+       FROM mem.user_facts
+      WHERE user_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > now())
+      ORDER BY confidence DESC, updated_at DESC`,
     [userId],
   );
 
   const group = { profile: [], dialog: [], domain: [] };
   for (const it of items) {
-    if (!group[it.scope]) {
-      continue;
-    }
-    group[it.scope].push({
+    const groupKey = it.fact_type === 'open_loop' ? 'dialog' : it.domain_key !== 'general' ? 'domain' : 'profile';
+    group[groupKey].push({
       id: it.id,
-      kind: it.memory_kind,
-      entityType: it.entity_type,
-      entityKey: it.entity_key,
-      text: it.memory_text,
-      data: it.data || {},
-      importance: Number(it.importance),
+      kind: it.fact_type,
+      text: it.fact_text,
       confidence: Number(it.confidence),
-      sensitivity: it.sensitivity,
-      usage: Number(it.usage_count || 0),
+      usage: Number(it.evidence_count || 1),
       updated: it.updated_at,
       domain: it.domain_key,
     });
@@ -226,14 +218,14 @@ export async function chat({ externalId, phrase, currentDomain = 'general' }) {
 // Delete a single memory record from the sandbox. The deletion is soft: the record stops appearing in
 // retrievals but physically remains in the database (for an audit trail and possible recovery). The method
 // depends on the category:
-//   profile/dialog/domain — status 'deleted' in mem.memory_items;
+//   profile/dialog/domain — status 'deleted' in mem.user_facts;
 //   reminder              — status 'cancelled' in mem.scheduled_tasks;
 //   secure                — consent 'revoked' in mem.secure_records (the protected data is not disclosed and
 //                           stops being shown, but the ciphertext remains until a separate erasure operation).
 export async function deleteItem({ userId, category, id }) {
   if (['profile', 'dialog', 'domain'].includes(category)) {
     const { rowCount } = await query(
-      `UPDATE mem.memory_items SET status = 'deleted', updated_at = now()
+      `UPDATE mem.user_facts SET status = 'deleted', updated_at = now()
         WHERE id = $1 AND user_id = $2 AND status = 'active'`,
       [id, userId],
     );
