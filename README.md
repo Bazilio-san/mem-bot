@@ -187,7 +187,9 @@ organized is in
 The memory principle and its five types are described in the section [“What the bot can do”](#what-the-bot-can-do). A
 detailed breakdown of selection, writing, and deduplication is in
 [docs/ai-bot-with-memory/06-memory.md](docs/ai-bot-with-memory/06-memory.md), and the structure of protected memory is in
-[docs/ai-bot-with-memory/07-secure-privacy.md](docs/ai-bot-with-memory/07-secure-privacy.md).
+[docs/ai-bot-with-memory/07-secure-privacy.md](docs/ai-bot-with-memory/07-secure-privacy.md). How large the memory can
+grow and which mechanisms contain it (prompt caps, TTL archiving, deduplication, journal retention) is summarized in
+[readme-docs/memory-growth.md](./readme-docs/memory-growth.md).
 
 The proactive extension lets the bot start a conversation itself on a suitable occasion: a prolonged silence, a morning
 greeting, progress toward a goal, the interlocutor's return, or an external event. All thresholds and daily limits are
@@ -214,6 +216,9 @@ For the full list of checks by subsystem, service scripts, and the source code l
 [readme-docs/development.md](./readme-docs/development.md).
 
 ## Architecture and documentation
+
+A one-page data-flow map — pipeline stages, prompt assembly, memory layers, and background loops — is in
+[readme-docs/architecture.md](./readme-docs/architecture.md).
 
 The full technical documentation is collected in the [docs/ai-bot-with-memory/](docs/ai-bot-with-memory/README.md)
 directory and is organized on the principle of progressive disclosure: from overview to the deep technical part. The
