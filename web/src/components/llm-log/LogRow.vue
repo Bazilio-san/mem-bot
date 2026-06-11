@@ -44,8 +44,8 @@ const KIND_COLORS = {
 
 const ICONS = {
   user_say: '👤',
-  stage: '▷',
-  agent_start: '▷',
+  stage: '◆',
+  agent_start: '⚑',
   agent_end: '◻',
   agent_error: '⚠',
   llm_request: '→',
@@ -98,11 +98,11 @@ const hasBody = computed(() => props.row.body != null);
 <template>
   <div class="lr" :style="{ background: color }" :class="{ stage: row.isGroupHeader }">
     <div class="lr-h" @click="emit('toggle')">
-      <span class="lr-chev">{{
-        row.isGroupHeader ? (expanded ? '▾' : '▸') : hasBody ? (expanded ? '▾' : '▸') : ''
-      }}</span>
       <span class="lr-n">{{ row.n }}</span>
-      <span class="lr-ic" :style="{ marginLeft: `${(row.indent || 0) * 22}px` }">{{ icon }}</span>
+      <span class="lr-chev" :style="{ marginLeft: `${(row.indent || 0) * 22}px` }">
+        <i v-if="row.isGroupHeader || hasBody" class="pi" :class="expanded ? 'pi-chevron-down' : 'pi-chevron-right'" />
+      </span>
+      <span class="lr-ic">{{ icon }}</span>
       <span class="lr-cap">{{ row.title }}</span>
       <span v-if="meta" class="lr-meta">{{ meta }}</span>
       <span v-if="row.error" class="lr-err" :title="row.error">⚠ {{ row.error }}</span>
@@ -184,11 +184,13 @@ const hasBody = computed(() => props.row.body != null);
 }
 .lr-chev {
   color: #6b7280;
-  width: 20px;
-  font-size: 16px;
-  line-height: 1;
+  width: 32px;
   flex: none;
   text-align: center;
+}
+.lr-chev .pi {
+  font-size: 15px;
+  vertical-align: middle;
 }
 .lr-b {
   padding: 8px 12px 10px 44px;

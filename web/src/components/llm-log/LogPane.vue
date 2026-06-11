@@ -33,19 +33,17 @@ async function copyRequestId() {
   }
 }
 
-// При загрузке нового журнала раскрываем «смысловые» строки, как в прототипе: сообщение пользователя и
-// финальный ответ. Остальное свёрнуто.
+// Все группы-стадии журнала: нужны, чтобы схлопнуть их разом при загрузке и по кнопке «свернуть всё».
+function allGroupIds(log) {
+  return new Set((log?.rows || []).filter((r) => r.isGroupHeader).map((r) => r.groupId));
+}
+
+// При загрузке нового журнала всё свёрнуто: группы схлопнуты, тела строк закрыты.
 watch(
   () => props.log,
   (log) => {
-    const next = new Set();
-    for (const row of log?.rows || []) {
-      if (row.rowType === 'user_say' || row.rowType === 'answer_user') {
-        next.add(row.n);
-      }
-    }
-    expandedRows.value = next;
-    collapsedGroups.value = new Set();
+    expandedRows.value = new Set();
+    collapsedGroups.value = allGroupIds(log);
   },
   { immediate: true },
 );
@@ -74,7 +72,7 @@ function setAll(open) {
   if (!props.log) {
     return;
   }
-  collapsedGroups.value = new Set();
+  collapsedGroups.value = open ? new Set() : allGroupIds(props.log);
   expandedRows.value = open
     ? new Set(props.log.rows.filter((r) => !r.isGroupHeader && r.body != null).map((r) => r.n))
     : new Set();
