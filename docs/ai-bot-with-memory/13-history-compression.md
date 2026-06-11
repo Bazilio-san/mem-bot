@@ -305,7 +305,7 @@ computed by the code:
 The `facts_to_memory` field contains durable facts that are better stored in long-term memory rather than in
 the history, in the same flat `{type, fact_text, confidence}` form that fact extraction produces. They cannot
 be written directly: they go through the same `saveFacts` flow as ordinary fact extraction (see
-[06-memory.md](06-memory.md)) with `source = 'history_summary'` — the lowest-ranked live source, so a
+[06-memory.md](06-memory.md)) with `source = 'history_summary'` — the lowest-ranked source, so a
 summarizer fact never overwrites a fact stated directly by the user. This preserves the unified logic of
 "confidence threshold → write-time semantic deduplication → confirm or replace instead of duplicating" and
 does not bypass the auto-save rules.

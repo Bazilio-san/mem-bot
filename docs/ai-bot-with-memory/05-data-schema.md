@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS mem.user_facts (
     status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','deleted')),
     -- Origin of the fact; affects ranking and conflict resolution (see 06-memory.md).
     source      text NOT NULL DEFAULT 'user_statement'
-        CHECK (source IN ('user_statement','user_reaction','history_summary','migration','manual')),
+        CHECK (source IN ('user_statement','user_reaction','history_summary','manual')),
     -- Pinned fact ("remember forever"): no expires_at, immune to the background sweep,
     -- replaceable only by a source of rank user_statement or higher.
     persistent  boolean NOT NULL DEFAULT false,

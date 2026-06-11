@@ -68,11 +68,10 @@ export function mapKindToType(kind) {
 // разрешено, только если ранг нового источника не ниже ранга старого. Закреплённые (persistent)
 // строки замещает только источник ранга user_statement и выше — человек явно передумал.
 export const SOURCE_RANK = {
-  manual: 4,
-  user_statement: 3,
-  user_reaction: 2,
-  history_summary: 1,
-  migration: 0,
+  manual: 3,
+  user_statement: 2,
+  user_reaction: 1,
+  history_summary: 0,
 };
 
 export const FACT_SOURCES = Object.keys(SOURCE_RANK);

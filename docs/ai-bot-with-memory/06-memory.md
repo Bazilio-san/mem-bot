@@ -68,7 +68,7 @@ const LIMITS = config.memoryLimits; // { profile: 7, dialog: 5, domain: 12, remi
 
 // Source reliability: direct user statements and explicit pin requests outrank
 // reaction-derived facts, history-compression facts, and migrated rows.
-const SOURCE_WEIGHT = { manual: 1.0, user_statement: 1.0, user_reaction: 0.8, history_summary: 0.7, migration: 0.6 };
+const SOURCE_WEIGHT = { manual: 1.0, user_statement: 1.0, user_reaction: 0.8, history_summary: 0.7 };
 
 function scoreFact(it, relevance) {
   const boosted = CORE_TYPES.has(it.fact_type) ? Math.max(relevance, 0.6) : relevance;
@@ -204,11 +204,10 @@ retrieval weight (MEM-2) and write-time conflict resolution (MEM-6):
 
 | `source` | Rank | Write path |
 |---|---|---|
-| `manual` | 4 | The `memory_pin` tool — the user explicitly asked to remember the fact |
-| `user_statement` | 3 | The regular extraction path from the user's dialog messages (default) |
-| `user_reaction` | 2 | Extraction from a user reaction to an assistant message |
-| `history_summary` | 1 | Facts recovered by the history-compression summarizer |
-| `migration` | 0 | Rows transferred from a previous storage |
+| `manual` | 3 | The `memory_pin` tool — the user explicitly asked to remember the fact |
+| `user_statement` | 2 | The regular extraction path from the user's dialog messages (default) |
+| `user_reaction` | 1 | Extraction from a user reaction to an assistant message |
+| `history_summary` | 0 | Facts recovered by the history-compression summarizer |
 
 A fact may also be **pinned** (`persistent = true`): the user explicitly asked to remember it forever. A
 pinned row never receives `expires_at`, the background sweep never archives it, and only a source of rank
