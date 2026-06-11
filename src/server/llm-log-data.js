@@ -6,6 +6,8 @@
 // (tests/llm-log-cycle.test.mjs) and degrades gracefully for historical cycles recorded before the agent
 // event journal existed.
 import { query, queryLog } from '../db.js';
+import { REQUEST_KIND_DISPLAY } from '../pipeline/llm-log.js';
+import { EVENT_DISPLAY } from '../pipeline/agent-event-log.js';
 
 // Human titles of request kinds (request_kind) for row headers and service badges.
 const KIND_TITLES = {
@@ -13,6 +15,7 @@ const KIND_TITLES = {
   delivery_intent: 'Классификация доставки',
   intent_classify: 'Классификация интента',
   fact_extract: 'Выгрузка фактов в память',
+  answer_summary: 'Саммари ответа',
   topic_extract: 'Темы разговора',
   event_relevance: 'Оценка релевантности события',
   proactive_message: 'Проактивное сообщение',
@@ -28,7 +31,7 @@ const KIND_TITLES = {
 
 // Kinds that run after the user already got the answer; the viewer shows them under a separate
 // "post-processing" stage header.
-const POST_KINDS = new Set(['fact_extract', 'topic_extract']);
+const POST_KINDS = new Set(['fact_extract', 'answer_summary', 'topic_extract']);
 
 export function kindTitle(kind) {
   return KIND_TITLES[kind] || kind || 'Запрос';
@@ -232,9 +235,10 @@ function buildHeader(records, rows) {
 //
 // Row model: { n, rowType, kind, title, indent, groupId, isGroupHeader, createdAt, model, tokens, priceUsd,
 // durationMs, status, error, body }. body is one of:
-//   { kind: 'text', text }                — plain text (user message)
+//   { kind: 'text', text }                — plain text (user message; always RAW, no format select)
 //   { kind: 'payload', payload }          — LLM request body (progressive disclosure on the frontend)
-//   { kind: 'content', content }          — response/tool content (format auto-detection on the frontend)
+//   { kind: 'content', content, displayFormat } — response/tool content; displayFormat comes from the
+//     server-side type dictionaries (REQUEST_KIND_DISPLAY / EVENT_DISPLAY); null = frontend auto-detection
 //
 // Ordering: every row gets a real timestamp. A journal record is written AFTER the call completes, so the
 // request row's display time is created_at minus duration_ms (the call start) and the response row's time is
@@ -297,7 +301,7 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           title: e.title || 'Вызов инструмента',
           indent: 2,
           groupId: currentGroup,
-          body: contentBody(e.data),
+          body: contentBody(e.data, EVENT_DISPLAY[e.event_type]),
         });
         break;
       case 'tool.completed':
@@ -308,7 +312,7 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           title: e.title || 'Результат инструмента',
           indent: 2,
           groupId: currentGroup,
-          body: contentBody(e.data),
+          body: contentBody(e.data, EVENT_DISPLAY[e.event_type]),
         });
         break;
       case 'mcp.connected':
@@ -320,7 +324,21 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           title: e.title || 'MCP-сервер',
           indent: 1,
           groupId: currentGroup,
-          body: contentBody(e.data),
+          body: contentBody(e.data, EVENT_DISPLAY[e.event_type]),
+        });
+        break;
+      case 'memory.written':
+      case 'memory.sweep':
+        // Без groupId: итог записи памяти идёт после ответа и попадает в группу «Пост-обработка»
+        // (или наследует активную группу, когда пост-обработки в цикле нет).
+        rows.push({
+          ...base,
+          rowType: 'memory',
+          kind: 'memory',
+          title:
+            e.title || (e.event_type === 'memory.written' ? 'Факты записаны в память' : 'Чистка дубликатов памяти'),
+          indent: 1,
+          body: contentBody(e.data, EVENT_DISPLAY[e.event_type]),
         });
         break;
       case 'assistant.completed':
@@ -388,7 +406,7 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           title: `Результат инструмента${toolMsg.name ? `: ${toolMsg.name}` : ''}`,
           indent: 2,
           createdAt: new Date(startMs - 1).toISOString(),
-          body: { kind: 'content', content: toolMsg.content },
+          body: { kind: 'content', content: toolMsg.content, displayFormat: 'JSON' },
         });
       }
     }
@@ -426,7 +444,11 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
         error: r.status === 'error' ? r.error : null,
         llmRequestId: r.llm_request_id,
         responseTruncated: r.response_truncated === true,
-        body: { kind: 'content', content: serializeResponse(r.response) },
+        body: {
+          kind: 'content',
+          content: serializeResponse(r.response),
+          displayFormat: REQUEST_KIND_DISPLAY[kind] ?? null,
+        },
       });
     }
 
@@ -440,7 +462,7 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           title: `Вызов инструмента: ${tc.function?.name || '?'}`,
           indent: 2,
           createdAt: new Date(endMs + 1).toISOString(),
-          body: { kind: 'content', content: tc.function?.arguments || '{}' },
+          body: { kind: 'content', content: tc.function?.arguments || '{}', displayFormat: 'JSON' },
         });
       }
       prevChatPayload = r.payload;
@@ -465,7 +487,12 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
       body: null,
     });
     for (let i = firstPostIdx + 1; i < rows.length; i++) {
-      if (POST_KINDS.has(rows[i].kind) || rows[i].rowType === 'llm_response' || rows[i].kind === 'embedding') {
+      if (
+        POST_KINDS.has(rows[i].kind) ||
+        rows[i].rowType === 'llm_response' ||
+        rows[i].kind === 'embedding' ||
+        rows[i].kind === 'memory'
+      ) {
         rows[i].groupId = postGroup;
       }
     }
@@ -521,18 +548,24 @@ function toIso(v) {
   return v instanceof Date ? v.toISOString() : new Date(v).toISOString();
 }
 
-// Event data → a content body (pretty JSON on the frontend); empty data → no body.
-function contentBody(data) {
+// Event data → a content body; empty data → no body. displayFormat comes from EVENT_DISPLAY
+// (null = frontend auto-detection).
+function contentBody(data, displayFormat = null) {
   if (data == null) {
     return null;
   }
-  return { kind: 'content', content: typeof data === 'string' ? data : JSON.stringify(data) };
+  return {
+    kind: 'content',
+    content: typeof data === 'string' ? data : JSON.stringify(data),
+    displayFormat: displayFormat ?? null,
+  };
 }
 
 // assistant.completed carries { text } — show the answer text itself, not a JSON wrapper.
+// The reply is in the channel's format (HTML / MD / plain) — auto-detection on the frontend.
 function answerBody(data) {
   if (data && typeof data === 'object' && typeof data.text === 'string') {
-    return { kind: 'content', content: data.text };
+    return { kind: 'content', content: data.text, displayFormat: null };
   }
   return contentBody(data);
 }

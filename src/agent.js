@@ -35,6 +35,35 @@ function newRequestId() {
   return `llm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Итог записи фактов в долговременную память — событие memory.written. Пишется и при пустом списке
+// (created=0 … — видно, что извлечение отработало и ничего не нашло). durationMs — длительность всего
+// writeJob; счётчики по действиям saveFacts; список фактов компактный (текст обрезан).
+function logMemoryWritten({ facts = [], results = [], startedAt, error = null }) {
+  const counts = { created: 0, confirmed: 0, replaced: 0, skipped: 0, errors: 0 };
+  const items = (results || []).map((r, i) => {
+    const key = r.action === 'error' ? 'errors' : r.action;
+    if (counts[key] != null) {
+      counts[key] += 1;
+    }
+    const fact = facts?.[i] || r.fact || {};
+    return {
+      action: r.action,
+      type: fact.type || null,
+      fact_text: String(fact.fact_text || '').slice(0, 160),
+      source: r.source || null,
+      ...(r.similarity != null ? { similarity: Number(Number(r.similarity).toFixed(3)) } : {}),
+    };
+  });
+  logAgentEvent({
+    eventType: AGENT_EVENTS.MEMORY_WRITTEN,
+    title: 'Факты записаны в память',
+    data: { ...counts, facts: items },
+    ...(startedAt ? { durationMs: Date.now() - startedAt } : {}),
+    status: error ? 'error' : 'ok',
+    ...(error ? { error } : {}),
+  });
+}
+
 const MAIN_SYSTEM = `Ты агентское приложение с инструментами и долговременной памятью.
 Правила:
 1. Отвечай на текущий запрос пользователя.
@@ -710,6 +739,9 @@ ${activeSkill.skillPrompt}`,
     // извлечения не попадает: вместо него используется короткое саммари без HTML (защита от
     // лавинообразного повторного извлечения фактов, которые бот сам перечислил в ответе).
     const writeJob = (async () => {
+      const writeStartedAt = Date.now();
+      let extracted = [];
+      let saved = null;
       try {
         // Саммари ТЕКУЩЕГО ответа — в metadata сообщения ассистента; пригодится на следующем ходе.
         const answerSummary = await summarizeAnswer(answer);
@@ -733,7 +765,9 @@ ${activeSkill.skillPrompt}`,
           assistantSummary: prevSummary,
           intent,
         });
+        extracted = facts;
         const result = await saveFacts(user.id, effectiveDomain, facts, conversation.id);
+        saved = result;
         // Extracting and updating dialog topics — only in companion mode.
         if (config.companion.enabled) {
           const recentText = [
@@ -751,8 +785,15 @@ ${activeSkill.skillPrompt}`,
             await upsertTopicMentions(user.id, await getDomainId(effectiveDomain), topics);
           }
         }
+        logMemoryWritten({ facts: extracted, results: result, startedAt: writeStartedAt });
         return result;
       } catch (err) {
+        logMemoryWritten({
+          facts: extracted,
+          results: saved || [],
+          startedAt: writeStartedAt,
+          error: String(err.message || err),
+        });
         return { error: String(err.message || err) };
       }
     })();
@@ -862,14 +903,25 @@ export async function recordUserReaction({
       // Цель реакции — сообщение ассистента: оно подаётся как контекст в теге <assistant> (без HTML),
       // а извлечение работает только по реплике пользователя с описанием реакции.
       const writeJob = (async () => {
+        const writeStartedAt = Date.now();
+        let extracted = [];
         try {
           const facts = await extractFacts({
             domainKey,
             userMessages: [content],
             assistantSummary: stripHtml(targetText).slice(0, config.facts.summaryMaxChars),
           });
-          return saveFacts(user.id, domainKey, facts, conversation.id, { source: 'user_reaction' });
+          extracted = facts;
+          const result = await saveFacts(user.id, domainKey, facts, conversation.id, { source: 'user_reaction' });
+          logMemoryWritten({ facts: extracted, results: result, startedAt: writeStartedAt });
+          return result;
         } catch (err) {
+          logMemoryWritten({
+            facts: extracted,
+            results: [],
+            startedAt: writeStartedAt,
+            error: String(err.message || err),
+          });
           return { error: String(err.message || err) };
         }
       })();

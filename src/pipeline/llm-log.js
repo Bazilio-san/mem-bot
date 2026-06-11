@@ -37,6 +37,34 @@ export const REQUEST_KINDS = Object.freeze({
   UNTYPED: 'untyped',
 });
 
+// Default display format of the RESPONSE CONTENT of each request kind in the admin log viewer
+// (the "Ответ ← LLM" row; the request payload is always rendered by PayloadView). The format is a property
+// of the kind and lives next to the kind dictionary — the single source of truth on the server.
+// 'JSON' | 'RAW' | 'MD' | 'HTML' | null; null = frontend auto-detection (kinds with variable content).
+export const REQUEST_KIND_DISPLAY = Object.freeze({
+  // Strictly structured chatJSON responses.
+  intent_classify: 'JSON',
+  delivery_intent: 'JSON',
+  fact_extract: 'JSON',
+  topic_extract: 'JSON',
+  event_relevance: 'JSON',
+  history_compress: 'JSON',
+  answer_summary: 'JSON',
+  voice_summary: 'JSON',
+  // Service/binary metadata.
+  embedding: 'JSON',
+  tts: 'JSON',
+  // Recognized speech is plain text.
+  stt: 'RAW',
+  // The analysis is rendered as Markdown (as AnalyzeDialog already does).
+  log_analysis: 'MD',
+  // Variable content (channel HTML / MD / plain) — auto-detection.
+  main_agent_answer: null,
+  proactive_message: null,
+  skill_authoring: null,
+  untyped: null,
+});
+
 // Default request kind by endpoint. Deliberately does NOT include chat.completions: for it a missing
 // kind is treated as an error and marked REQUEST_KINDS.UNTYPED, rather than substituted with a plausible value.
 const DEFAULT_KIND_BY_ENDPOINT = {

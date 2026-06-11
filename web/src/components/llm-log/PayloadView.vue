@@ -68,6 +68,18 @@ function toolCallTags(m) {
   return (m?.tool_calls || []).map((tc) => tc?.function?.name || '?');
 }
 
+// Формат содержимого сообщения по роли: user/system — сырой текст, tool — JSON;
+// assistant — единственная роль с переменным содержимым, остаётся автодетекция (null).
+function roleFormat(role) {
+  if (role === 'user' || role === 'system') {
+    return 'RAW';
+  }
+  if (role === 'tool') {
+    return 'JSON';
+  }
+  return null;
+}
+
 const openedMessages = ref(new Set());
 const openedTools = ref(new Set());
 const openedParams = ref(new Set());
@@ -222,10 +234,15 @@ onBeforeUnmount(() => {
           <div v-if="m.tool_calls?.length" class="pv-tcalls">
             <div v-for="(tc, i) in m.tool_calls" :key="i">
               <b>{{ tc.function?.name }}</b>
-              <ContentViewer :content="tc.function?.arguments || '{}'" compact />
+              <ContentViewer :content="tc.function?.arguments || '{}'" compact default-format="JSON" />
             </div>
           </div>
-          <ContentViewer v-if="messageContent(m)" :content="messageContent(m)" compact />
+          <ContentViewer
+            v-if="messageContent(m)"
+            :content="messageContent(m)"
+            compact
+            :default-format="roleFormat(m.role)"
+          />
         </div>
       </div>
     </div>
@@ -246,6 +263,7 @@ onBeforeUnmount(() => {
             v-if="openedParams.has(idx) && toolInfo(t).parameters"
             :content="JSON.stringify(toolInfo(t).parameters)"
             compact
+            default-format="JSON"
           />
         </div>
       </div>

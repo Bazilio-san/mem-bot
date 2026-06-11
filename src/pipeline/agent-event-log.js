@@ -21,6 +21,25 @@ export const AGENT_EVENTS = Object.freeze({
   ASSISTANT_COMPLETED: 'assistant.completed',
   AGENT_COMPLETED: 'agent.completed',
   AGENT_FAILED: 'agent.failed',
+  // Итог записи фактов в долговременную память (writeJob основного хода и путь реакций).
+  MEMORY_WRITTEN: 'memory.written',
+  // Итог фоновой чистки дубликатов памяти (dedupeFactsSweep): задача планировщика и ручной скрипт.
+  MEMORY_SWEEP: 'memory.sweep',
+});
+
+// Default display format of the event data body in the admin log viewer. The format is a property of the
+// event type and lives next to the type dictionary (single source of truth on the server).
+// 'JSON' | 'RAW' | 'MD' | 'HTML' | null; null = frontend auto-detection. Types absent here either have no
+// body at all (agent.*, stage.started — plain text rows) or carry variable content.
+export const EVENT_DISPLAY = Object.freeze({
+  'tool.started': 'JSON',
+  'tool.completed': 'JSON',
+  'memory.written': 'JSON',
+  'memory.sweep': 'JSON',
+  'mcp.connected': 'JSON',
+  'mcp.failed': 'JSON',
+  // Текст ответа в формате канала (HTML/MD/plain) — автодетекция.
+  'assistant.completed': null,
 });
 
 // Columns of log.agent_event in insertion order. data is jsonb.

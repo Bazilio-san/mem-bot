@@ -2343,6 +2343,41 @@ async function layerLogJournal() {
     msgRows.length === 2 && msgRows.every((m) => m.request_id === res.requestId),
     msgRows.map((m) => `${m.role}:${m.request_id}`).join('; '),
   );
+
+  // 10.7–10.8. Ход с синхронной записью памяти: итог записи фактов журналируется событием memory.written
+  // с согласованными счётчиками, а саммари ответа (answer_summary) появляется не более одного раза за ход.
+  {
+    await freshUser('tlog_mem');
+    const res2 = await handleMessage({
+      externalId: 'tlog_mem',
+      userMessage: 'Я не люблю длинные ответы, пиши коротко.',
+      domainKey: 'general',
+      extractSync: true,
+    });
+    await flushLlmLog();
+    await flushAgentEventLog();
+    const { rows: memEvents } = await queryLog(
+      `SELECT data, status, duration_ms FROM log.agent_event
+        WHERE request_id = $1 AND event_type = 'memory.written'`,
+      [res2.requestId],
+    );
+    const d = memEvents[0]?.data || {};
+    const counted = (d.created || 0) + (d.confirmed || 0) + (d.replaced || 0) + (d.skipped || 0) + (d.errors || 0);
+    check(
+      '10.7. Событие memory.written записано, счётчики согласованы со списком фактов',
+      memEvents.length === 1 &&
+        memEvents[0].status === 'ok' &&
+        Array.isArray(d.facts) &&
+        counted === d.facts.length &&
+        memEvents[0].duration_ms != null,
+      JSON.stringify(d).slice(0, 200),
+    );
+    const { rows: sumRows } = await queryLog(
+      `SELECT count(*)::int AS c FROM log.llm_request WHERE request_id = $1 AND request_kind = 'answer_summary'`,
+      [res2.requestId],
+    );
+    check('10.8. answer_summary появляется в журнале цикла не более одного раза', sumRows[0].c <= 1);
+  }
 }
 
 // ========================= Запуск ===========================================

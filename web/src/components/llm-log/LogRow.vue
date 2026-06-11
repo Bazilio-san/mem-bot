@@ -25,7 +25,9 @@ const KIND_COLORS = {
   tool_result: '#eafbda',
   embedding: '#f5edff',
   fact_extract: '#ffe7e3',
+  answer_summary: '#ffe7e3',
   topic_extract: '#ffe7e3',
+  memory: '#fde2f0',
   history_compress: '#ffebd9',
   proactive_message: '#c5ebf1',
   event_relevance: '#c5ebf1',
@@ -53,6 +55,7 @@ const ICONS = {
   embedding: '↔',
   answer_user: '💬',
   mcp: '⛓',
+  memory: '🧠',
   event: '•',
 };
 
@@ -112,7 +115,11 @@ const hasBody = computed(() => props.row.body != null);
         Содержимое было обрезано при записи в журнал (лимит maxPayloadChars).
       </div>
       <PayloadView v-if="row.body.kind === 'payload'" :payload="row.body.payload" :binary-meta="row.body.binaryMeta" />
-      <ContentViewer v-else-if="row.body.kind === 'content'" :content="row.body.content || ''" />
+      <ContentViewer
+        v-else-if="row.body.kind === 'content'"
+        :content="row.body.content || ''"
+        :default-format="row.body.displayFormat || null"
+      />
       <div v-else-if="row.body.kind === 'text'" class="lr-text">{{ row.body.text }}</div>
     </div>
   </div>

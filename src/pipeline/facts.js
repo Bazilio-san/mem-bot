@@ -13,6 +13,7 @@ import { query, vectorToSql } from '../db.js';
 import { chatJSON, embed } from '../llm.js';
 import { config } from '../config.js';
 import { getFactExtractionPrompt, getSkill, getSkillByDomain } from './skills/registry.js';
+import { logAgentEvent, AGENT_EVENTS } from './agent-event-log.js';
 
 export const FACT_TYPES = [
   'profile',
@@ -488,5 +489,12 @@ export async function dedupeFactsSweep({ userId, dryRun = false, limit = 500 } =
       [pair.dropId, pair.keepId],
     );
   }
+  // Итог чистки — событие memory.sweep. Запускается вне request-контекста (задача планировщика или
+  // ручной скрипт), поэтому корреляционные поля события NULL — просмотрщик покажет его как сервисное.
+  logAgentEvent({
+    eventType: AGENT_EVENTS.MEMORY_SWEEP,
+    title: 'Чистка дубликатов памяти',
+    data: { checked: facts.length, merged: pairs.length, pairs },
+  });
   return { merged: pairs.length, checked: facts.length, pairs };
 }

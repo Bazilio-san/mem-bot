@@ -11,6 +11,10 @@ const props = defineProps({
   content: { type: String, default: '' },
   // Компактный режим ограничивает высоту блока (используется внутри элементов messages).
   compact: { type: Boolean, default: false },
+  // Формат отображения по умолчанию ('JSON' | 'MD' | 'HTML' | 'RAW'). Если задан — стартовый режим
+  // равен ему БЕЗ автодетекции (и при смене content сбрасывается к нему же); null — автодетекция.
+  // Источник — серверные словари типов (REQUEST_KIND_DISPLAY / EVENT_DISPLAY).
+  defaultFormat: { type: String, default: null },
 });
 
 const FORMATS = ['JSON', 'MD', 'HTML', 'RAW'];
@@ -37,11 +41,16 @@ function detectFormat(s) {
   return 'RAW';
 }
 
-const mode = ref(detectFormat(props.content));
+// Стартовый режим: заданный сервером формат типа без автодетекции, иначе автодетекция по содержимому.
+function initialMode(content) {
+  return FORMATS.includes(props.defaultFormat) ? props.defaultFormat : detectFormat(content);
+}
+
+const mode = ref(initialMode(props.content));
 watch(
   () => props.content,
   (v) => {
-    mode.value = detectFormat(v);
+    mode.value = initialMode(v);
   },
 );
 
