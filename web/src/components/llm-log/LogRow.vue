@@ -9,8 +9,10 @@ import ContentViewer from './ContentViewer.vue';
 const props = defineProps({
   row: { type: Object, required: true },
   expanded: { type: Boolean, default: false },
+  // Чекбокс отбора строк для AI-анализа: true — строка (или вся группа) выбрана.
+  checked: { type: Boolean, default: false },
 });
-const emit = defineEmits(['toggle']);
+const emit = defineEmits(['toggle', 'check']);
 
 // Палитра из референсной реализации multi-bot: неяркие пастельные фоны, к которым привыкает глаз.
 const KIND_COLORS = {
@@ -98,6 +100,13 @@ const hasBody = computed(() => props.row.body != null);
 <template>
   <div class="lr" :style="{ background: color }" :class="{ stage: row.isGroupHeader }">
     <div class="lr-h" @click="emit('toggle')">
+      <input
+        type="checkbox"
+        class="lr-cb"
+        :checked="checked"
+        :title="row.isGroupHeader ? 'Выбрать всю группу для запроса к ИИ' : 'Выбрать строку для запроса к ИИ'"
+        @click.stop="emit('check')"
+      />
       <span class="lr-n">{{ row.n }}</span>
       <span class="lr-chev" :style="{ marginLeft: `${(row.indent || 0) * 22}px` }">
         <i v-if="row.isGroupHeader || hasBody" class="pi" :class="expanded ? 'pi-chevron-down' : 'pi-chevron-right'" />
@@ -139,6 +148,12 @@ const hasBody = computed(() => props.row.body != null);
 }
 .lr-h:hover {
   filter: brightness(0.97);
+}
+.lr-cb {
+  flex: none;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #e8a33d;
 }
 .lr-n {
   width: 24px;

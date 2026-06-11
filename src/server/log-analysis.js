@@ -100,11 +100,14 @@ function sseEnd(res) {
 
 // Run the analysis and stream the result into the response. Throws only before the stream starts (bad
 // arguments → JSON error); after the SSE header any failure is reported inside the stream.
-export async function runAnalysis({ llmRequestId, question, engine, model, preset }, res) {
+// Two ways to provide the prompt: a ready-made `prompt` text built (and possibly edited) on the client,
+// or the legacy pair llmRequestId + question — then the prompt is assembled here from the journal record.
+export async function runAnalysis({ llmRequestId, question, engine, model, preset, prompt: rawPrompt }, res) {
   const cfg = analysisConfig();
+  const direct = String(rawPrompt || '').trim();
   const q = String(question || '').trim();
-  if (!llmRequestId || !q) {
-    res.status(400).json({ error: 'Нужны llmRequestId и question.' });
+  if (!direct && (!llmRequestId || !q)) {
+    res.status(400).json({ error: 'Нужен либо готовый prompt, либо пара llmRequestId и question.' });
     return;
   }
   if (engine === 'cli' && !cfg.cliAvailable) {
@@ -113,13 +116,15 @@ export async function runAnalysis({ llmRequestId, question, engine, model, prese
     });
     return;
   }
-  const { rows } = await queryLog(`SELECT * FROM log.llm_request WHERE llm_request_id = $1`, [Number(llmRequestId)]);
-  if (!rows.length) {
-    res.status(404).json({ error: 'Запись журнала не найдена.' });
-    return;
+  let prompt = direct;
+  if (!prompt) {
+    const { rows } = await queryLog(`SELECT * FROM log.llm_request WHERE llm_request_id = $1`, [Number(llmRequestId)]);
+    if (!rows.length) {
+      res.status(404).json({ error: 'Запись журнала не найдена.' });
+      return;
+    }
+    prompt = buildPrompt(rows[0], q);
   }
-  const record = rows[0];
-  const prompt = buildPrompt(record, q);
 
   sseStart(res);
   try {

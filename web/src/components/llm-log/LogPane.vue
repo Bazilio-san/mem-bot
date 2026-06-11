@@ -11,10 +11,12 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   title: { type: String, default: '' },
 });
-const emit = defineEmits(['analyze']);
+const emit = defineEmits(['analyze', 'selection']);
 
 const expandedRows = ref(new Set());
 const collapsedGroups = ref(new Set());
+// Номера строк, отмеченных чекбоксами для запроса к ИИ. Чекбокс группы выбирает все её строки разом.
+const checkedRows = ref(new Set());
 
 // Бэйдж «id»: тултип показывает request_id, клик копирует его в буфер обмена.
 const idCopied = ref(false);
@@ -38,15 +40,48 @@ function allGroupIds(log) {
   return new Set((log?.rows || []).filter((r) => r.isGroupHeader).map((r) => r.groupId));
 }
 
-// При загрузке нового журнала всё свёрнуто: группы схлопнуты, тела строк закрыты.
+// При загрузке нового журнала всё свёрнуто: группы схлопнуты, тела строк закрыты, отбор для ИИ сброшен.
 watch(
   () => props.log,
   (log) => {
     expandedRows.value = new Set();
     collapsedGroups.value = allGroupIds(log);
+    checkedRows.value = new Set();
+    emit('selection', []);
   },
   { immediate: true },
 );
+
+// Строки-участники группы (без заголовка): по ним считается состояние группового чекбокса.
+function groupMembers(groupId) {
+  return (props.log?.rows || []).filter((r) => !r.isGroupHeader && r.groupId === groupId);
+}
+
+function isRowChecked(row) {
+  if (row.isGroupHeader) {
+    const members = groupMembers(row.groupId);
+    return members.length > 0 && members.every((m) => checkedRows.value.has(m.n));
+  }
+  return checkedRows.value.has(row.n);
+}
+
+function toggleCheck(row) {
+  const next = new Set(checkedRows.value);
+  if (row.isGroupHeader) {
+    const members = groupMembers(row.groupId);
+    const allSelected = members.length > 0 && members.every((m) => next.has(m.n));
+    members.forEach((m) => (allSelected ? next.delete(m.n) : next.add(m.n)));
+  } else if (next.has(row.n)) {
+    next.delete(row.n);
+  } else {
+    next.add(row.n);
+  }
+  checkedRows.value = next;
+  emit(
+    'selection',
+    [...next].sort((a, b) => a - b),
+  );
+}
 
 function toggleRow(row) {
   if (row.isGroupHeader) {
@@ -122,7 +157,9 @@ const headerSummary = computed(() => {
       <span class="lp-sp" />
       <Button text size="small" title="Развернуть всё" @click="setAll(true)">▼</Button>
       <Button text size="small" title="Свернуть всё" @click="setAll(false)">▲</Button>
-      <Button size="small" severity="warn" @click="emit('analyze')">Спросить ИИ</Button>
+      <Button size="small" severity="warn" @click="emit('analyze')">
+        Спросить ИИ{{ checkedRows.size ? ` (${checkedRows.size})` : '' }}
+      </Button>
     </div>
     <div class="lp-rows">
       <div v-if="loading" class="lp-empty">Загрузка журнала…</div>
@@ -133,7 +170,9 @@ const headerSummary = computed(() => {
           :key="row.n"
           :row="row"
           :expanded="row.isGroupHeader ? !collapsedGroups.has(row.groupId) : expandedRows.has(row.n)"
+          :checked="isRowChecked(row)"
           @toggle="toggleRow(row)"
+          @check="toggleCheck(row)"
         />
       </template>
     </div>

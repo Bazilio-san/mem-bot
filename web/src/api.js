@@ -174,11 +174,11 @@ export function fetchLogAnalysisConfig() {
 // Запуск AI-анализа контекста запроса. Ответ приходит потоком (SSE поверх fetch): onChunk вызывается на
 // каждый фрагмент текста, по завершении промис разрешается полным текстом. Ошибка статуса бросается как
 // исключение с сообщением сервера.
-export async function runLogAnalysis({ llmRequestId, question, engine, model, preset }, onChunk) {
+export async function runLogAnalysis({ llmRequestId, question, engine, model, preset, prompt }, onChunk) {
   const res = await fetch('/api/llm-log/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ llmRequestId, question, engine, model, preset }),
+    body: JSON.stringify({ llmRequestId, question, engine, model, preset, prompt }),
   });
   if (!res.ok) {
     let detail = '';

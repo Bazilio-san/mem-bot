@@ -58,8 +58,8 @@ async function selectLog({ requestId, llmRequestId, item }) {
   }
 }
 
-// Запись для AI-анализа: последний главный запрос цикла (main_agent_answer), иначе — последняя строка
-// запроса вообще. Именно её payload и response уходят анализатору.
+// Запись для AI-анализа по умолчанию (когда чекбоксами ничего не выбрано): последний главный запрос
+// цикла (main_agent_answer), иначе — последняя строка запроса вообще.
 const analyzeTarget = computed(() => {
   const rows = log.value?.rows || [];
   const requests = rows.filter((r) => r.rowType === 'llm_request' && r.llmRequestId);
@@ -68,8 +68,57 @@ const analyzeTarget = computed(() => {
   return target || null;
 });
 
+// Номера строк, отмеченных чекбоксами в журнале — именно их содержимое уйдёт в LLM при анализе.
+const selectedNs = ref([]);
+
+// Одна строка журнала → текстовый блок для промпта: заголовок с метаданными и тело целиком
+// (payload сериализуется как JSON — описания и схемы инструментов попадают в LLM полностью).
+function rowToText(row) {
+  const head = [
+    `строка №${row.n}`,
+    row.title,
+    row.model || null,
+    row.tokens != null ? `${row.tokens} ткн` : null,
+    row.status === 'error' && row.error ? `ошибка: ${row.error}` : null,
+    row.createdAt,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const b = row.body;
+  let body = '';
+  if (b?.kind === 'payload') {
+    body = JSON.stringify(b.payload, null, 2);
+  } else if (b?.kind === 'content') {
+    body = b.content || '';
+  } else if (b?.kind === 'text') {
+    body = b.text || '';
+  }
+  return `### ${head}\n${body || '(нет содержимого)'}`;
+}
+
+// Контекст для AI-анализа: выбранные чекбоксами строки; если ничего не выбрано — запрос и ответ
+// записи analyzeTarget (прежнее поведение «весь главный запрос цикла»).
+const analyzeContext = computed(() => {
+  const rows = log.value?.rows || [];
+  const sel = new Set(selectedNs.value);
+  let chosen = rows.filter((r) => !r.isGroupHeader && sel.has(r.n));
+  if (!chosen.length && analyzeTarget.value) {
+    const id = analyzeTarget.value.llmRequestId;
+    chosen = rows.filter((r) => r.llmRequestId === id && (r.rowType === 'llm_request' || r.rowType === 'llm_response'));
+  }
+  return chosen.map(rowToText).join('\n\n');
+});
+
+const analyzeLabel = computed(() => {
+  if (selectedNs.value.length) {
+    return `выбрано строк журнала: ${selectedNs.value.length} (№ ${selectedNs.value.join(', ')})`;
+  }
+  const t = analyzeTarget.value;
+  return t ? `строка №${t.n} «${t.title}» (запрос + ответ модели)` : '';
+});
+
 function openAnalyze() {
-  if (analyzeTarget.value) {
+  if (analyzeTarget.value || selectedNs.value.length) {
     analyzeVisible.value = true;
   }
 }
@@ -93,14 +142,21 @@ function openAnalyze() {
         <ChatPane :user-id="selectedUser?.id || null" @select-log="selectLog" @error="error = $event" />
       </SplitterPanel>
       <SplitterPanel :size="68" :min-size="30">
-        <LogPane :log="log" :loading="logLoading" :title="logTitle" @analyze="openAnalyze" />
+        <LogPane
+          :log="log"
+          :loading="logLoading"
+          :title="logTitle"
+          @analyze="openAnalyze"
+          @selection="selectedNs = $event"
+        />
       </SplitterPanel>
     </Splitter>
 
     <AnalyzeDialog
       v-model:visible="analyzeVisible"
       :llm-request-id="analyzeTarget?.llmRequestId || null"
-      :context-label="analyzeTarget ? `строка №${analyzeTarget.n} «${analyzeTarget.title}»` : ''"
+      :context-text="analyzeContext"
+      :context-label="analyzeLabel"
     />
   </div>
 </template>

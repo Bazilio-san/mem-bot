@@ -223,7 +223,12 @@ onBeforeUnmount(() => {
         <button type="button" class="pv-mini" @click="setAllMessages(true)">раскрыть все</button>
         <button type="button" class="pv-mini" @click="setAllMessages(false)">свернуть все</button>
       </div>
-      <div v-for="(m, idx) in messages" :key="idx" class="pv-msg" :class="{ open: openedMessages.has(idx) }">
+      <div
+        v-for="(m, idx) in messages"
+        :key="idx"
+        class="pv-msg"
+        :class="[`msg-${m.role}`, { open: openedMessages.has(idx) }]"
+      >
         <div class="pv-msg-h" @click="clickMessage(idx)">
           <span class="pv-role" :class="`role-${m.role}`">{{ m.role }}</span>
           <span v-for="tn in toolCallTags(m)" :key="tn" class="pv-tcall">🛠 {{ tn }}</span>
@@ -257,14 +262,11 @@ onBeforeUnmount(() => {
         <div v-if="openedTools.has(idx)" class="pv-tool-b">
           {{ toolInfo(t).description }}
           <div>
-            <button type="button" class="pv-mini" @click="toggleSet(openedParams, idx)">параметры (JSON Schema)</button>
+            <button type="button" class="pv-mini" @click="toggleSet(openedParams, idx)">
+              JSON инструмента (описание + схема параметров)
+            </button>
           </div>
-          <ContentViewer
-            v-if="openedParams.has(idx) && toolInfo(t).parameters"
-            :content="JSON.stringify(toolInfo(t).parameters)"
-            compact
-            default-format="JSON"
-          />
+          <ContentViewer v-if="openedParams.has(idx)" :content="JSON.stringify(t)" compact default-format="JSON" />
         </div>
       </div>
     </div>
@@ -354,7 +356,7 @@ onBeforeUnmount(() => {
   padding: 3px 8px;
   cursor: pointer;
 }
-.pv-msg-h:hover,
+.pv-msg:not(.open) .pv-msg-h:hover,
 .pv-tool-h:hover {
   background: #fafafa;
 }
@@ -404,6 +406,16 @@ onBeforeUnmount(() => {
 .pv-msg-b {
   border-top: 1px dashed rgba(0, 0, 0, 0.1);
   padding: 6px 8px;
+}
+/* Фон развёрнутого сообщения по роли. */
+.pv-msg.open.msg-system {
+  background: #f3efff;
+}
+.pv-msg.open.msg-assistant {
+  background: #edf7ed;
+}
+.pv-msg.open.msg-user {
+  background: #fffad8;
 }
 .pv-tcalls {
   margin-bottom: 6px;
