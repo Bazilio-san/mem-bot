@@ -213,7 +213,7 @@ Place the full response-loop assembly with companion branches in the `src/agent.
 When the user asks what the bot can do, what features or tools it has, the response loop adds a
 service block called `CAPABILITIES_CONTEXT`. The block contains only the actually available tool
 definitions and instructions for using the RAG editorial article. The domain list is not included
-in this block. A domain is used for classification, memory retrieval, `data` schemas, topics, and
+in this block. A domain is used for classification, memory retrieval, topics, and
 domain-level global facts; it is not itself a public capability and does not imply any action.
 
 The capabilities response is built from available tools, enabled feature flags, and the RAG

@@ -324,13 +324,12 @@ statement replaces it; below the replace threshold a new fact row is inserted.
 
 The skill-editing toolset relies on dedicated generators with strict JSON output in
 `src/pipeline/skills/author.js`. `generateSkillDraft` assembles a full skill draft from a description (name,
-domain key, classification signals, prompt blocks, and optionally a schema definition); `refineBlock` rewrites the
-`# Skill Prompt` or `## Fact Extraction Prompt` block according to an instruction; `generateDomainSchema` and
-`proposeSchemaEdit` create and surgically update a closed domain schema. Every result that contains a schema
-passes through the `validateDefinition` meta-validator before being written, and any findings are returned for
-preview. The model receives grounding for choosing the right tool from the `# Skill Prompt` block of the
-`skill-author` editor skill (see [11-per-domain-schema.md](11-per-domain-schema.md)). These generators and tools
-are available to administrators only and only when the corresponding flag is enabled.
+domain key, classification signals, prompt blocks); `refineBlock` rewrites the `# Skill Prompt` or
+`## Fact Extraction Prompt` block according to an instruction. Generated drafts pass the skill validator before
+being written, and any findings are returned for preview. The model receives grounding for choosing the right
+tool from the `# Skill Prompt` block of the `skill-author` editor skill (see
+[11-per-domain-schema.md](11-per-domain-schema.md)). These generators and tools are available to administrators
+only and only when the corresponding flag is enabled.
 
 ---
 

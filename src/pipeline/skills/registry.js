@@ -1,15 +1,15 @@
 // Runtime skills registry: the single source of a domain. Each skills/<name>/ directory with a SKILL.md file
 // defines a domain memory namespace and all of the domain's behavior — classification signals, the main-answer
-// prompt, the fact-extraction prompt, the closed domain memory schema, the tool list, and references.
+// prompt, the fact-extraction prompt, the tool list, and references.
 //
 // The registry reads files once on first access and keeps the parsed skills in process memory.
-// The source of truth for a domain schema is the file next to the skill (domain-schema.json or the ## Domain
-// Schema block), not a table in the database. This is the "single mechanism": a domain is a projection of a skill.
+// Domain specificity of memory is expressed by two mechanisms: the "## Fact Extraction Prompt" block
+// (mixed into fact extraction) and the domain_key coordinate of mem.user_facts. A domain is a projection
+// of a skill.
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { validateDefinition } from '../../schema/meta.js';
-import { splitSkillFile, extractSection, extractJsonBlock } from './parse.js';
+import { splitSkillFile, extractSection } from './parse.js';
 
 // Per-process cache of the parsed registry. null means "not loaded yet".
 let cache = null;
@@ -37,38 +37,6 @@ function loadOneSkill(dir, name) {
   const skillPrompt = extractSection(body, '# Skill Prompt');
   if (!skillPrompt) {
     issues.push(`skill «${name}»: the "# Skill Prompt" block is missing.`);
-  }
-
-  // Domain memory schema: from a separate file (memory.schema: *.json) or from the ## Domain Schema block.
-  // The schema is optional (a domain may have no subject entities), but if set it must be valid.
-  let definition = null;
-  const schemaRef = fm.memory?.schema;
-  try {
-    if (typeof schemaRef === 'string' && schemaRef.endsWith('.json')) {
-      const schemaPath = path.join(dir, schemaRef);
-      definition = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
-    } else {
-      const block = extractSection(body, '## Domain Schema');
-      definition = block ? extractJsonBlock(block) : null;
-    }
-  } catch (err) {
-    issues.push(`skill «${name}»: failed to read the domain schema — ${err.message}`);
-  }
-
-  // A schema with only a domain_key/title field and no entities is an "empty" schema (a domain with no subject
-  // entities). We validate against the meta-schema only definitions with a non-empty entity list.
-  if (definition && Array.isArray(definition.entities) && definition.entities.length) {
-    const { ok, issues: defIssues } = validateDefinition(definition);
-    if (!ok) {
-      issues.push(`skill «${name}»: the domain schema is invalid:\n  - ${defIssues.join('\n  - ')}`);
-    }
-    if (ok && definition.domain_key !== fm.domain_key) {
-      issues.push(
-        `skill «${name}»: schema domain_key «${definition.domain_key}» does not match skill domain_key «${fm.domain_key}».`,
-      );
-    }
-  } else {
-    definition = null; // no subject entities — a domain without a schema (free-form profile facts)
   }
 
   if (issues.length) {
@@ -103,7 +71,6 @@ function loadOneSkill(dir, name) {
     },
     skillPrompt,
     factExtractionPrompt: extractSection(body, '## Fact Extraction Prompt'),
-    definition, // closed domain memory schema or null
   };
 }
 
@@ -198,16 +165,6 @@ export function getSkillPrompt(name) {
 // Contents of the "## Fact Extraction Prompt" block.
 export function getFactExtractionPrompt(name) {
   return getSkill(name)?.factExtractionPrompt || '';
-}
-
-// Closed domain memory schema of a skill (the definition object) or null.
-export function getDomainSchema(name) {
-  return getSkill(name)?.definition || null;
-}
-
-// Domain schema by domain key (a bridge for the memory-writing layer: validateAndCanonicalize/extract).
-export function getDomainDefinitionByKey(domainKey) {
-  return getSkillByDomain(domainKey)?.definition || null;
 }
 
 // Read a skill reference from the references/** directory. Forbids absolute paths and escaping via "..".

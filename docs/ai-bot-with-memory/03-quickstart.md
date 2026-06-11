@@ -35,9 +35,9 @@ progress events via the `onEvent` callback (see [ARCH-7] in [04-architecture.md]
 feedback.
 
 Skills management (see [11-per-domain-schema.md](11-per-domain-schema.md)): a new domain is added by creating a
-`skills/<name>/` directory containing a `SKILL.md` file and, if needed, `domain-schema.json`. The command
-`npm run skills:validate` validates all skills; `npm run skills:list` shows their domains, tools, and schema
-presence; `npm run skills:sync` creates `domain_key` → `domain_id` mapping rows for new domains in the
+`skills/<name>/` directory containing a `SKILL.md` file. The command
+`npm run skills:validate` validates all skills; `npm run skills:list` shows their domains and tools;
+`npm run skills:sync` creates `domain_key` → `domain_id` mapping rows for new domains in the
 `mem.agent_domains` reference table. In addition to manual file editing, skills can be created and updated by an
 administrator directly in conversation via the skill-authoring toolset, which is enabled by the flag
 `config.skills.authoring.enabled` and is available to administrators only.
@@ -137,7 +137,7 @@ table schema is in [05-data-schema.md](05-data-schema.md), section [DATA-12].
 ```text
 migrations/001_init.sql      single initialization of the memory database: mem schema, all tables, types, indexes, triggers, base domains
 migrations-log/001_log_init.sql  single initialization of the logs database: log schema, journal tables, billing trigger
-skills/                      skills registry: one directory per domain (SKILL.md, domain-schema.json, references/)
+skills/                      skills registry: one directory per domain (SKILL.md, references/)
 config/                      node-config configuration tree: default.yaml, environment files, local.yaml, env-var map
 src/config.js                snapshot of the config tree (node-config): model selection, flags, and DB connection parameters
 src/db.js                    PostgreSQL access via af-db-ts: the memory connection (query) and the logs connection (queryLog)
@@ -150,9 +150,9 @@ src/scheduler-run.js         scheduler and proactivity worker
 src/utils/temporal.js        temporal context (criterion 14)
 src/pipeline/classify.js     stage 1: request classification (skill selection)
 src/pipeline/skills/parse.js     parse SKILL.md into front-matter and markdown blocks
-src/pipeline/skills/registry.js  skills registry: loading, validation, access to prompt, schema, references
+src/pipeline/skills/registry.js  skills registry: loading, validation, access to prompts and references
 src/pipeline/skills/cli.js       skill management commands: validate, list, sync
-src/pipeline/skills/author.js    model-driven generators for skill parts (draft, prompt blocks, schema)
+src/pipeline/skills/author.js    model-driven generators for skill parts (draft, prompt blocks)
 src/pipeline/skills/writer.js    assemble SKILL.md, validate, atomic write, and hot-reload the skill
 src/pipeline/skills/authoring-support.js  helpers for skill-authoring tools
 src/pipeline/agent-tools/skill-authoring/  admin tools for creating and editing skills (skill_author_*)
@@ -181,12 +181,8 @@ src/pipeline/log-retention.js     daily age-based cleanup of the journals (confi
 src/pipeline/llm-pricing.js  request cost calculation from the model price list
 src/pipeline/llm-usage-stats.js   cost aggregates over the narrow log.llm_usage log
 scripts/migrate-llm-log-db.js     one-time transfer of historical journals into the logs database
-src/schema/meta.js           domain definition meta-schema and shared ajv validator
-src/schema/registry.js       domain schema and entity spec access via the skills registry (getEntitySpec)
-src/schema/validate.js       validateAndCanonicalize: validate data and canonicalize entity_key
 tests/run.js                 layered test suite (base layer plus proactivity, history compression, and global memory layers)
 tests/memory_cases.json      fact-extraction test cases
-tests/schema.test.js         domain data schema layer tests (npm run test:schema)
 tests/skills.test.mjs        skills registry and tool-filtering tests (npm run test:skills)
 tests/skill-authoring.test.mjs  skill-authoring toolset tests (npm run test:skill-authoring)
 tests/llm-log-*.test.mjs, tests/log-*.test.mjs, tests/agent-event-log.test.mjs  journal unit and integration suites (npm run test:llm-log, test:llm-log-db)

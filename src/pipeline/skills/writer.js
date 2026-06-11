@@ -1,12 +1,11 @@
 // Skill writing and reload layer for the editing toolkit. Takes a skill object of the same shape the registry
-// returns (getSkill), assembles SKILL.md and domain-schema.json from it, checks invariants before writing, writes
-// atomically with a backup, and hot-reloads the registry. Every write and delete is confined to the
-// config.skills.dir directory: absolute paths and escaping via ".." are rejected.
+// returns (getSkill), assembles SKILL.md from it, checks invariants before writing, writes atomically with a
+// backup, and hot-reloads the registry. Every write and delete is confined to the config.skills.dir directory:
+// absolute paths and escaping via ".." are rejected.
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { query } from '../../db.js';
-import { validateDefinition } from '../../schema/meta.js';
 import { loadSkills, getAllSkills, invalidateSkillsCache } from './registry.js';
 
 const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -50,9 +49,6 @@ export function composeSkillFile(skill) {
   fm.push(`  negative_signals: ${flowList(skill.classification?.negative_signals)}`);
   fm.push('memory:');
   fm.push(`  scopes: ${flowList(skill.memory?.scopes || ['profile', 'domain', 'dialog'])}`);
-  if (skill.definition) {
-    fm.push('  schema: domain-schema.json');
-  }
   fm.push('tools:');
   fm.push(`  allowed: ${flowList(skill.tools?.allowed)}`);
   fm.push(`  base: ${skill.tools?.base === false ? 'false' : 'true'}`);
@@ -88,18 +84,6 @@ export async function validateSkill(skill) {
   }
   if (!skill.skillPrompt || !skill.skillPrompt.trim()) {
     issues.push('The "# Skill Prompt" block is empty.');
-  }
-
-  if (skill.definition && Array.isArray(skill.definition.entities) && skill.definition.entities.length) {
-    const { ok, issues: defIssues } = validateDefinition(skill.definition);
-    if (!ok) {
-      issues.push(...defIssues);
-    }
-    if (ok && skill.definition.domain_key !== skill.domain_key) {
-      issues.push(
-        `schema domain_key «${skill.definition.domain_key}» does not match skill domain_key «${skill.domain_key}».`,
-      );
-    }
   }
 
   // Existence of tools from tools.allowed.
@@ -174,19 +158,12 @@ export async function writeSkill(skill, { backup = true } = {}) {
   const dir = skillDir(skill.name);
   fs.mkdirSync(dir, { recursive: true });
   const skillMd = path.join(dir, 'SKILL.md');
-  const schemaJson = path.join(dir, 'domain-schema.json');
 
   if (backup) {
     backupIfExists(skillMd);
-    if (skill.definition) {
-      backupIfExists(schemaJson);
-    }
   }
 
   atomicWrite(skillMd, composeSkillFile(skill));
-  if (skill.definition) {
-    atomicWrite(schemaJson, JSON.stringify(skill.definition, null, 2) + '\n');
-  }
 
   invalidateSkillsCache();
   loadSkills({ force: true });

@@ -45,7 +45,6 @@ const demo = {
   references: { allowed: false },
   skillPrompt: 'Промпт навыка.',
   factExtractionPrompt: 'Что сохранять.',
-  definition: null,
 };
 
 console.log('\n=== Сериализация SKILL.md ↔ разбор ===');
@@ -70,12 +69,6 @@ check('Блоки prompt восстанавливаются из тела', () =
   const { body } = splitSkillFile(md);
   assert.equal(extractSection(body, '# Skill Prompt'), 'Промпт навыка.');
   assert.equal(extractSection(body, '## Fact Extraction Prompt'), 'Что сохранять.');
-});
-
-check('memory.schema появляется только при наличии definition', () => {
-  const withSchema = { ...demo, definition: { domain_key: 'demo_skill', title: 'Демо', entities: [] } };
-  assert.match(composeSkillFile(withSchema), /schema: domain-schema\.json/);
-  assert.ok(!/schema: domain-schema\.json/.test(composeSkillFile(demo)));
 });
 
 console.log('\n=== Правила validateSkill ===');
@@ -107,24 +100,12 @@ await checkA('Пустой Skill Prompt отклоняется', async () => {
 
 await checkA('Неизвестный инструмент в tools.allowed отклоняется', async () => {
   const { ok, issues } = await validateSkill({ ...demo, tools: { allowed: ['no_such_tool_xyz'], base: true } });
-  assert.ok(!ok && issues.some((i) => /не найден в реестре/.test(i)));
+  assert.ok(!ok && issues.some((i) => /was not found in the tool registry/.test(i)));
 });
 
 await checkA('Занятый domain_key отклоняется', async () => {
   const { ok, issues } = await validateSkill({ ...demo, name: 'other-skill', domain_key: 'flight_search' });
-  assert.ok(!ok && issues.some((i) => /уже занят/.test(i)));
-});
-
-await checkA('Невалидная схема домена отклоняется', async () => {
-  const badDef = {
-    domain_key: 'demo_skill',
-    title: 'Демо',
-    entities: [
-      { entity_type: 'x', entity_key: { mode: 'slug' }, data_schema: { type: 'object', additionalProperties: true } },
-    ],
-  };
-  const { ok } = await validateSkill({ ...demo, definition: badDef });
-  assert.ok(!ok);
+  assert.ok(!ok && issues.some((i) => /is already taken/.test(i)));
 });
 
 console.log('\n=== Защита путей и удаления ===');
@@ -132,7 +113,7 @@ console.log('\n=== Защита путей и удаления ===');
 check('removeReference запрещает выход через ..', () => {
   assert.throws(
     () => removeReference('flight-search', '../SKILL.md', { confirm: true }),
-    /Недопустимый путь|выходит за пределы/,
+    /Invalid reference path|escapes the skill/,
   );
 });
 
@@ -145,8 +126,8 @@ check('deleteSkill требует confirm=true', () => {
 });
 
 check('deleteSkill запрещает удаление general и skill-author', () => {
-  assert.throws(() => deleteSkill('general', { confirm: true }), /удалять нельзя/);
-  assert.throws(() => deleteSkill('skill-author', { confirm: true }), /удалять нельзя/);
+  assert.throws(() => deleteSkill('general', { confirm: true }), /cannot be deleted/);
+  assert.throws(() => deleteSkill('skill-author', { confirm: true }), /cannot be deleted/);
 });
 
 console.log(`\nИтого: ${passed} прошло, ${failed} провалено.`);

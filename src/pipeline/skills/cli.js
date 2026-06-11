@@ -2,10 +2,9 @@
 //
 // Commands:
 //   validate   Read and check every skills/<name>/SKILL.md. Fails with a clear error on a problem.
-//   list       Show active skills, their domain_key, tool set, and whether a domain schema is present.
+//   list       Show active skills, their domain_key and tool set.
 //   sync       Create rows in mem.agent_domains for the skills' domain keys (domain_key → domain_id mapping).
 //
-// The sync command does not store schemas in the database: the source of a schema is the file next to the skill.
 // Sync only guarantees that for each domain key there is a lookup row with a numeric domain_id, which the foreign
 // keys of the memory tables reference.
 import { loadSkills, listSkillRoutes, getSkill } from './registry.js';
@@ -16,8 +15,7 @@ function cmdValidate() {
   const { byName } = loadSkills({ force: true });
   console.log(`Skills checked: ${byName.size}.`);
   for (const skill of byName.values()) {
-    const schema = skill.definition ? `schema: ${skill.definition.entities.length} entities` : 'schema: none';
-    console.log(`  • ${skill.name} → domain ${skill.domain_key}; ${schema}`);
+    console.log(`  • ${skill.name} → domain ${skill.domain_key}`);
   }
   console.log('All definitions are valid.');
 }
@@ -32,11 +30,8 @@ function cmdList() {
   for (const r of routes) {
     const skill = getSkill(r.name);
     const tools = skill.tools.allowed.length ? skill.tools.allowed.join(', ') : '(base only)';
-    const schema = skill.definition ? `${skill.definition.entities.length} entities` : 'none';
     console.log(`  • ${r.name} / domain ${r.domain_key} — ${r.title}`);
-    console.log(
-      `      tools: ${tools}; domain schema: ${schema}; references: ${skill.references.allowed ? 'yes' : 'no'}`,
-    );
+    console.log(`      tools: ${tools}; references: ${skill.references.allowed ? 'yes' : 'no'}`);
   }
 }
 

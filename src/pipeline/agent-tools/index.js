@@ -23,8 +23,6 @@ import { skillAuthorApplyTool } from './skill-authoring/skill-author-apply.js';
 import { skillAuthorSetFieldTool } from './skill-authoring/skill-author-set-field.js';
 import { skillAuthorWritePromptTool } from './skill-authoring/skill-author-write-prompt.js';
 import { skillAuthorWriteExtractionTool } from './skill-authoring/skill-author-write-extraction.js';
-import { skillAuthorSchemaGenerateTool } from './skill-authoring/skill-author-schema-generate.js';
-import { skillAuthorSchemaEditTool } from './skill-authoring/skill-author-schema-edit.js';
 import { skillAuthorAddReferenceTool } from './skill-authoring/skill-author-add-reference.js';
 import { skillAuthorRemoveReferenceTool } from './skill-authoring/skill-author-remove-reference.js';
 import { skillAuthorEnableTool } from './skill-authoring/skill-author-enable.js';
@@ -58,8 +56,6 @@ export const allTools = [
   skillAuthorSetFieldTool,
   skillAuthorWritePromptTool,
   skillAuthorWriteExtractionTool,
-  skillAuthorSchemaGenerateTool,
-  skillAuthorSchemaEditTool,
   skillAuthorAddReferenceTool,
   skillAuthorRemoveReferenceTool,
   skillAuthorEnableTool,

@@ -496,13 +496,12 @@ The global tables contain no `user_id`: records are shared across all users. Wri
 
 ---
 
-## [DATA-10] Domain Entity Schemas
+## [DATA-10] Domain Specificity Without Extra Tables
 
-The closed per-domain entity schemas are not stored in the database — each lives in a file alongside its skill
-(`skills/<name>/domain-schema.json`) and is loaded by the skills registry at startup. These schemas describe the
-subject entities of a domain for the skill-authoring toolset (generation, surgical edits, and meta-validation of
-skills); they do not participate in the memory write or read paths — long-term memory stores flat facts in
-`mem.user_facts` ([DATA-4]). The layer is described in detail in [11-per-domain-schema.md](11-per-domain-schema.md).
+A domain stores no structured per-entity data of its own: long-term memory keeps flat facts in
+`mem.user_facts` ([DATA-4]), addressed by the `domain_key` coordinate. What domain knowledge reaches memory is
+steered by the skill's `## Fact Extraction Prompt` block. The layer is described in
+[11-per-domain-schema.md](11-per-domain-schema.md).
 
 ## [DATA-11] Message External References
 

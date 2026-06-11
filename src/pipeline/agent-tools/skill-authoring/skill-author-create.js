@@ -21,8 +21,8 @@ export const skillAuthorCreateTool = {
     function: {
       name: 'skill_author_create',
       description: `Create a NEW skill from a natural-language description: the model drafts name, domain_key,
-classification, prompts and (if relevant) the memory schema. By default returns a preview and
-validation issues without writing. Set apply=true to write it to disk and hot-reload the registry.
+classification and prompts. By default returns a preview and validation issues without writing.
+Set apply=true to write it to disk and hot-reload the registry.
 Use for a brand-new domain, not for editing an existing skill.`,
       parameters: {
         type: 'object',
@@ -46,7 +46,7 @@ Use for a brand-new domain, not for editing an existing skill.`,
     },
   },
   async handler(ctx, args) {
-    const draft = await generateSkillDraft({ description: args.skillDescription, hints: args.hints || '' });
+    const draft = await generateSkillDraft({ skillDescription: args.skillDescription, hints: args.hints || '' });
     const skill = buildSkillFromDraft(draft);
 
     if (getSkill(skill.name)) {

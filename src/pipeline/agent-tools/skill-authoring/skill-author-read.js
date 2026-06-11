@@ -12,8 +12,7 @@ export const skillAuthorReadTool = {
     function: {
       name: 'skill_author_read',
       description: `Read a parsed skill, fully or one part. Use to inspect current content before editing.
-part: "all" (default), "frontmatter", "skill_prompt", "fact_extraction_prompt", "domain_schema",
-"references".`,
+part: "all" (default), "frontmatter", "skill_prompt", "fact_extraction_prompt", "references".`,
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -25,7 +24,7 @@ part: "all" (default), "frontmatter", "skill_prompt", "fact_extraction_prompt", 
           },
           part: {
             type: 'string',
-            enum: ['all', 'frontmatter', 'skill_prompt', 'fact_extraction_prompt', 'domain_schema', 'references'],
+            enum: ['all', 'frontmatter', 'skill_prompt', 'fact_extraction_prompt', 'references'],
             description: 'Which part to return; defaults to "all".',
           },
         },
@@ -39,8 +38,6 @@ part: "all" (default), "frontmatter", "skill_prompt", "fact_extraction_prompt", 
         return { skill_prompt: s.skillPrompt };
       case 'fact_extraction_prompt':
         return { fact_extraction_prompt: s.factExtractionPrompt };
-      case 'domain_schema':
-        return { domain_schema: s.definition };
       case 'references':
         return { references: s.references };
       case 'frontmatter':

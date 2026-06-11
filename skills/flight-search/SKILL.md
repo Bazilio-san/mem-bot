@@ -21,7 +21,6 @@ classification:
     - metaphorical «улетел» or «рейс» not about aviation
 memory:
   scopes: [profile, domain, dialog]
-  schema: domain-schema.json
 tools:
   allowed: [search_flights, resolve_place]
   base: true

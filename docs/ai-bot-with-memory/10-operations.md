@@ -126,13 +126,13 @@ flags are enabled, and administrative tools only for administrators. The permiss
 `executeTool` wrapper: a call to an administrative tool by a non-administrator is rejected and logged.
 
 The tool registry is the authoritative source of actions that the model can promise and perform. The skills registry
-is not such a source on its own: a skill selects context, memory, and domain schema, and restricts the available
+is not such a source on its own: a skill selects context and memory, and restricts the available
 domain tools via its `tools.allowed` list, but it does not become a public capability without a corresponding tool.
 In responses about capabilities, the list of domains is not passed to the model; the bot derives actions from tool
 definitions and the RAG editorial article.
 
 A separate group is the skill-editing tools (`skill_author_*`): creating a skill from a description, reading and
-validating it, editing fields, prompt blocks, domain schema and lookup tables, enabling, disabling, deleting, and
+validating it, editing fields, prompt blocks and references, enabling, disabling, deleting, and
 reloading the registry. They are available only to administrators and only when the `SKILL_AUTHORING_ENABLED` flag is
 enabled; the model manages them through the `skill-author` editor skill (see
 [11-per-domain-schema.md](11-per-domain-schema.md)). Generative tools return a preview by default and write to disk

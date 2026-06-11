@@ -16,11 +16,10 @@ repository service directories are intentional here.
 | `CONVERSATION_CONTEXT` | `src/agent.js:481` | Conversation-mode context: timing, topics, and conversational style. |
 | `chatJSON` JSON instruction | `src/llm.js:203` | General wrapper for strict JSON output via `response_format: json_object`. |
 | Intent classifier | `src/pipeline/classify.js:52` | Dynamic system prompt containing the domain list and a user-message template. |
-| Domain schema hint | `src/pipeline/extract.js:11` | Enumeration of `entity_type` values and `data` fields for the first extraction pass. |
-| entity/data refinement | `src/pipeline/extract.js:56` | Second strict extraction pass against the schema of a specific entity. |
-| Memory extraction `SYSTEM` | `src/pipeline/extract.js:157` | First pass for extracting long-term memory candidates. |
-| Topic extraction `TOPICS_SYSTEM` | `src/pipeline/extract.js:256` | Identifying conversation topics and scoring user engagement. |
-| History summarizer `SUMMARY_SYSTEM` | `src/pipeline/history-compress.js:62` | Compressing the cold portion of history and surfacing stable facts. |
+| Fact extraction `EXTRACT_SYSTEM` | `src/pipeline/facts.js:163` | The single extraction pass for long-term user facts (with fact-lifetime judgement). |
+| Answer summary `SUMMARY_SYSTEM` | `src/pipeline/facts.js:104` | Compressing the assistant reply into a short summary for the extraction context. |
+| Topic extraction `TOPICS_SYSTEM` | `src/pipeline/topics.js:113` | Identifying conversation topics and scoring user engagement. |
+| History summarizer `SUMMARY_SYSTEM` | `src/pipeline/history-compress.js:63` | Compressing the cold portion of history and surfacing stable facts. |
 | `HISTORY_CONTEXT` | `src/pipeline/history-context.js:12` | Reference block of compressed history for the main response. |
 | `MEMORY_CONTEXT` | `src/pipeline/retrieve.js:121` | Reference block of relevant personal memory, protected against injection. |
 | `GLOBAL_FACTS` | `src/pipeline/global-memory.js:71` | Shared facts and policies injected into the main request. |
@@ -52,6 +51,7 @@ behaviour. The coordinate points to the line containing `description` inside the
 | `memory_forget_all` | `src/pipeline/agent-tools/memory/memory-forget-all.js:10` |
 | `memory_forget_entity` | `src/pipeline/agent-tools/memory/memory-forget-entity.js:10` |
 | `memory_list` | `src/pipeline/agent-tools/memory/memory-list.js:10` |
+| `memory_pin` | `src/pipeline/agent-tools/memory/memory-pin.js:13` |
 | `memory_search` | `src/pipeline/agent-tools/memory/memory-search.js:12` |
 | `scheduler_create_task` | `src/pipeline/agent-tools/scheduler/scheduler_create_task.js:10` |
 | `scheduler_list_tasks` | `src/pipeline/agent-tools/scheduler/scheduler_list_tasks.js:113` |
@@ -71,8 +71,6 @@ instructions.
 | `skill_author_write_extraction` | `src/pipeline/agent-tools/skill-authoring/skill-author-write-extraction.js:14` |
 | `skill_author_add_reference` | `src/pipeline/agent-tools/skill-authoring/skill-author-add-reference.js:14` |
 | `skill_author_remove_reference` | `src/pipeline/agent-tools/skill-authoring/skill-author-remove-reference.js:14` |
-| `skill_author_schema_generate` | `src/pipeline/agent-tools/skill-authoring/skill-author-schema-generate.js:14` |
-| `skill_author_schema_edit` | `src/pipeline/agent-tools/skill-authoring/skill-author-schema-edit.js:14` |
 | `skill_author_validate` | `src/pipeline/agent-tools/skill-authoring/skill-author-validate.js:14` |
 | `skill_author_apply` | `src/pipeline/agent-tools/skill-authoring/skill-author-apply.js:15` |
 | `skill_author_reload` | `src/pipeline/agent-tools/skill-authoring/skill-author-reload.js:14` |

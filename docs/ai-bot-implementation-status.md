@@ -32,10 +32,10 @@ with references to real code and to numbered specification requirements.
   and, when both are on, passes fully (16 of 16 layer checks; total `npm test` — 78 of 78).
 - **External notification delivery** — partial: Telegram channel added (`src/telegram/bot.js`); email and push
   notification channels are not implemented.
-- **Per-domain schema layer** (`DOMAIN-1`…`DOMAIN-3`) — implemented: a domain schema is required for domain-specific
-  facts, the `mem.domain_schemas` registry, the `src/schema/` module, validation and
-  canonicalization on write, and a strict two-pass contract on retrieval. The separate `npm run test:schema` run
-  passes fully (32 of 32 checks).
+- **Domain specificity of memory** (`DOMAIN-1`…`DOMAIN-3`) — implemented through two mechanisms: the
+  `## Fact Extraction Prompt` block of the active skill (mixed into fact extraction) and the `domain_key`
+  coordinate of the flat `mem.user_facts` table with per-type retention and source-rank policies. There is no
+  separate structured entity layer.
 
 ---
 
@@ -80,11 +80,11 @@ with references to real code and to numbered specification requirements.
 | Requirement ID | Short description | Status | Code reference / note |
 |----------------|-------------------|--------|------------------------|
 | `QS-1` | Environment requirements (Node.js 22, PostgreSQL 16, extensions) | done | `package.json`, `migrations/001_init.sql` |
-| `QS-2` | Commands (`migrate`, `chat`, `scheduler`, `test`, `check:llm`, `schema:*`, `test:schema`) | done | `package.json`, `src/cli.js`, `src/scheduler-run.js`, `src/schema/cli.js` |
+| `QS-2` | Commands (`migrate`, `chat`, `scheduler`, `test`, `check:llm`, `skills:*`) | done | `package.json`, `src/cli.js`, `src/scheduler-run.js`, `src/pipeline/skills/cli.js` |
 | `QS-3` | Proactivity flags | done | `src/config.js`, `proactive` block |
 | `QS-4` | History compression flags | done | `src/config.js`, `historyCompression` block |
 | `QS-4a` | Global memory flags | done | `src/config.js`, `globalMemory` block |
-| `QS-5` | Directory structure | done | `src/` (including `src/schema/`), `migrations/`, `schemas/`, `tests/` match the specification |
+| `QS-5` | Directory structure | done | `src/`, `migrations/`, `skills/`, `tests/` match the specification |
 | `QS-6` | From-scratch build order | done | confirmed by repository contents |
 
 ### Response Loop Architecture — `ARCH`
@@ -178,13 +178,13 @@ Full runtime prompt coordinates, tool definitions, and test and historical templ
 | `OPS-8` | Twelve mandatory tests | done | `tests/run.js` |
 | `OPS-9` | Testing rules (no mocks, real database) | done | `tests/run.js`, `tests/memory_cases.json` |
 
-### Per-Domain `data` Schema Layer — `DOMAIN`
+### Domain Specificity of Memory — `DOMAIN`
 
 | Requirement ID | Short description | Status | Code reference / note |
 |----------------|-------------------|--------|------------------------|
-| `DOMAIN-1` | End-to-end per-domain schema mechanism | done | `validateAndCanonicalize` in `src/schema/validate.js`, step in `processCandidate` (`src/pipeline/merge.js`) |
-| `DOMAIN-2` | Schema registry, `src/schema/` module | done | `migrations/001_init.sql`, `src/schema/` (meta/registry/validate/generate/cli), `ajv` dependency |
-| `DOMAIN-3` | Layer benefits and risks; strict two-pass contract | done | second extraction pass in `src/pipeline/extract.js`; schema is mandatory, no compatibility mode |
+| `DOMAIN-1` | Domain tuning of fact extraction | done | `## Fact Extraction Prompt` block, mixed in by `extractFacts` (`src/pipeline/facts.js`) |
+| `DOMAIN-2` | Domain addressing of facts | done | `domain_key` coordinate of `mem.user_facts`; retrieval covers the domain plus `general` |
+| `DOMAIN-3` | Storage policies per fact row | done | per-type retention, source ranks, pinning (`src/pipeline/facts.js`, `config.facts`) |
 
 ### History Compression — `HIST`
 

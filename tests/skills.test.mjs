@@ -11,7 +11,6 @@ import {
   getSkillByDomain,
   getSkillPrompt,
   getFactExtractionPrompt,
-  getDomainSchema,
   getReference,
 } from '../src/pipeline/skills/registry.js';
 import { buildToolDefs } from '../src/pipeline/tools.js';
@@ -45,7 +44,6 @@ classification:
     - два
 memory:
   scopes: [profile, domain, dialog]
-  schema: domain-schema.json
 model:
   main: null
   extract: null`);
@@ -55,7 +53,6 @@ model:
   assert.equal(fm.classification.when_to_use, 'Первая строка вторая строка.');
   assert.deepEqual(fm.classification.positive_signals, ['один', 'два']);
   assert.deepEqual(fm.memory.scopes, ['profile', 'domain', 'dialog']);
-  assert.equal(fm.memory.schema, 'domain-schema.json');
   assert.equal(fm.model.main, null);
 });
 
@@ -108,13 +105,6 @@ check('# Skill Prompt и ## Fact Extraction Prompt непустые', () => {
   }
 });
 
-check('Схема домена flight_search валидна и содержит сущности', () => {
-  const def = getDomainSchema('flight-search');
-  assert.equal(def.domain_key, 'flight_search');
-  assert.ok(def.entities.some((e) => e.entity_type === 'city'));
-  assert.ok(def.entities.some((e) => e.entity_type === 'trip'));
-});
-
 check('tools.allowed у flight-search содержит предметные инструменты', () => {
   const skill = getSkill('flight-search');
   assert.deepEqual(skill.tools.allowed, ['search_flights', 'resolve_place']);
@@ -129,15 +119,15 @@ check('getReference читает разрешённый справочник', (
 });
 
 check('getReference запрещает выход через ..', () => {
-  assert.throws(() => getReference('flight-search', '../SKILL.md'), /Недопустимый путь|выходит за пределы/);
+  assert.throws(() => getReference('flight-search', '../SKILL.md'), /Invalid reference path|escapes the skill/);
 });
 
 check('getReference запрещает абсолютный путь', () => {
-  assert.throws(() => getReference('flight-search', 'C:/Windows/system32/drivers/etc/hosts'), /Недопустимый путь/);
+  assert.throws(() => getReference('flight-search', 'C:/Windows/system32/drivers/etc/hosts'), /Invalid reference path/);
 });
 
 check('getReference отказывает skill без references.allowed', () => {
-  assert.throws(() => getReference('math-tutor', 'whatever.md'), /выключено/);
+  assert.throws(() => getReference('math-tutor', 'whatever.md'), /disabled/);
 });
 
 console.log('\n=== Инструмент skill_read_reference и фильтрация инструментов ===');

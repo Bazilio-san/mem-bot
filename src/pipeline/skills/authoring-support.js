@@ -40,7 +40,6 @@ export function buildSkillFromDraft(draft) {
     references: { allowed: false },
     skillPrompt: draft.skill_prompt,
     factExtractionPrompt: draft.fact_extraction_prompt,
-    definition: draft.definition || null,
   };
 }
 
@@ -64,7 +63,6 @@ export function loadEditable(name) {
       references: s.references,
       skillPrompt: s.skillPrompt,
       factExtractionPrompt: s.factExtractionPrompt,
-      definition: s.definition,
     }),
   );
 }
@@ -106,7 +104,5 @@ export function summarize(skill) {
     enabled: skill.enabled !== false,
     tools_allowed: skill.tools?.allowed || [],
     references_allowed: skill.references?.allowed === true,
-    has_schema: !!skill.definition,
-    entities: skill.definition ? skill.definition.entities.map((e) => e.entity_type) : [],
   };
 }

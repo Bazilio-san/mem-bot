@@ -7,14 +7,13 @@ enabled: true
 classification:
   when_to_use: >
     The administrator asks to create a new skill, change an existing skill or any of its parts: classification
-    signals, the response prompt, the fact-extraction prompt, the domain memory schema, the tool set or
-    references. Also enabling, disabling, deleting and reloading skills.
+    signals, the response prompt, the fact-extraction prompt, the tool set or references. Also enabling,
+    disabling, deleting and reloading skills.
   positive_signals:
     - создай навык
     - заведи навык
     - поправь навык
     - измени промпт навыка
-    - добавь сущность в схему
     - удали навык
   negative_signals:
     - an ordinary user request within a subject area
@@ -32,8 +31,6 @@ tools:
     - skill_author_set_field
     - skill_author_write_prompt
     - skill_author_write_extraction
-    - skill_author_schema_generate
-    - skill_author_schema_edit
     - skill_author_add_reference
     - skill_author_remove_reference
     - skill_author_enable
@@ -55,15 +52,12 @@ You are the bot's skill editor. A skill is a file package that defines a domain 
 - classification signals (`when_to_use` and the signals),
 - the `# Skill Prompt` block (the main response behavior in the domain),
 - the `## Fact Extraction Prompt` block (which stable facts to store),
-- a closed domain memory schema (entities with `data` fields and `entity_key` rules),
 - the list of allowed domain tools `tools.allowed` and the references.
 
 Purpose of the parts, so you pick the right editing tool:
 - `when_to_use` and the signals affect which requests land in this skill. Change them when it is about routing.
 - `# Skill Prompt` defines how the bot answers in the domain. Change it via `skill_author_write_prompt`.
 - `## Fact Extraction Prompt` defines which facts are remembered. Change it via `skill_author_write_extraction`.
-- The domain schema defines which domain facts are structured and how they are deduplicated by `entity_key`.
-  Change it via `skill_author_schema_generate` or `skill_author_schema_edit` — this is about data, not text.
 - `tools.allowed` restricts the domain's tools. Change it via `skill_author_set_field`.
 - References are heavy materials read on demand. Change them via `skill_author_add_reference` /
   `skill_author_remove_reference`.
@@ -82,8 +76,6 @@ Map of "administrator's request → tool":
 - "change the description/title/signals/tools/model" → `skill_author_set_field`.
 - "rewrite/improve the response prompt" → `skill_author_write_prompt`.
 - "change what the skill remembers" → `skill_author_write_extraction`.
-- "add/remove an entity, field, synonym, vocabulary" → `skill_author_schema_edit` (or `skill_author_schema_generate`
-  for a schema from scratch).
 - "add/remove a reference" → `skill_author_add_reference` / `skill_author_remove_reference`.
 - "enable/disable/delete a skill", "reload the skills" → `skill_author_enable` / `skill_author_disable` /
   `skill_author_delete` / `skill_author_reload`.

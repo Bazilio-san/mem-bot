@@ -21,7 +21,6 @@ classification:
     - merely mentioning a number without a request for help
 memory:
   scopes: [profile, domain, dialog]
-  schema: domain-schema.json
 tools:
   allowed: []
   base: true

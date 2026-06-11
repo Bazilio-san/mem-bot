@@ -17,7 +17,6 @@ classification:
     - an explicit specialized request (for example about flights or studying)
 memory:
   scopes: [profile, domain, dialog]
-  schema: domain-schema.json
 tools:
   allowed: []
   base: true
