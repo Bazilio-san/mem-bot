@@ -506,31 +506,6 @@ function restartViaPM2(serviceName) {
   execCommand(`pm2 restart "${serviceName}" --update-env`);
 }
 
-function startFallbackProcess(deploymentConfig) {
-  logIt('No managed service found. Starting app as detached process.');
-  try {
-    if (fs.existsSync(path.join(CWD, 'scripts', 'stop-telegram.js'))) {
-      execCommand('node scripts/stop-telegram.js --soft', { silent: true });
-    }
-  } catch (error) {
-    logIt(`Could not run stop script before restart: ${error.message}`);
-  }
-
-  const logFile = deploymentConfig.runtimeLogFile || appRuntimeLogFile;
-  const shellCommand = `${deploymentConfig.startCommand} >> "${logFile}" 2>&1`;
-  const child = spawn('bash', ['-lc', shellCommand], {
-    detached: true,
-    stdio: 'ignore',
-    cwd: CWD,
-    env: {
-      ...process.env,
-      NODE_ENV: deploymentConfig.startNodeEnv,
-    },
-  });
-  child.unref();
-  logIt(`Started fallback process with PID ${child.pid}`);
-}
-
 function restartService(deploymentConfig) {
   for (const serviceName of deploymentConfig.serviceCandidates) {
     if (systemctlServiceExists(serviceName)) {
@@ -546,7 +521,10 @@ function restartService(deploymentConfig) {
     }
   }
 
-  startFallbackProcess(deploymentConfig);
+  // No managed service (neither systemd nor pm2) was found. By design we never start any fallback process here:
+  // the deploy only ever restarts an existing managed service. If none exists, the application stays stopped and
+  // we just report it, so a missing service is visible instead of being silently masked by a detached process.
+  logIt('No managed service found (neither systemd nor pm2). Nothing started — the app is left stopped by design.');
 }
 
 /**

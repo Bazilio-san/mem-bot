@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mem-bot — админка · База знаний (прототип)</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px; color: #1c1f24; background: #f5f6f8;
+    display: flex; flex-direction: column;
+  }
+
+  /* ── Шапка как в App.vue ───────────────────────────────────────── */
+  .app-header {
+    background: #1f6feb; color: #fff; padding: 0 16px; height: 52px;
+    display: flex; align-items: center; gap: 24px; flex-shrink: 0;
+  }
+  .app-header h1 { font-size: 16px; font-weight: 600; margin: 0; white-space: nowrap; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button {
+    background: transparent; border: none; color: rgba(255,255,255,.75); font-size: 14px;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .tabs button:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .tabs button.active { background: rgba(255,255,255,.22); color: #fff; font-weight: 600; }
+  .header-spacer { flex: 1; }
+  .auth-box { display: flex; align-items: center; gap: 10px; font-size: 13px; color: rgba(255,255,255,.85); }
+  .auth-box button {
+    background: rgba(255,255,255,.15); border: none; color: #fff; padding: 5px 12px;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .auth-box button:hover { background: rgba(255,255,255,.28); }
+
+  /* ── Страница ──────────────────────────────────────────────────── */
+  .page { flex: 1; overflow: auto; padding: 16px 20px; }
+  .toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid #c9ced6; background: #fff; color: #1c1f24; padding: 6px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .btn:hover { background: #f0f2f5; }
+  .btn-primary { background: #4567d8; border-color: #4567d8; color: #fff; }
+  .btn-primary:hover { background: #3a58c0; }
+  .toolbar .stat { color: #6a7180; font-size: 13px; }
+  .stat-warn { color: #9a6700; cursor: pointer; text-decoration: underline dotted; }
+  .stat-warn:hover { color: #7a5200; }
+
+  /* ── Таблица ───────────────────────────────────────────────────── */
+  .tbl-wrap { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 1080px; }
+  thead th {
+    text-align: left; font-weight: 600; font-size: 12.5px; color: #444b56;
+    background: #fafbfc; border-bottom: 1px solid #e3e6ea; padding: 7px 10px;
+    white-space: nowrap; user-select: none;
+  }
+  th.sortable { cursor: pointer; }
+  th.sortable:hover { color: #1f6feb; }
+  th .arrow { font-size: 10px; color: #1f6feb; margin-left: 3px; }
+  tr.filter-row th { padding: 4px 6px; background: #f4f6f8; border-bottom: 1px solid #e3e6ea; }
+  .filter-row input, .filter-row select {
+    width: 100%; font-size: 12px; padding: 3px 6px; border: 1px solid #d4d9e0;
+    border-radius: 4px; background: #fff; color: #1c1f24;
+  }
+  tbody td {
+    padding: 4px 10px; border-bottom: 1px solid #eef0f3; vertical-align: top;
+    line-height: 1.3; font-size: 13px;
+  }
+  tbody tr:nth-child(even) { background: #fafbfd; }
+  tbody tr:hover { background: #f0f5ff; }
+  td.cell-content { max-width: 420px; }
+  .cell-clip { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.nowrap, th.nowrap { white-space: nowrap; }
+  .col-actions { width: 1%; text-align: right; white-space: nowrap; }
+
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; }
+  .emb-ok   { background: #e2f4e6; color: #19703a; }
+  .emb-none { background: #fdeeda; color: #9a6700; }
+  .emb-busy { background: #e8eefc; color: #2a4fc0; }
+  .st-active   { background: #eef0f3; color: #444b56; }
+  .st-archived { background: #f0eafd; color: #6b46c1; }
+  .st-deleted  { background: #fde8e6; color: #b3261e; }
+  .tag { background: #e6f0ff; color: #2a4fc0; border-radius: 8px; padding: 0 7px; font-size: 11px; margin-right: 3px; white-space: nowrap; }
+  .domain-all { color: #8a909a; font-style: italic; }
+
+  .icon-btn {
+    width: 1.75rem; height: 1.75rem; border: none; background: transparent; border-radius: 5px;
+    cursor: pointer; font-size: 13px; color: #5a6170; line-height: 1;
+  }
+  .icon-btn:hover { background: #e6ebf2; color: #1c1f24; }
+  .icon-btn.danger:hover { background: #fde8e6; color: #b3261e; }
+  .muted { color: #8a909a; font-size: 12px; }
+  .empty { padding: 28px; text-align: center; color: #8a909a; }
+
+  /* ── Ресайзабельный диалог (паттерн PayloadView.vue) ───────────── */
+  .dlg-ovl {
+    position: fixed; inset: 0; background: rgba(20,24,32,.45);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .dlg {
+    position: relative; background: #fff; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.25);
+    display: flex; flex-direction: column; min-width: 520px; min-height: 360px;
+    max-width: 96vw; max-height: 94vh; overflow: hidden;
+  }
+  .dlg-head {
+    display: flex; align-items: center; padding: 12px 18px; border-bottom: 1px solid #e3e6ea;
+    font-weight: 600; font-size: 15px; flex-shrink: 0; cursor: default;
+  }
+  .dlg-head .x { margin-left: auto; font-size: 18px; color: #8a909a; }
+  .dlg-body { flex: 1; overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .frow { display: flex; gap: 14px; }
+  .fld { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .fld label { font-size: 12px; color: #555c68; font-weight: 600; }
+  .fld input, .fld select, .fld textarea {
+    font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid #d4d9e0; border-radius: 6px;
+    background: #fff; color: #1c1f24; width: 100%;
+  }
+  .fld input:focus, .fld select:focus, .fld textarea:focus { outline: 2px solid #b9ccf5; border-color: #4567d8; }
+  .fld-content { flex: 1; display: flex; }
+  .fld-content textarea { flex: 1; resize: none; min-height: 120px; line-height: 1.45; }
+  .dlg-foot {
+    display: flex; align-items: center; gap: 12px; padding: 11px 18px;
+    border-top: 1px solid #e3e6ea; flex-shrink: 0;
+  }
+  .dlg-foot .emb-note { font-size: 12px; color: #9a6700; }
+  .dlg-foot .spacer { flex: 1; }
+
+  /* Хэндлы ресайза: 4 стороны + 4 угла */
+  .rs { position: absolute; z-index: 5; }
+  .rs-n  { top: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+  .rs-s  { bottom: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+  .rs-e  { right: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+  .rs-w  { left: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+  .rs-ne { top: -5px; right: -5px; width: 14px; height: 14px; cursor: nesw-resize; }
+  .rs-nw { top: -5px; left: -5px; width: 14px; height: 14px; cursor: nwse-resize; }
+  .rs-se { bottom: -5px; right: -5px; width: 14px; height: 14px; cursor: nwse-resize; }
+  .rs-sw { bottom: -5px; left: -5px; width: 14px; height: 14px; cursor: nesw-resize; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1>mem-bot — админка</h1>
+  <nav class="tabs">
+    <button>Память</button>
+    <button>Логи LLM</button>
+    <button class="active">База знаний</button>
+  </nav>
+  <div class="header-spacer"></div>
+  <div class="auth-box"><span>Наталья</span><button>Выйти</button></div>
+</header>
+
+<main class="page">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="openDialog(null)">＋ Добавить запись</button>
+    <span class="stat" id="statTotal"></span>
+    <span class="stat stat-warn" id="statNoEmb" onclick="filterNoEmbedding()" title="Показать записи без эмбеддинга"></span>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr id="headRow">
+          <th class="sortable nowrap" data-key="hasEmbedding">Эмбеддинг<span class="arrow"></span></th>
+          <th class="sortable" data-key="title">Заголовок<span class="arrow"></span></th>
+          <th class="sortable" data-key="content">Содержимое<span class="arrow"></span></th>
+          <th class="sortable nowrap" data-key="domain">Домен<span class="arrow"></span></th>
+          <th>Теги</th>
+          <th class="sortable nowrap" data-key="importance">Важн.<span class="arrow"></span></th>
+          <th class="sortable nowrap" data-key="status">Статус<span class="arrow"></span></th>
+          <th class="sortable nowrap" data-key="source">Источник<span class="arrow"></span></th>
+          <th class="sortable nowrap" data-key="updatedAt">Обновлено<span class="arrow"></span></th>
+          <th class="col-actions"></th>
+        </tr>
+        <tr class="filter-row">
+          <th><select id="fEmb"><option value="">все</option><option value="yes">есть</option><option value="no">нет</option></select></th>
+          <th><input id="fTitle" placeholder="фильтр…"></th>
+          <th><input id="fContent" placeholder="фильтр…"></th>
+          <th><select id="fDomain"><option value="">все</option></select></th>
+          <th><select id="fTag"><option value="">все</option></select></th>
+          <th></th>
+          <th><select id="fStatus"><option value="">active + archived</option><option value="active">active</option><option value="archived">archived</option><option value="deleted">deleted</option></select></th>
+          <th><input id="fSource" placeholder="фильтр…"></th>
+          <th></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="emptyMsg" style="display:none">Ничего не найдено — измените фильтры</div>
+  </div>
+</main>
+
+<!-- Диалог редактирования (ресайз со всех сторон) -->
+<div class="dlg-ovl" id="dlgOvl" style="display:none">
+  <div class="dlg" id="dlg">
+    <div class="rs rs-n" data-rs="n"></div><div class="rs rs-s" data-rs="s"></div>
+    <div class="rs rs-e" data-rs="e"></div><div class="rs rs-w" data-rs="w"></div>
+    <div class="rs rs-ne" data-rs="ne"></div><div class="rs rs-nw" data-rs="nw"></div>
+    <div class="rs rs-se" data-rs="se"></div><div class="rs rs-sw" data-rs="sw"></div>
+
+    <div class="dlg-head">
+      <span id="dlgTitle">Запись базы знаний</span>
+      <button class="icon-btn x" onclick="closeDialog()" title="Закрыть (Esc)">✕</button>
+    </div>
+
+    <div class="dlg-body">
+      <div class="frow">
+        <div class="fld" style="flex:2"><label>Заголовок</label><input id="eTitle" placeholder="Необязательный заголовок"></div>
+        <div class="fld"><label>Домен</label>
+          <select id="eDomain">
+            <option value="">— все домены —</option>
+            <option value="finance">finance</option>
+            <option value="health">health</option>
+            <option value="travel">travel</option>
+          </select>
+        </div>
+      </div>
+      <div class="fld fld-content">
+        <label style="margin-bottom:4px">Содержимое *</label>
+        <textarea id="eContent" placeholder="Текст фрагмента знаний…"></textarea>
+      </div>
+      <div class="frow">
+        <div class="fld" style="flex:2"><label>Теги (через запятую)</label><input id="eTags" placeholder="напр.: регламент, оплата"></div>
+        <div class="fld"><label>Важность (0–1)</label><input id="eImportance" type="number" min="0" max="1" step="0.05" value="0.5"></div>
+        <div class="fld"><label>Статус</label>
+          <select id="eStatus"><option>active</option><option>archived</option><option>deleted</option></select>
+        </div>
+      </div>
+      <div class="fld"><label>Источник</label><input id="eSource" placeholder="документ, URL, автор…"></div>
+    </div>
+
+    <div class="dlg-foot">
+      <span class="emb-note" id="embNote">⚠ Эмбеддинг будет пересчитан после сохранения</span>
+      <span class="spacer"></span>
+      <button class="btn" onclick="closeDialog()">Отмена</button>
+      <button class="btn btn-primary" onclick="saveDialog()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Мок-данные (в реальной версии: GET /api/knowledge) ─────────── */
+let seq = 100;
+const rows = [
+  mk('Режим работы поддержки', 'Поддержка отвечает ежедневно с 9:00 до 21:00 по московскому времени. В праздники — дежурный режим, время ответа до 4 часов.', 'finance', ['регламент'], 0.7, 'active', 'внутренний регламент', true,  '2026-06-10T18:40:00'),
+  mk('Лимиты переводов', 'Лимит перевода без подтверждения — 150 000 ₽ в сутки. Свыше — подтверждение по коду из приложения.', 'finance', ['лимиты','платежи'], 0.9, 'active', 'тарифы v12', true, '2026-06-09T11:02:00'),
+  mk(null, 'При упоминании конкурентов бот не даёт оценочных суждений, ограничивается фактами из открытых источников.', null, ['политика'], 0.8, 'active', null, false, '2026-06-11T08:15:00'),
+  mk('Правила хранения багажа', 'Ручная кладь до 10 кг включена во все тарифы. Сверхнормативный багаж оплачивается отдельно при онлайн-регистрации дешевле, чем в аэропорту.', 'travel', ['багаж','тарифы'], 0.6, 'active', 'FAQ перевозчика', true, '2026-06-08T14:30:00'),
+  mk('Противопоказания напоминаний', 'Бот не назначает лекарства и дозировки; на медицинские вопросы отвечает с дисклеймером и советует обратиться к врачу.', 'health', ['политика','безопасность'], 1.0, 'active', 'политика безопасности', true, '2026-06-07T09:00:00'),
+  mk('Старая версия тарифов', 'Тарифная сетка от января 2026 года: базовый 290 ₽, расширенный 590 ₽.', 'finance', ['тарифы'], 0.3, 'archived', 'тарифы v11', true, '2026-05-20T10:00:00'),
+  mk(null, 'Черновик: программа лояльности запускается осенью, кэшбэк до 5 % на категории на выбор.', 'finance', ['черновик'], 0.4, 'active', null, false, '2026-06-11T10:55:00'),
+];
+function mk(title, content, domain, tags, importance, status, source, hasEmbedding, updatedAt) {
+  return { id: 'gk-' + (seq++), title, content, domain, tags, importance, status, source, hasEmbedding,
+           embBusy: false, updatedAt };
+}
+
+/* ── Состояние таблицы ──────────────────────────────────────────── */
+let sortKey = 'updatedAt', sortDir = -1; // по умолчанию: обновлено, новые сверху
+let editingId = null;
+
+const $ = (id) => document.getElementById(id);
+const filterIds = ['fEmb','fTitle','fContent','fDomain','fTag','fStatus','fSource'];
+filterIds.forEach((id) => $(id).addEventListener('input', render));
+
+document.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => {
+  const k = th.dataset.key;
+  if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+  render();
+}));
+
+function buildFilterOptions() {
+  const doms = [...new Set(rows.map((r) => r.domain).filter(Boolean))].sort();
+  $('fDomain').innerHTML = '<option value="">все</option><option value="__all__">— все домены —</option>'
+    + doms.map((d) => `<option>${d}</option>`).join('');
+  const tags = [...new Set(rows.flatMap((r) => r.tags))].sort();
+  $('fTag').innerHTML = '<option value="">все</option>' + tags.map((t) => `<option>${t}</option>`).join('');
+}
+
+function visibleRows() {
+  const fe = $('fEmb').value, fs = $('fStatus').value, fd = $('fDomain').value, ft = $('fTag').value;
+  const tT = $('fTitle').value.toLowerCase(), tC = $('fContent').value.toLowerCase(), tS = $('fSource').value.toLowerCase();
+  let list = rows.filter((r) => {
+    if (fs === '' && r.status === 'deleted') return false;
+    if (fs !== '' && r.status !== fs) return false;
+    if (fe === 'yes' && !r.hasEmbedding) return false;
+    if (fe === 'no' && r.hasEmbedding) return false;
+    if (fd === '__all__' && r.domain) return false;
+    if (fd && fd !== '__all__' && r.domain !== fd) return false;
+    if (ft && !r.tags.includes(ft)) return false;
+    if (tT && !(r.title || '').toLowerCase().includes(tT)) return false;
+    if (tC && !r.content.toLowerCase().includes(tC)) return false;
+    if (tS && !(r.source || '').toLowerCase().includes(tS)) return false;
+    return true;
+  });
+  list.sort((a, b) => {
+    let va = a[sortKey], vb = b[sortKey];
+    if (sortKey === 'domain') { va = a.domain || ''; vb = b.domain || ''; }
+    if (va === null || va === undefined) va = '';
+    if (vb === null || vb === undefined) vb = '';
+    if (va < vb) return -sortDir;
+    if (va > vb) return sortDir;
+    return 0;
+  });
+  return list;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function render() {
+  document.querySelectorAll('th.sortable .arrow').forEach((a) => { a.textContent = ''; });
+  const th = document.querySelector(`th[data-key="${sortKey}"] .arrow`);
+  if (th) th.textContent = sortDir === 1 ? '▲' : '▼';
+
+  const list = visibleRows();
+  $('tbody').innerHTML = list.map((r) => {
+    const emb = r.embBusy
+      ? '<span class="badge emb-busy">⏳ считается…</span>'
+      : r.hasEmbedding
+        ? '<span class="badge emb-ok">✓ есть</span>'
+        : `<span class="badge emb-none">⚠ нет</span> <button class="icon-btn" title="Пересчитать эмбеддинг" onclick="reembed('${r.id}')">⟳</button>`;
+    return `<tr>
+      <td class="nowrap">${emb}</td>
+      <td>${r.title ? esc(r.title) : '<span class="muted">—</span>'}</td>
+      <td class="cell-content"><div class="cell-clip">${esc(r.content)}</div></td>
+      <td class="nowrap">${r.domain ? esc(r.domain) : '<span class="domain-all">все домены</span>'}</td>
+      <td>${r.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</td>
+      <td class="num">${r.importance.toFixed(2)}</td>
+      <td class="nowrap"><span class="badge st-${r.status}">${r.status}</span></td>
+      <td class="nowrap">${r.source ? esc(r.source) : '<span class="muted">—</span>'}</td>
+      <td class="nowrap muted">${fmtDate(r.updatedAt)}</td>
+      <td class="col-actions">
+        <button class="icon-btn" title="Редактировать" onclick="openDialog('${r.id}')">✎</button>
+        <button class="icon-btn danger" title="Удалить" onclick="del('${r.id}')">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+  $('emptyMsg').style.display = list.length ? 'none' : '';
+
+  const act = rows.filter((r) => r.status !== 'deleted');
+  const noEmb = act.filter((r) => !r.hasEmbedding && !r.embBusy).length;
+  $('statTotal').textContent = `записей: ${act.length}`;
+  $('statNoEmb').textContent = noEmb ? `без эмбеддинга: ${noEmb}` : '';
+}
+
+function filterNoEmbedding() { $('fEmb').value = 'no'; render(); }
+
+/* ── CRUD (в реальной версии — вызовы /api/knowledge) ──────────── */
+function del(id) {
+  const r = rows.find((x) => x.id === id);
+  if (!confirm(`Удалить запись${r.title ? ` «${r.title}»` : ''}? Запись будет помечена как deleted.`)) return;
+  r.status = 'deleted';
+  render();
+}
+
+function reembed(id) {
+  const r = rows.find((x) => x.id === id);
+  r.embBusy = true; render();
+  setTimeout(() => { r.embBusy = false; r.hasEmbedding = true; render(); }, 1200); // имитация POST /:id/embed
+}
+
+/* ── Диалог: открытие/сохранение ───────────────────────────────── */
+function openDialog(id) {
+  editingId = id;
+  const r = id ? rows.find((x) => x.id === id) : null;
+  $('dlgTitle').textContent = r ? 'Редактирование записи' : 'Новая запись';
+  $('eTitle').value = r?.title || '';
+  $('eContent').value = r?.content || '';
+  $('eDomain').value = r?.domain || '';
+  $('eTags').value = r ? r.tags.join(', ') : '';
+  $('eImportance').value = r ? r.importance : 0.5;
+  $('eStatus').value = r?.status || 'active';
+  $('eSource').value = r?.source || '';
+  const embOk = r && r.hasEmbedding;
+  $('embNote').textContent = embOk
+    ? '✓ Эмбеддинг актуален; при изменении текста будет сброшен триггером и пересчитан'
+    : '⚠ Эмбеддинг будет рассчитан после сохранения';
+  $('embNote').style.color = embOk ? '#19703a' : '#9a6700';
+  restoreDlgSize();
+  $('dlgOvl').style.display = '';
+  $('eContent').focus();
+}
+
+function closeDialog() { $('dlgOvl').style.display = 'none'; editingId = null; }
+
+function saveDialog() {
+  const content = $('eContent').value.trim();
+  if (!content) { alert('Поле «Содержимое» обязательно'); return; }
+  const vals = {
+    title: $('eTitle').value.trim() || null,
+    content,
+    domain: $('eDomain').value || null,
+    tags: $('eTags').value.split(',').map((s) => s.trim()).filter(Boolean),
+    importance: Math.min(1, Math.max(0, parseFloat($('eImportance').value) || 0.5)),
+    status: $('eStatus').value,
+    source: $('eSource').value.trim() || null,
+    updatedAt: new Date().toISOString(),
+  };
+  let r;
+  if (editingId) {
+    r = rows.find((x) => x.id === editingId);
+    const textChanged = r.content !== vals.content || r.title !== vals.title;
+    Object.assign(r, vals);
+    if (textChanged) r.hasEmbedding = false; // триггер в БД сбросил вектор
+  } else {
+    r = mk(vals.title, vals.content, vals.domain, vals.tags, vals.importance, vals.status, vals.source,
+           false, vals.updatedAt);
+    rows.unshift(r);
+  }
+  closeDialog();
+  if (!r.hasEmbedding) { // сервер пересчитывает эмбеддинг после сохранения
+    r.embBusy = true; render();
+    setTimeout(() => { r.embBusy = false; r.hasEmbedding = true; render(); }, 1400);
+  } else render();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('dlgOvl').style.display !== 'none') closeDialog();
+});
+$('dlgOvl').addEventListener('pointerdown', (e) => { if (e.target === $('dlgOvl')) closeDialog(); });
+
+/* ── Ресайз диалога со всех сторон (паттерн PayloadView.vue) ───── */
+const MIN_W = 520, MIN_H = 360;
+const SIZE_KEY = 'knowledge.dialog.size';
+let dlgW = 860, dlgH = 600;
+
+function restoreDlgSize() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null');
+    if (s) { dlgW = s.w; dlgH = s.h; }
+  } catch { /* размер по умолчанию */ }
+  applyDlgSize();
+}
+function applyDlgSize() {
+  dlgW = Math.min(Math.max(dlgW, MIN_W), window.innerWidth * 0.96);
+  dlgH = Math.min(Math.max(dlgH, MIN_H), window.innerHeight * 0.94);
+  $('dlg').style.width = dlgW + 'px';
+  $('dlg').style.height = dlgH + 'px';
+}
+
+document.querySelectorAll('.rs').forEach((h) => h.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const dir = h.dataset.rs;
+  const startX = e.clientX, startY = e.clientY, startW = dlgW, startH = dlgH;
+  const move = (ev) => {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    // диалог отцентрован, поэтому тянем за каждую сторону с коэффициентом 2
+    if (dir.includes('e')) dlgW = startW + dx * 2;
+    if (dir.includes('w')) dlgW = startW - dx * 2;
+    if (dir.includes('s')) dlgH = startH + dy * 2;
+    if (dir.includes('n')) dlgH = startH - dy * 2;
+    applyDlgSize();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    localStorage.setItem(SIZE_KEY, JSON.stringify({ w: dlgW, h: dlgH }));
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}));
+
+buildFilterOptions();
+render();
+</script>
+</body>
+</html>
