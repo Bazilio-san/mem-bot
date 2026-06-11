@@ -1,0 +1,13 @@
+###
+POST https://ml.bazilio.ru/img-gen/api
+Content-Type: application/json
+
+{
+  "prompt": "кот-космонавт на Марсе, cinematic lighting, high detail",
+  "negative_prompt": "blurry, low quality, distorted",
+  "width": 1024,
+  "height": 1024,
+  "model": "auto",
+  "seed": -1
+}
+

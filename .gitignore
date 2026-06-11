@@ -31,6 +31,7 @@ playwright.config.js.map
 # локальные секреты и переопределения node-config (не коммитятся)
 config/local.yaml
 config/local-*.yaml
+**/*.ignore.*
 /.idea/
 /_tmp/
 **/node_modules/
