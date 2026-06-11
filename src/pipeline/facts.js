@@ -63,6 +63,23 @@ export function mapKindToType(kind) {
   return KIND_TO_TYPE[kind] || null;
 }
 
+// Ранги источников фактов для разрешения конфликтов при записи: замещение существующей строки
+// разрешено, только если ранг нового источника не ниже ранга старого. Закреплённые (persistent)
+// строки замещает только источник ранга user_statement и выше — человек явно передумал.
+export const SOURCE_RANK = {
+  manual: 4,
+  user_statement: 3,
+  user_reaction: 2,
+  history_summary: 1,
+  migration: 0,
+};
+
+export const FACT_SOURCES = Object.keys(SOURCE_RANK);
+
+function normalizeSource(source) {
+  return FACT_SOURCES.includes(source) ? source : 'user_statement';
+}
+
 // Грубая очистка от HTML-разметки: ответы бота в Telegram-канале содержат <b>/<i> и т.п.
 // Используется для саммари-фолбэка и для текста цели реакции.
 export function stripHtml(text) {
@@ -181,6 +198,15 @@ const EXTRACT_SYSTEM = `Ты извлекаешь устойчивые факт�
 однозначен из текста сообщения, на которое он отреагировал: «Ты любишь торты?» + :heart: →
 preference «Пользователь любит торты». Вежливое одобрение без содержания — не факт.
 
+Срок жизни факта. Оценивай срок жизни факта по его природе, как это сделал бы человек:
+- Именования и устойчивые договорённости об общении («называй меня на ты», «тебя зовут Шарик»,
+  «отвечай без смайликов») — бессрочные: ttl_days = null. Действуют до явной отмены или замены.
+- Сиюминутные оценки и настроения («ты весёлый», «ты сегодня молодец», «мне скучно») — не факты:
+  не сохраняй. Если видишь повторяющийся паттерн — сохраняй паттерн, а не разовую реплику.
+- Рабочие договорённости о текущей задаче («будешь помогать с курсовой», «правь тексты, которые
+  пришлю») — это open_loop или goal со сроком: ttl_days 30–60. Они актуальны, пока жива задача,
+  и должны затухать сами, если к ним не возвращаются.
+
 Если сохранять нечего — верни {"facts": []}. Чаще всего так и есть.`;
 
 // Извлечение фактов из реплик пользователя. assistantSummary — краткое содержание ОТВЕТА АССИСТЕНТА,
@@ -237,7 +263,7 @@ ${assistantBlock}<user>${current}</user>`;
 async function findNearestFact({ userId, factType, vector, factText }) {
   if (vector) {
     const { rows } = await query(
-      `SELECT id, fact_text, confidence, evidence_count, domain_key,
+      `SELECT id, fact_text, confidence, evidence_count, domain_key, source, persistent,
               1 - (embedding <=> $3::vector) AS similarity
          FROM mem.user_facts
         WHERE user_id = $1 AND fact_type = $2 AND status = 'active' AND embedding IS NOT NULL
@@ -248,7 +274,7 @@ async function findNearestFact({ userId, factType, vector, factText }) {
     return rows[0] || null;
   }
   const { rows } = await query(
-    `SELECT id, fact_text, confidence, evidence_count, domain_key, 1.0 AS similarity
+    `SELECT id, fact_text, confidence, evidence_count, domain_key, source, persistent, 1.0 AS similarity
        FROM mem.user_facts
       WHERE user_id = $1 AND fact_type = $2 AND status = 'active' AND lower(fact_text) = lower($3)
       LIMIT 1`,
@@ -257,20 +283,27 @@ async function findNearestFact({ userId, factType, vector, factText }) {
   return rows[0] || null;
 }
 
-function openLoopExpiry(ttlDays) {
-  const days = Number(ttlDays) > 0 ? Number(ttlDays) : config.facts.openLoopTtlDays;
-  return new Date(Date.now() + days * 86400000);
+// Срок забывания (expires_at) по типу факта: явный ttl_days из извлечения имеет приоритет,
+// иначе берётся таблица facts.retention из конфига (0 — бессрочно, expires_at = NULL).
+function retentionExpiry(factType, ttlDays) {
+  const days = Number(ttlDays) > 0 ? Number(ttlDays) : Number(config.facts.retention?.[factType]) || 0;
+  return days > 0 ? new Date(Date.now() + days * 86400000) : null;
 }
 
-// Сохранить один факт с дедупликацией. Возвращает { action, id, ... }:
+// Сохранить один факт с дедупликацией. opts.source — тип источника (см. SOURCE_RANK, дефолт
+// 'user_statement'); fact.persistent = true закрепляет факт («запомни навсегда»): expires_at = NULL,
+// фоновый sweep строку не трогает, замещение доступно только источникам ранга user_statement и выше.
+// Возвращает { action, id, ... }:
 //   confirmed — близкий факт уже есть, строка обновлена (свежесть, evidence_count, формулировка);
 //   replaced  — та же тема с новым значением: старая строка архивирована, вставлена новая;
 //   created   — новый факт;
 //   skipped   — не прошёл порог уверенности или неизвестный тип.
-export async function saveFact(userId, domainKey, fact, sourceConversationId = null) {
+export async function saveFact(userId, domainKey, fact, sourceConversationId = null, opts = {}) {
   const factType = FACT_TYPES.includes(fact.type) ? fact.type : mapKindToType(fact.type);
   const factText = String(fact.fact_text || '').trim();
   const confidence = Math.min(Math.max(Number(fact.confidence) || 0, 0), 0.99);
+  const source = normalizeSource(opts.source);
+  const persistent = fact.persistent === true;
   if (!factType || !factText) {
     return { action: 'skipped', reason: 'unknown type or empty text', fact };
   }
@@ -279,32 +312,59 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   }
 
   const factDomain = GENERAL_TYPES.has(factType) ? 'general' : domainKey || 'general';
-  const expiresAt =
-    factType === 'open_loop' ? openLoopExpiry(fact.ttl_days) : fact.ttl_days ? openLoopExpiry(fact.ttl_days) : null;
+  const expiresAt = persistent ? null : retentionExpiry(factType, fact.ttl_days);
   const vector = await embed(factText);
   const nearest = await findNearestFact({ userId, factType, vector, factText });
   const similarity = nearest ? Number(nearest.similarity) : 0;
+  const sourceRank = SOURCE_RANK[source];
+  const nearestRank = nearest ? (SOURCE_RANK[nearest.source] ?? SOURCE_RANK.user_statement) : 0;
 
   if (nearest && similarity >= config.facts.confirmSimilarity) {
-    // Подтверждение: тот же смысл. Берём более свежую формулировку, поднимаем уверенность и свежесть.
+    // Подтверждение: тот же смысл. Свежая формулировка принимается, только если ранг источника
+    // не ниже ранга строки (для закреплённой строки — не ниже user_statement) — слабый источник
+    // не переписывает текст сильного, но продлевает свежесть.
+    const keepPersistent = nearest.persistent === true || persistent;
+    const rewriteText = sourceRank >= (nearest.persistent === true ? SOURCE_RANK.user_statement : nearestRank);
+    // Подтверждение продлевает срок забывания от текущего момента для любого типа с ненулевым
+    // retention; закреплённая строка остаётся бессрочной.
+    const nextExpiry = keepPersistent ? null : retentionExpiry(factType, fact.ttl_days);
     await query(
       `UPDATE mem.user_facts
-          SET fact_text = $2, confidence = GREATEST(confidence, $3), evidence_count = evidence_count + 1,
-              embedding = COALESCE($4::vector, embedding), last_confirmed_at = now(), updated_at = now(),
-              expires_at = CASE WHEN fact_type = 'open_loop' THEN $5 ELSE expires_at END
+          SET fact_text = CASE WHEN $6 THEN $2 ELSE fact_text END,
+              confidence = GREATEST(confidence, $3), evidence_count = evidence_count + 1,
+              embedding = CASE WHEN $6 THEN COALESCE($4::vector, embedding) ELSE embedding END,
+              last_confirmed_at = now(), updated_at = now(),
+              persistent = $7,
+              expires_at = CASE WHEN $7 THEN NULL ELSE COALESCE($5, expires_at) END
         WHERE id = $1`,
-      [nearest.id, factText, confidence, vector ? vectorToSql(vector) : null, expiresAt],
+      [nearest.id, factText, confidence, vector ? vectorToSql(vector) : null, nextExpiry, rewriteText, keepPersistent],
     );
-    return { action: 'confirmed', id: nearest.id, similarity };
+    return { action: 'confirmed', id: nearest.id, similarity, source };
   }
 
   if (nearest && similarity >= config.facts.replaceSimilarity) {
     // Та же тема, новое значение («переехал в Казань» поверх «живёт в Москве»): замещение.
+    // Правило конфликтов: замещать может только источник ранга не ниже старого. Для закреплённой
+    // (persistent) строки порог фиксированный — user_statement и выше: человек явно передумал
+    // («Тебя зовут Бобик» поверх закреплённого «Тебя зовут Шарик») — штатная смена с архивацией.
+    // Иначе слабый источник лишь подтверждает свежесть строки, не трогая её текст.
+    const requiredRank = nearest.persistent === true ? SOURCE_RANK.user_statement : nearestRank;
+    if (sourceRank < requiredRank) {
+      await query(
+        `UPDATE mem.user_facts
+            SET evidence_count = evidence_count + 1, last_confirmed_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [nearest.id],
+      );
+      return { action: 'confirmed', id: nearest.id, similarity, source, reason: 'source rank below existing' };
+    }
+    // Закрепление наследуется: явная смена закреплённого факта остаётся закреплённой (и бессрочной).
+    const insertPersistent = persistent || nearest.persistent === true;
     const { rows } = await query(
       `INSERT INTO mem.user_facts
          (user_id, domain_key, fact_type, fact_text, confidence, source_conversation_id, embedding,
-          expires_at, metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, jsonb_build_object('replaces', $9::text))
+          expires_at, source, persistent, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, jsonb_build_object('replaces', $11::text))
        RETURNING id`,
       [
         userId,
@@ -314,7 +374,9 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
         confidence,
         sourceConversationId,
         vector ? vectorToSql(vector) : null,
-        expiresAt,
+        insertPersistent ? null : expiresAt,
+        source,
+        insertPersistent,
         nearest.id,
       ],
     );
@@ -325,13 +387,14 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
         WHERE id = $1`,
       [nearest.id, rows[0].id],
     );
-    return { action: 'replaced', id: rows[0].id, archived: nearest.id, similarity };
+    return { action: 'replaced', id: rows[0].id, archived: nearest.id, similarity, source };
   }
 
   const { rows } = await query(
     `INSERT INTO mem.user_facts
-       (user_id, domain_key, fact_type, fact_text, confidence, source_conversation_id, embedding, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       (user_id, domain_key, fact_type, fact_text, confidence, source_conversation_id, embedding,
+        expires_at, source, persistent)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING id`,
     [
       userId,
@@ -342,18 +405,21 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
       sourceConversationId,
       vector ? vectorToSql(vector) : null,
       expiresAt,
+      source,
+      persistent,
     ],
   );
-  return { action: 'created', id: rows[0].id };
+  return { action: 'created', id: rows[0].id, source };
 }
 
 // Сохранить пачку извлечённых фактов. Последовательно: дедупликация внутри пачки должна видеть
 // результат предыдущих вставок (две формулировки одного факта в одном ходе схлопнутся).
-export async function saveFacts(userId, domainKey, facts, sourceConversationId = null) {
+// opts.source передаётся каждому saveFact.
+export async function saveFacts(userId, domainKey, facts, sourceConversationId = null, opts = {}) {
   const results = [];
   for (const fact of facts || []) {
     try {
-      results.push(await saveFact(userId, domainKey, fact, sourceConversationId));
+      results.push(await saveFact(userId, domainKey, fact, sourceConversationId, opts));
     } catch (err) {
       results.push({ action: 'error', error: String(err.message || err), fact });
     }
@@ -380,15 +446,19 @@ export async function dedupeFactsSweep({ userId, dryRun = false, limit = 500 } =
   );
   const pairs = [];
   // Пары ищем в SQL одним самосоединением по типу: косинусное сходство выше порога.
+  // Закреплённые (persistent) строки не архивируются как дубликаты: они могут быть только
+  // «выжившей» стороной пары, поэтому сторона b всегда не закреплена, а при сравнении
+  // закрепление весит больше evidence_count и свежести.
   const { rows: dupRows } = await query(
     `SELECT a.id AS keep_id, b.id AS drop_id, 1 - (a.embedding <=> b.embedding) AS similarity
        FROM mem.user_facts a
        JOIN mem.user_facts b
          ON b.user_id = a.user_id AND b.fact_type = a.fact_type AND b.id <> a.id
-        AND b.status = 'active' AND b.embedding IS NOT NULL
+        AND b.status = 'active' AND b.embedding IS NOT NULL AND NOT b.persistent
       WHERE a.user_id = $1 AND a.status = 'active' AND a.embedding IS NOT NULL
         AND 1 - (a.embedding <=> b.embedding) >= $2
-        AND (a.evidence_count, a.last_confirmed_at, a.id) > (b.evidence_count, b.last_confirmed_at, b.id)`,
+        AND (a.persistent, a.evidence_count, a.last_confirmed_at, a.id)
+            > (b.persistent, b.evidence_count, b.last_confirmed_at, b.id)`,
     [userId, config.facts.confirmSimilarity],
   );
   const dropped = new Set();

@@ -392,7 +392,7 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
   // Durable facts from history go into long-term memory via the normal flow (thresholds, dedup).
   if (result.factsToMemory.length) {
     try {
-      await saveFacts(userId, domainKey, result.factsToMemory, conversationId);
+      await saveFacts(userId, domainKey, result.factsToMemory, conversationId, { source: 'history_summary' });
     } catch (err) {
       dbg('writing facts_to_memory failed:', err.message);
     }

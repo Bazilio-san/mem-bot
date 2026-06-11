@@ -19,8 +19,8 @@
 All facts live in the single flat table `mem.user_facts` (see [05-data-schema.md](05-data-schema.md), DATA-4).
 Each fact is one short third-person sentence with three storage coordinates — user, domain, fact type — plus
 `confidence`, `evidence_count` (how many times the fact was re-confirmed), freshness (`last_confirmed_at`),
-an optional `expires_at`, and an embedding. The ten fact types are chosen to make the bot a great
-conversational partner:
+the origin of the fact (`source`), the pinned flag (`persistent`), an optional `expires_at`, and an
+embedding. The ten fact types are chosen to make the bot a great conversational partner:
 
 | `fact_type` | What it captures |
 |---|---|
@@ -66,13 +66,20 @@ deserves a follow-up regardless of the current topic.
 // which reads MEMORY_LIMIT_* env vars and defaults to 7/5/12/3/3/30.
 const LIMITS = config.memoryLimits; // { profile: 7, dialog: 5, domain: 12, reminder: 3, secure: 3, total: 30 }
 
+// Source reliability: direct user statements and explicit pin requests outrank
+// reaction-derived facts, history-compression facts, and migrated rows.
+const SOURCE_WEIGHT = { manual: 1.0, user_statement: 1.0, user_reaction: 0.8, history_summary: 0.7, migration: 0.6 };
+
 function scoreFact(it, relevance) {
   const boosted = CORE_TYPES.has(it.fact_type) ? Math.max(relevance, 0.6) : relevance;
-  return boosted * 0.5 + Number(it.confidence) * 0.25 +
-         recencyScore(it.last_confirmed_at) * 0.15 +
-         Math.min(Number(it.evidence_count || 1) / 5, 1) * 0.1;
+  return boosted * 0.5 + Number(it.confidence) * 0.22 +
+         recencyScore(it.last_confirmed_at) * 0.13 +
+         Math.min(Number(it.evidence_count || 1) / 5, 1) * 0.1 +
+         (SOURCE_WEIGHT[it.source] ?? 1.0) * 0.05;
 }
 ```
+
+When two facts score equally, pinned facts (`persistent = true`) sort first within their group.
 
 The structural candidate filter and vector search share a single privacy-safe predicate (secret data never
 reaches this table — it lives encrypted in `secure_records`):
@@ -170,6 +177,13 @@ states, avoiding psychological labels, and avoiding absolute wording such as "al
 reactions to assistant messages produce a fact only when the target message makes the meaning of the reaction
 unambiguous. If there is nothing to save, the model returns an empty list — and most turns yield exactly that.
 
+The prompt also asks the model to judge the fact's lifetime by its nature, the way a person would, via the
+`ttl_days` field: namings and stable communication agreements ("call me by first name", "your name is
+Sharik", "no emojis") are open-ended (`ttl_days = null`, valid until explicitly cancelled or replaced);
+fleeting moods and one-off appraisals ("you are funny", "I am bored") are not facts at all — only a recurring
+pattern is saved; working agreements about a current task ("you'll help me with my coursework") are
+`open_loop` or `goal` facts with a 30–60 day lifetime that fade out by themselves unless revisited.
+
 The model returns flat fact objects; the pipeline assigns the storage domain itself (person-level types go to
 `general`, `goal` and `open_loop` to the current domain):
 
@@ -178,12 +192,50 @@ The model returns flat fact objects; the pipeline assigns the storage domain its
                "confidence": 0.9, "ttl_days": null } ] }
 ```
 
-### [MEM-5] Auto-save Threshold and Privacy
+### [MEM-5] Auto-save Threshold, Fact Sources, and Privacy
 
 A fact is saved automatically only when `confidence >= config.facts.minConfidence` (0.7 by default);
 weaker candidates are skipped. Sensitive data does not reach this filter at all — the extraction prompt drops
 it, and the secure storage path ([07-secure-privacy.md](07-secure-privacy.md)) remains the only place where
 secrets are kept, encrypted.
+
+Every saved fact records its **source** — who or what produced it. Sources are ranked; the rank governs both
+retrieval weight (MEM-2) and write-time conflict resolution (MEM-6):
+
+| `source` | Rank | Write path |
+|---|---|---|
+| `manual` | 4 | The `memory_pin` tool — the user explicitly asked to remember the fact |
+| `user_statement` | 3 | The regular extraction path from the user's dialog messages (default) |
+| `user_reaction` | 2 | Extraction from a user reaction to an assistant message |
+| `history_summary` | 1 | Facts recovered by the history-compression summarizer |
+| `migration` | 0 | Rows transferred from a previous storage |
+
+A fact may also be **pinned** (`persistent = true`): the user explicitly asked to remember it forever. A
+pinned row never receives `expires_at`, the background sweep never archives it, and only a source of rank
+`user_statement` or higher can replace it — the user explicitly changed their mind ("your name is Bobik" on
+top of the pinned "your name is Sharik" is a normal replacement that archives the old row). Human-like
+permanence rests on the pair "open-ended fact (retention 0) + semantic replacement"; `persistent` is the
+safety latch against background cleanup and weak sources for explicit "remember forever" requests.
+
+**Retention.** `expires_at` marks the moment of FORGETTING, not the moment a fact stops being true. It is
+computed at write time from the per-type retention table in the configuration (`facts.retention`, days;
+0 = open-ended). An explicit `ttl_days` from extraction takes priority over the table. Re-confirming a fact
+extends `expires_at` from the current moment for any type with a non-zero retention period.
+
+```yaml
+facts:
+  retention:
+    profile: 0
+    preference: 0
+    habit: 0
+    goal: 0
+    communication_style: 0
+    open_loop: 30           # unfinished threads fade unless revisited
+    emotional_pattern: 180  # a pattern unconfirmed for half a year is stale
+    activity_rhythm: 180
+    topic_energy: 120
+    discovery_seed: 365
+```
 
 ### [MEM-6] Deduplication and Updating Instead of Creating Duplicates
 
@@ -194,24 +246,29 @@ fallback when the embedding service is unavailable). Two thresholds from configu
 `text-embedding-3-small`) split the outcome into three cases:
 
 - **similarity ≥ confirmSimilarity — confirmation.** The same statement in a different wording. The existing
-  row is updated in place: the newer wording wins, `confidence` is raised to the maximum of the two,
-  `evidence_count` is incremented, `last_confirmed_at` is refreshed, and an `open_loop` fact gets its
-  `expires_at` extended. Repeatedly confirmed facts therefore rank higher and never multiply.
+  row is updated in place: `confidence` is raised to the maximum of the two, `evidence_count` is incremented,
+  `last_confirmed_at` is refreshed, and `expires_at` is extended from the current moment for any type with a
+  non-zero retention period. The newer wording wins only when the new source's rank is not below the row's
+  rank (for a pinned row — not below `user_statement`): a weak source refreshes a strong fact but does not
+  rewrite it. Repeatedly confirmed facts therefore rank higher and never multiply.
 - **replaceSimilarity ≤ similarity < confirmSimilarity — replacement.** The same topic with a new value
-  ("current city: Moscow" → "current city: Kazan"). The new row is inserted with `metadata.replaces`, the old
-  one is archived with `metadata.replaced_by` — conflicts resolve toward the newest statement while the
-  history stays auditable.
+  ("current city: Moscow" → "current city: Kazan"). Replacement is allowed only when the new source's rank is
+  not below the old row's rank (for a pinned row the threshold is fixed at `user_statement`); otherwise the
+  write degrades to a freshness confirmation without touching the text. When allowed, the new row is inserted
+  with `metadata.replaces`, the old one is archived with `metadata.replaced_by` — conflicts resolve toward
+  the newest statement while the history stays auditable. A replaced pinned row passes its `persistent` flag
+  to the successor.
 - **below replaceSimilarity — a new fact.** Inserted as a new row.
 
-Aging is driven by `expires_at`: `open_loop` facts always receive a TTL (`facts.openLoopTtlDays`, 30 days by
-default, model-overridable via `ttl_days`), expired rows are excluded from retrieval and archived by the
-scheduler's `memory_cleanup` task.
+Aging is driven by `expires_at`, computed from the retention table (MEM-5); expired rows are excluded from
+retrieval and archived by the scheduler's `memory_cleanup` task.
 
 Retroactive cleanup of accumulated duplicates is the `dedupeFactsSweep` function (the scheduler's
 `memory_dedupe_cleanup` task and the manual `memory:dedupe` script): pairs of same-type facts above the
 confirmation threshold are merged — the row with more confirmations survives and absorbs the duplicate's
-`evidence_count`, the duplicate is archived with `metadata.merged_into`. A dry run reports the pairs without
-changing anything.
+`evidence_count`, the duplicate is archived with `metadata.merged_into`. Pinned rows are never archived as
+duplicates — they can only be the surviving side of a pair. A dry run reports the pairs without changing
+anything.
 
 ---
 
@@ -223,7 +280,7 @@ by the mandatory deletion test from the required test suite (`OPS-8`).
 
 ### User Memory Management Directly in the Dialog
 
-The logic from `src/pipeline/admin.js` is exposed to the user through three agent tools (function calling). Each
+The logic from `src/pipeline/admin.js` is exposed to the user through agent tools (function calling). Each
 tool lives in its own module under `src/pipeline/agent-tools/`, which co-locates the `title`, the OpenAI function
 definition, and the handler. The user controls their memory using natural phrases, and the agent selects the
 appropriate tool automatically:
@@ -238,8 +295,12 @@ appropriate tool automatically:
 - **`memory_forget_all`** — "delete everything you know about me". Relies on `forgetAll` and only fires when
   `confirm=true`. The agent's system prompt requires it to ask the user for confirmation before calling this tool —
   from the user's perspective the operation is irreversible, even though the deletion remains soft internally.
+- **`memory_pin`** — "remember forever: I am allergic to peanuts". Saves the fact via the regular `saveFact`
+  path with `confidence = 0.99`, `persistent = true`, and `source = 'manual'` (parameters: `fact_text` and a
+  `fact_type` from the ten types, with `profile` for free-form facts). The agent's system prompt directs an
+  explicit "remember (forever) ..." request to this tool. The pinning semantics are defined in MEM-5.
 
-All three tools operate strictly within the user's identifier (`ctx.userId`) and go through the shared
+All these tools operate strictly within the user's identifier (`ctx.userId`) and go through the shared
 `executeTool`, so every call is automatically recorded in the tool-call log (`logToolCall`).
 
 ---

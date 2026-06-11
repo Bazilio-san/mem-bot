@@ -8,7 +8,7 @@ import { config } from '../src/config.js';
 import { query, queryLog, closePool, vectorToSql } from '../src/db.js';
 import { embed } from '../src/llm.js';
 import { ensureUser, getDomainId, ensureDefaultTriggers, ensureConversation, getRecentMessages } from '../src/repo.js';
-import { handleMessage } from '../src/agent.js';
+import { handleMessage, recordUserReaction } from '../src/agent.js';
 import { extractFacts, saveFact, saveFacts, dedupeFactsSweep, mapKindToType } from '../src/pipeline/facts.js';
 import { retrieveMemory, buildMemoryContext, LIMITS } from '../src/pipeline/retrieve.js';
 import { saveSecureRecord, grantConsent, getSecureValue, listSecureSummaries } from '../src/pipeline/secure.js';
@@ -170,9 +170,10 @@ async function layerStructure() {
   const { rows: factCols } = await query(
     `SELECT column_name FROM information_schema.columns
       WHERE table_schema='mem' AND table_name='user_facts'
-        AND column_name IN ('fact_type','fact_text','confidence','evidence_count','expires_at','last_confirmed_at')`,
+        AND column_name IN ('fact_type','fact_text','confidence','evidence_count','expires_at',
+                            'last_confirmed_at','source','persistent')`,
   );
-  check('user_facts имеет координаты хранения и поля устаревания', factCols.length === 6);
+  check('user_facts имеет координаты хранения, поля устаревания, source и persistent', factCols.length === 8);
 
   // Чувствительные данные — отдельная таблица, не в user_facts.
   const { rows: secCols } = await query(
@@ -1065,6 +1066,250 @@ async function mandatory() {
       '14. Инструменты памяти проходят через executeTool с журналированием',
       sawCar && forgot.deleted === 1 && blocked.deleted === 0 && typeof allGone.deleted === 'number' && loggedAll,
     );
+  }
+}
+
+// ============ СЛОЙ 2c. Модель факта: источник, закрепление, retention ========
+async function layerFactModel() {
+  section('Слой 2c. Модель факта: source, persistent, retention');
+
+  // F1. Основной путь записи (обычный ход диалога) проставляет source = user_statement.
+  {
+    await freshUser('tf1');
+    const res = await handleMessage({
+      externalId: 'tf1',
+      userMessage: 'Я не люблю длинные ответы, пиши коротко.',
+      domainKey: 'general',
+      extractSync: true,
+    });
+    const { rows } = await query(`SELECT source FROM mem.user_facts WHERE user_id=$1`, [res.userId]);
+    check(
+      'F1. Обычный ход пишет факты с source=user_statement',
+      rows.length >= 1 && rows.every((r) => r.source === 'user_statement'),
+      `строк ${rows.length}: ${rows.map((r) => r.source).join(',')}`,
+    );
+  }
+
+  // F2. Путь реакций проставляет source = user_reaction; путь сжатия истории — history_summary.
+  {
+    const u = await freshUser('tf2');
+    const conv = await ensureConversation(u.id, 'general');
+    await recordUserReaction({
+      externalId: 'tf2',
+      domainKey: 'general',
+      reactionKey: 'heart',
+      targetMessage: { id: null, conversation_id: conv.id, role: 'assistant', content: 'Ты любишь торты?' },
+      extractSync: true,
+    });
+    const { rows: reactionRows } = await query(
+      `SELECT source FROM mem.user_facts WHERE user_id=$1 AND status='active'`,
+      [u.id],
+    );
+    check(
+      'F2a. Реакция на сообщение ассистента пишет факт с source=user_reaction',
+      reactionRows.length >= 1 && reactionRows.every((r) => r.source === 'user_reaction'),
+      `строк ${reactionRows.length}: ${reactionRows.map((r) => r.source).join(',')}`,
+    );
+
+    const u2 = await freshUser('tf2b');
+    await saveFacts(
+      u2.id,
+      'general',
+      [{ type: 'profile', fact_text: 'Пользователь работает школьным учителем.', confidence: 0.9 }],
+      null,
+      { source: 'history_summary' },
+    );
+    const { rows: histRows } = await query(`SELECT source FROM mem.user_facts WHERE user_id=$1`, [u2.id]);
+    check(
+      'F2b. Контур сжатия истории пишет факты с source=history_summary',
+      histRows.length === 1 && histRows[0].source === 'history_summary',
+    );
+  }
+
+  // F3. Замещение блокируется при понижении ранга источника: history_summary не перетирает
+  // user_statement — старая строка остаётся активной, лишь подтверждается её свежесть.
+  {
+    const u = await freshUser('tf3');
+    await saveFact(u.id, 'general', {
+      type: 'profile',
+      fact_text: 'Текущий город пользователя: Москва.',
+      confidence: 0.9,
+    });
+    const r = await saveFact(
+      u.id,
+      'general',
+      { type: 'profile', fact_text: 'Текущий город пользователя: Казань.', confidence: 0.9 },
+      null,
+      { source: 'history_summary' },
+    );
+    const { rows } = await query(`SELECT fact_text FROM mem.user_facts WHERE user_id=$1 AND status='active'`, [u.id]);
+    check(
+      'F3. Слабый источник не замещает факт сильного (текст не перезаписан)',
+      r.action !== 'replaced' && rows.length === 1 && /Москв/.test(rows[0].fact_text),
+      `action=${r.action}, текст=${rows[0]?.fact_text}`,
+    );
+  }
+
+  // F4. memory_pin создаёт закреплённый факт: source=manual, persistent=true, без срока забывания.
+  {
+    const u = await freshUser('tf4');
+    const conv = await ensureConversation(u.id, 'general');
+    const res = await executeTool(
+      { userId: u.id, conversationId: conv.id, domainKey: 'general', isAdmin: false },
+      'memory_pin',
+      { fact_text: 'У пользователя аллергия на арахис.', fact_type: 'profile' },
+    );
+    const { rows } = await query(
+      `SELECT source, persistent, expires_at FROM mem.user_facts WHERE user_id=$1 AND status='active'`,
+      [u.id],
+    );
+    check(
+      'F4. memory_pin создаёт persistent-факт с source=manual и без expires_at',
+      res.action === 'created' &&
+        rows.length === 1 &&
+        rows[0].persistent === true &&
+        rows[0].source === 'manual' &&
+        rows[0].expires_at === null,
+      JSON.stringify(res),
+    );
+  }
+
+  // F5. Фоновый sweep не архивирует persistent-строку: она может быть только «выжившей» стороной,
+  // даже когда у незакреплённого дубликата больше подтверждений.
+  {
+    const u = await freshUser('tf5');
+    const pinnedText = 'Пользователь предпочитает короткие и прямые ответы.';
+    const dupText = 'Пользователь предпочитает короткие прямые ответы без долгих вступлений.';
+    const v1 = await embed(pinnedText);
+    const v2 = await embed(dupText);
+    await query(
+      `INSERT INTO mem.user_facts (user_id, domain_key, fact_type, fact_text, confidence, evidence_count,
+                                   persistent, source, embedding)
+       VALUES ($1,'general','communication_style',$2,0.95,1,true,'manual',$3::vector)`,
+      [u.id, pinnedText, v1 ? vectorToSql(v1) : null],
+    );
+    await query(
+      `INSERT INTO mem.user_facts (user_id, domain_key, fact_type, fact_text, confidence, evidence_count,
+                                   persistent, source, embedding)
+       VALUES ($1,'general','communication_style',$2,0.9,5,false,'user_statement',$3::vector)`,
+      [u.id, dupText, v2 ? vectorToSql(v2) : null],
+    );
+    await dedupeFactsSweep({ userId: u.id });
+    const { rows } = await query(`SELECT persistent, status FROM mem.user_facts WHERE user_id=$1`, [u.id]);
+    const pinnedActive = rows.some((r) => r.persistent === true && r.status === 'active');
+    const dupArchived = rows.some((r) => r.persistent === false && r.status === 'archived');
+    check('F5. Sweep сохраняет persistent-строку и архивирует незакреплённый дубликат', pinnedActive && dupArchived);
+  }
+
+  // F6. Retention из конфига: emotional_pattern получает expires_at (~180 дней), подтверждение
+  // продлевает срок от текущего момента.
+  {
+    const u = await freshUser('tf6');
+    const fact = { type: 'emotional_pattern', fact_text: 'Пользователь часто устаёт по вечерам.', confidence: 0.85 };
+    const r1 = await saveFact(u.id, 'general', fact);
+    const days = (ts) => (new Date(ts).getTime() - Date.now()) / 86400000;
+    const row1 = (await query(`SELECT expires_at FROM mem.user_facts WHERE id=$1`, [r1.id])).rows[0];
+    const retentionDays = Number(config.facts.retention.emotional_pattern);
+    check(
+      `F6a. emotional_pattern получает expires_at из retention-таблицы (~${retentionDays} дней)`,
+      row1.expires_at && Math.abs(days(row1.expires_at) - retentionDays) < 1,
+      `expires_at=${row1.expires_at}`,
+    );
+    // Откатываем срок назад и подтверждаем тем же текстом — срок должен продлиться от «сейчас».
+    await query(`UPDATE mem.user_facts SET expires_at = now() + interval '10 days' WHERE id=$1`, [r1.id]);
+    const r2 = await saveFact(u.id, 'general', fact);
+    const row2 = (await query(`SELECT expires_at FROM mem.user_facts WHERE id=$1`, [r1.id])).rows[0];
+    check(
+      'F6b. Подтверждение продлевает expires_at от текущего момента',
+      r2.action === 'confirmed' && days(row2.expires_at) > retentionDays - 1,
+      `action=${r2.action}, expires_at=${row2.expires_at}`,
+    );
+  }
+
+  // F7. Суждение о сроке жизни: именование («Тебя зовут Шарик») извлекается как бессрочный факт.
+  {
+    const facts = await extractFacts({
+      domainKey: 'general',
+      userMessages: ['Тебя зовут Шарик.'],
+      assistantSummary: '',
+    });
+    const savable = facts.filter((f) => Number(f.confidence) >= config.facts.minConfidence);
+    check(
+      'F7. «Тебя зовут Шарик» извлекается как бессрочный факт (ttl_days = null)',
+      savable.length >= 1 && savable.some((f) => f.ttl_days == null),
+      JSON.stringify(facts),
+    );
+  }
+
+  // F8. Новое явное высказывание (user_statement) меняет закреплённый факт: активен «Бобик»,
+  // «Шарик» не активен (замещение с архивацией либо подтверждение с перезаписью формулировки).
+  {
+    const u = await freshUser('tf8');
+    await saveFact(
+      u.id,
+      'general',
+      { type: 'profile', fact_text: 'Ассистента зовут Шарик.', confidence: 0.99, persistent: true },
+      null,
+      { source: 'manual' },
+    );
+    const r = await saveFact(u.id, 'general', {
+      type: 'profile',
+      fact_text: 'Ассистента зовут Бобик.',
+      confidence: 0.9,
+    });
+    const { rows } = await query(`SELECT fact_text, status, metadata FROM mem.user_facts WHERE user_id=$1`, [u.id]);
+    const active = rows.filter((x) => x.status === 'active');
+    const bobikActive = active.length === 1 && /Бобик/.test(active[0].fact_text);
+    const archiveOk =
+      r.action !== 'replaced' || rows.some((x) => x.status === 'archived' && x.metadata?.replaced_by === String(r.id));
+    check(
+      'F8. user_statement меняет закреплённый факт: активен «Бобик», «Шарик» не активен',
+      ['replaced', 'confirmed'].includes(r.action) && bobikActive && archiveOk,
+      `action=${r.action}, активных=${active.length}: ${active.map((x) => x.fact_text).join(' | ')}`,
+    );
+  }
+
+  // F9. Сиюминутная оценка («Ты — весёлый») не порождает сохраняемого факта.
+  {
+    const facts = await extractFacts({
+      domainKey: 'general',
+      userMessages: ['Ты — весёлый!'],
+      assistantSummary: 'Пошутил в ответ на вопрос пользователя.',
+    });
+    const savable = facts.filter((f) => Number(f.confidence) >= config.facts.minConfidence);
+    check('F9. «Ты — весёлый» не порождает сохраняемого факта', savable.length === 0, JSON.stringify(facts));
+  }
+
+  // F10. Рабочая договорённость («Будешь помогать мне с курсовой») извлекается со сроком
+  // (open_loop/goal, ttl_days задан) и продлевается при повторном упоминании курсовой.
+  {
+    const u = await freshUser('tf10');
+    const facts = await extractFacts({
+      domainKey: 'general',
+      userMessages: ['Будешь помогать мне с курсовой по экономике.'],
+      assistantSummary: '',
+    });
+    const savable = facts.filter(
+      (f) => Number(f.confidence) >= config.facts.minConfidence && ['open_loop', 'goal'].includes(f.type),
+    );
+    const withTtl = savable.filter((f) => Number(f.ttl_days) > 0);
+    check(
+      'F10a. Договорённость о курсовой извлекается как open_loop/goal с ненулевым сроком',
+      withTtl.length >= 1,
+      JSON.stringify(facts),
+    );
+    if (withTtl.length) {
+      const r1 = await saveFact(u.id, 'general', withTtl[0]);
+      await query(`UPDATE mem.user_facts SET expires_at = now() + interval '2 days' WHERE id=$1`, [r1.id]);
+      const r2 = await saveFact(u.id, 'general', withTtl[0]);
+      const row = (await query(`SELECT expires_at FROM mem.user_facts WHERE id=$1`, [r1.id])).rows[0];
+      const daysLeft = (new Date(row.expires_at).getTime() - Date.now()) / 86400000;
+      check(
+        'F10b. Повторное упоминание курсовой продлевает срок факта',
+        r2.action === 'confirmed' && daysLeft > 10,
+        `action=${r2.action}, осталось дней ${daysLeft.toFixed(1)}`,
+      );
+    }
   }
 }
 
@@ -2109,6 +2354,7 @@ async function main() {
     layerToolTitlesCoverage();
     await layerExtraction();
     await mandatory();
+    await layerFactModel();
     await layerPrivacy();
     await layerScenario();
     // Слой 6 выполняется только при включённом проактивном контуре, чтобы базовый прогон остался 36/36.

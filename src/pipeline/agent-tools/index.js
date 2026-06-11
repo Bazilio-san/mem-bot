@@ -5,6 +5,7 @@ import { secureRecordGetTool } from './secure-record-get.js';
 import { memoryListTool } from './memory/memory-list.js';
 import { memoryForgetEntityTool } from './memory/memory-forget-entity.js';
 import { memoryForgetAllTool } from './memory/memory-forget-all.js';
+import { memoryPinTool } from './memory/memory-pin.js';
 import { globalFactAddTool } from './global-fact/global-fact-add.js';
 import { globalFactDeleteTool } from './global-fact/global-fact-delete.js';
 import { globalFactListTool } from './global-fact/global-fact-list.js';
@@ -39,6 +40,7 @@ export const allTools = [
   memoryListTool,
   memoryForgetEntityTool,
   memoryForgetAllTool,
+  memoryPinTool,
   globalFactAddTool,
   globalFactDeleteTool,
   globalFactListTool,

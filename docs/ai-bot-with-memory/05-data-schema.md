@@ -148,10 +148,15 @@ statement (`fact_text`) with three storage coordinates: the user (`user_id`), th
 (`domain_key`, with `'general'` holding facts about the person that are valid in any domain), and the fact
 type (`fact_type`, a closed set of ten types oriented at conversational quality — see
 [06-memory.md](06-memory.md)). There is no per-entity structured payload and no separate importance score:
-ranking relies on `confidence`, freshness (`last_confirmed_at`), and the number of repeated confirmations
-(`evidence_count`). The `search_tsv` column is an automatically generated full-text vector; `embedding` is a
-1536-dimensional vector for semantic search and write-time deduplication. Aging is expressed by
-`expires_at` (always set for `open_loop` facts and refreshed when the fact is re-confirmed).
+ranking relies on `confidence`, freshness (`last_confirmed_at`), the number of repeated confirmations
+(`evidence_count`), and the reliability of the fact's origin (`source` — who or what produced the fact; see
+[06-memory.md](06-memory.md) for the rank order and conflict rules). The `persistent` flag pins a fact the
+user explicitly asked to remember forever: a pinned row never receives `expires_at`, is never archived by the
+background sweep, and can be replaced only by a new explicit user statement. The `search_tsv` column is an
+automatically generated full-text vector; `embedding` is a 1536-dimensional vector for semantic search and
+write-time deduplication. Aging is expressed by `expires_at` — the moment of FORGETTING (retention), not the
+moment the fact stops being true. It is computed at write time from the per-type retention table in the
+configuration and is extended from the current moment each time the fact is re-confirmed.
 
 ```sql
 CREATE TABLE IF NOT EXISTS mem.user_facts (
@@ -165,6 +170,12 @@ CREATE TABLE IF NOT EXISTS mem.user_facts (
     confidence  numeric(3,2) NOT NULL DEFAULT 0.80 CHECK (confidence >= 0 AND confidence <= 1),
     evidence_count integer NOT NULL DEFAULT 1,
     status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','deleted')),
+    -- Origin of the fact; affects ranking and conflict resolution (see 06-memory.md).
+    source      text NOT NULL DEFAULT 'user_statement'
+        CHECK (source IN ('user_statement','user_reaction','history_summary','migration','manual')),
+    -- Pinned fact ("remember forever"): no expires_at, immune to the background sweep,
+    -- replaceable only by a source of rank user_statement or higher.
+    persistent  boolean NOT NULL DEFAULT false,
     source_conversation_id uuid REFERENCES mem.conversations(id) ON DELETE SET NULL,
     embedding   vector(1536),
     search_tsv  tsvector GENERATED ALWAYS AS (to_tsvector('simple', fact_text)) STORED,

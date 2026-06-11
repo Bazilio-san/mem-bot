@@ -131,8 +131,15 @@ user-replicas-only rule still applies.
 
 The `user_facts` response schema is an array of flat objects with fields `type` (one of the ten fact types
 from [06-memory.md](06-memory.md)), `fact_text` (one short third-person sentence without HTML),
-`confidence` (0..1), and `ttl_days` (an integer for `open_loop` facts, otherwise `null`). The storage domain
-is assigned by the pipeline, not by the model.
+`confidence` (0..1), and `ttl_days` (an integer or `null`). The storage domain is assigned by the pipeline,
+not by the model.
+
+The model judges the fact's lifetime by its nature through `ttl_days`, the way a person would: namings and
+stable communication agreements are open-ended (`ttl_days = null`); fleeting moods and one-off appraisals are
+not saved at all (only a recurring pattern is); working agreements about a current task are `open_loop` or
+`goal` facts with `ttl_days` of 30–60 so they fade out unless revisited. An explicit `ttl_days` takes
+priority over the per-type retention table when computing `expires_at` (see [06-memory.md](06-memory.md),
+MEM-5).
 
 The extraction prompt preserves stable, useful facts rather than one-off states. It prohibits psychological
 diagnoses and labels, absolute phrasing such as "always" and "never", and requires lowering `confidence` when

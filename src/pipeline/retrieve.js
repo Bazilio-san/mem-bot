@@ -27,15 +27,32 @@ function recencyScore(ts) {
   return Math.max(0, 1 - days / 180); // линейное затухание за полгода
 }
 
-// Совокупный вес факта: семантическая релевантность запросу + уверенность + свежесть + подтверждения.
+// Вес источника факта: прямые высказывания пользователя и явные просьбы запомнить надёжнее
+// реакций, фактов из сжатия истории и переноса из старого хранилища.
+const SOURCE_WEIGHT = {
+  manual: 1.0,
+  user_statement: 1.0,
+  user_reaction: 0.8,
+  history_summary: 0.7,
+  migration: 0.6,
+};
+
+// Совокупный вес факта: релевантность + уверенность + свежесть + подтверждения + надёжность
+// источника. Сумма весов слагаемых — 1.0.
 function scoreFact(it, relevance) {
   const boosted = CORE_TYPES.has(it.fact_type) ? Math.max(relevance, 0.6) : relevance;
   return (
     boosted * 0.5 +
-    Number(it.confidence) * 0.25 +
-    recencyScore(it.last_confirmed_at) * 0.15 +
-    Math.min(Number(it.evidence_count || 1) / 5, 1) * 0.1
+    Number(it.confidence) * 0.22 +
+    recencyScore(it.last_confirmed_at) * 0.13 +
+    Math.min(Number(it.evidence_count || 1) / 5, 1) * 0.1 +
+    (SOURCE_WEIGHT[it.source] ?? 1.0) * 0.05
   );
+}
+
+// Сортировка группы: по совокупному весу; при равных прочих закреплённые факты выше.
+function byScore(a, b) {
+  return b.score - a.score || Number(b.persistent === true) - Number(a.persistent === true);
 }
 
 // Основной retrieval. Возвращает структуру по группам + активные напоминания + безопасные резюме.
@@ -47,7 +64,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
   // и текущего домена.
   const { rows: candidates } = await query(
     `SELECT id, domain_key, fact_type, fact_text AS memory_text, fact_text, confidence,
-            evidence_count, last_confirmed_at, updated_at
+            evidence_count, last_confirmed_at, updated_at, source, persistent
        FROM mem.user_facts
       WHERE user_id = $1 AND status = 'active'
         AND (expires_at IS NULL OR expires_at > now())
@@ -98,8 +115,8 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
       byGroup.profile.push(it);
     }
   }
-  byGroup.profile.sort((a, b) => b.score - a.score);
-  byGroup.domain.sort((a, b) => b.score - a.score);
+  byGroup.profile.sort(byScore);
+  byGroup.domain.sort(byScore);
   // Незакрытые линии — по свежести, а не по релевантности: о недавнем «потом расскажу» уместно
   // спросить независимо от темы текущей фразы.
   byGroup.dialog.sort((a, b) => new Date(b.last_confirmed_at) - new Date(a.last_confirmed_at));
