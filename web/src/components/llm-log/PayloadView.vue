@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
   padding: 3px 8px;
   cursor: pointer;
 }
-.pv-msg:not(.open) .pv-msg-h:hover,
+.pv-msg-h:hover,
 .pv-tool-h:hover {
   background: #fafafa;
 }
@@ -407,14 +407,23 @@ onBeforeUnmount(() => {
   border-top: 1px dashed rgba(0, 0, 0, 0.1);
   padding: 6px 8px;
 }
-/* Фон развёрнутого сообщения по роли. */
-.pv-msg.open.msg-system {
+/* Внутри раскрытого сообщения у просмотрщика содержимого убираются собственная рамка и белая
+   подложка, а цветной фон по роли получает только сам блок текста (.cv-out). */
+.pv-msg-b :deep(.cv) {
+  border: none;
+  background: transparent;
+}
+.pv-msg-b :deep(.cv-out) {
+  padding: 4px 20px 4px 8px;
+  border-radius: 4px;
+}
+.pv-msg.msg-system .pv-msg-b :deep(.cv-out) {
   background: #f3efff;
 }
-.pv-msg.open.msg-assistant {
+.pv-msg.msg-assistant .pv-msg-b :deep(.cv-out) {
   background: #edf7ed;
 }
-.pv-msg.open.msg-user {
+.pv-msg.msg-user .pv-msg-b :deep(.cv-out) {
   background: #fffad8;
 }
 .pv-tcalls {

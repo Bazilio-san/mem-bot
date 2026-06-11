@@ -17,6 +17,7 @@ import {
   saveMessageExternalRef,
   findMessageByExternalRef,
   getUserReplyMode,
+  syncTelegramProfile,
 } from '../repo.js';
 import { assertDatabasesAvailable, query, getPool, closePool } from '../db.js';
 import { flushLlmLog } from '../pipeline/llm-log.js';
@@ -516,6 +517,15 @@ async function handleUpdate(message) {
   const chatId = message.chat.id;
   const externalId = String(chatId);
   let text = (message.text || '').trim();
+
+  // Save the sender's Telegram profile (display name, username, language) on every incoming message —
+  // this also covers the very first /start, so a new user gets a display_name right away. Best-effort:
+  // a profile-sync failure must not block handling the message itself.
+  try {
+    await syncTelegramProfile(externalId, message.from);
+  } catch (err) {
+    console.error(`Failed to save the Telegram profile for chat ${chatId}:`, err.message);
+  }
 
   // Text commands are parsed before speech recognition.
   if (text.startsWith('/') && (await handleCommand(chatId, externalId, text))) {

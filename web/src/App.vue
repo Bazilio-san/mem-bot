@@ -166,13 +166,57 @@ async function selectUser(user) {
   }
 }
 
-// Удаление одной записи памяти. Сначала запрашиваем подтверждение, затем выполняем мягкое удаление на сервере
-// и убираем запись из локального состояния, чтобы таблица обновилась без повторной загрузки всей памяти.
-async function removeItem(groupKey, item) {
+// Общая длительность подавления диалогов подтверждения удаления (записей памяти и пользователей):
+// флажок «Не напоминать в течение 1 минуты» записывает в localStorage момент, до которого подтверждение
+// не требуется. Пока он не наступил, повторные удаления выполняются сразу, без диалога.
+const DELETE_CONFIRM_SUPPRESS_MS = 60 * 1000;
+
+// Активно ли подавление диалога подтверждения по заданному ключу localStorage (срок ещё не истёк).
+function isConfirmSuppressed(storageKey) {
+  const until = Number(localStorage.getItem(storageKey) || 0);
+  return Number.isFinite(until) && Date.now() < until;
+}
+
+// --- Удаление одной записи памяти ---------------------------------------------------------------
+// Подтверждение через модальный диалог — так же, как при удалении пользователя, — со своим флажком
+// подавления и отдельным ключом в localStorage, чтобы подавление записей и пользователей не пересекалось.
+const DELETE_ITEM_CONFIRM_SUPPRESS_KEY = 'memAdmin.deleteFactConfirmSuppressedUntil';
+
+const itemDeleteDialogVisible = ref(false);
+const itemToDelete = ref(null); // { groupKey, item }
+const suppressItemDeleteConfirm = ref(false);
+
+// Клик по крестику в строке записи: либо сразу удаляем (подавление активно), либо открываем диалог.
+function askRemoveItem(groupKey, item) {
   if (!selectedUser.value || !memory.value) {
     return;
   }
-  if (!window.confirm(`Удалить запись?\n\n${itemText(item)}`)) {
+  if (isConfirmSuppressed(DELETE_ITEM_CONFIRM_SUPPRESS_KEY)) {
+    performRemoveItem(groupKey, item);
+    return;
+  }
+  itemToDelete.value = { groupKey, item };
+  suppressItemDeleteConfirm.value = false;
+  itemDeleteDialogVisible.value = true;
+}
+
+// Подтверждение в диалоге: при включённом флажке запоминаем срок подавления, затем удаляем запись.
+async function confirmRemoveItem() {
+  if (suppressItemDeleteConfirm.value) {
+    localStorage.setItem(DELETE_ITEM_CONFIRM_SUPPRESS_KEY, String(Date.now() + DELETE_CONFIRM_SUPPRESS_MS));
+  }
+  const target = itemToDelete.value;
+  itemDeleteDialogVisible.value = false;
+  itemToDelete.value = null;
+  if (target) {
+    await performRemoveItem(target.groupKey, target.item);
+  }
+}
+
+// Собственно удаление: мягкое удаление на сервере, затем запись убирается из локального состояния,
+// чтобы таблица обновилась без повторной загрузки всей памяти.
+async function performRemoveItem(groupKey, item) {
+  if (!selectedUser.value || !memory.value) {
     return;
   }
   try {
@@ -185,25 +229,16 @@ async function removeItem(groupKey, item) {
 
 // --- Удаление пользователя целиком -------------------------------------------------------------
 // По кнопке у строки пользователя показывается диалог-предупреждение о каскадном удалении всех данных.
-// Флажок «Не напоминать в течение 5 минут» записывает в localStorage момент, до которого подтверждение
-// не требуется: пока он не наступил, повторные удаления выполняются сразу, без диалога.
 const DELETE_CONFIRM_SUPPRESS_KEY = 'memAdmin.deleteUserConfirmSuppressedUntil';
-const DELETE_CONFIRM_SUPPRESS_MS = 5 * 60 * 1000;
 
 const deleteDialogVisible = ref(false);
 const userToDelete = ref(null);
 const suppressDeleteConfirm = ref(false);
 const deletingUser = ref(false);
 
-// Активно ли сейчас подавление диалога подтверждения (включённый ранее флажок ещё не истёк).
-function isDeleteConfirmSuppressed() {
-  const until = Number(localStorage.getItem(DELETE_CONFIRM_SUPPRESS_KEY) || 0);
-  return Number.isFinite(until) && Date.now() < until;
-}
-
 // Клик по кнопке удаления в списке: либо сразу удаляем (подавление активно), либо открываем диалог.
 function askDeleteUser(user) {
-  if (isDeleteConfirmSuppressed()) {
+  if (isConfirmSuppressed(DELETE_CONFIRM_SUPPRESS_KEY)) {
     performDeleteUser(user);
     return;
   }
@@ -331,11 +366,31 @@ onBeforeUnmount(() => {
       </p>
       <label class="delete-suppress">
         <Checkbox v-model="suppressDeleteConfirm" binary input-id="suppress-delete-confirm" />
-        <span>Не напоминать в течение 5 минут</span>
+        <span>Не напоминать в течение 1 минуты</span>
       </label>
       <template #footer>
         <Button label="Отмена" severity="secondary" text @click="deleteDialogVisible = false" />
         <Button label="Удалить" severity="danger" @click="confirmDeleteUser" />
+      </template>
+    </Dialog>
+
+    <Dialog
+      v-model:visible="itemDeleteDialogVisible"
+      modal
+      header="Удаление записи памяти"
+      :style="{ width: 'min(480px, 92vw)' }"
+    >
+      <p class="delete-warning">
+        Запись будет помечена удалённой и перестанет участвовать в ответах бота:
+        <strong>{{ itemToDelete ? itemText(itemToDelete.item) : '' }}</strong>
+      </p>
+      <label class="delete-suppress">
+        <Checkbox v-model="suppressItemDeleteConfirm" binary input-id="suppress-item-delete-confirm" />
+        <span>Не напоминать в течение 1 минуты</span>
+      </label>
+      <template #footer>
+        <Button label="Отмена" severity="secondary" text @click="itemDeleteDialogVisible = false" />
+        <Button label="Удалить" severity="danger" @click="confirmRemoveItem" />
       </template>
     </Dialog>
 
@@ -390,7 +445,7 @@ onBeforeUnmount(() => {
                   text
                   rounded
                   aria-label="Удалить запись"
-                  @click="removeItem(grp.key, data)"
+                  @click="askRemoveItem(grp.key, data)"
                 />
               </template>
             </Column>

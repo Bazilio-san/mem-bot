@@ -24,6 +24,37 @@ export async function ensureUser(
   return rows[0];
 }
 
+// Save the sender's Telegram profile into mem.users: display_name is assembled from the first and last name
+// (falling back to the username), and the raw profile fields (id, username, names, language code, premium flag)
+// land in metadata.telegram. The upsert is cheap to call on every incoming message: the DO UPDATE branch fires
+// only when something actually changed, so an unchanged profile produces no row update. A missing sender object
+// or a bot sender is ignored. This is how the bot learns the user's name already at the first /start.
+export async function syncTelegramProfile(externalId, from, { isTest = process.env.NODE_ENV === 'test' } = {}) {
+  if (!from || from.is_bot) {
+    return;
+  }
+  const displayName = [from.first_name, from.last_name].filter(Boolean).join(' ').trim() || from.username || null;
+  const profile = {
+    user_id: from.id ?? null,
+    username: from.username ?? null,
+    first_name: from.first_name ?? null,
+    last_name: from.last_name ?? null,
+    language_code: from.language_code ?? null,
+    is_premium: from.is_premium === true,
+  };
+  await query(
+    `INSERT INTO mem.users AS u (external_id, display_name, is_test, metadata)
+     VALUES ($1, $2, $3, jsonb_build_object('telegram', $4::jsonb))
+     ON CONFLICT (external_id) DO UPDATE
+       SET display_name = COALESCE(EXCLUDED.display_name, u.display_name),
+           metadata = u.metadata || EXCLUDED.metadata,
+           updated_at = now()
+     WHERE u.display_name IS DISTINCT FROM COALESCE(EXCLUDED.display_name, u.display_name)
+        OR u.metadata -> 'telegram' IS DISTINCT FROM EXCLUDED.metadata -> 'telegram'`,
+    [externalId, displayName, isTest, JSON.stringify(profile)],
+  );
+}
+
 const domainCache = new Map();
 
 // Get a domain id by its key (with caching).

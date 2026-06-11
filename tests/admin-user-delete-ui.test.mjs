@@ -1,8 +1,9 @@
-// UI-тест удаления пользователя со страницы «Память» админки (Playwright, без БД и без бэкенда).
+// UI-тест удаления пользователя и записи памяти со страницы «Память» админки (Playwright, без БД и бэкенда).
 // Перед запуском собирается фронтенд (vite build), затем web/dist отдаётся локальным express-сервером,
 // а все запросы к /api перехватываются заглушками прямо в браузере (page.route). Проверяется поведение
-// интерфейса: кнопка удаления у строки пользователя, диалог-предупреждение, кнопки «Удалить»/«Отмена»,
-// флажок «Не напоминать в течение 5 минут» (подавление диалога через localStorage) и его истечение.
+// интерфейса: кнопки удаления у строки пользователя и у записи памяти, диалоги-подтверждения, кнопки
+// «Удалить»/«Отмена», флажки «Не напоминать в течение 1 минуты» (раздельное подавление диалогов через
+// localStorage для пользователей и записей) и истечение срока подавления.
 // Запуск: npm run test:admin-ui
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,9 +16,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const distDir = path.join(rootDir, 'web', 'dist');
 
-// Ключ localStorage и длительность подавления — должны совпадать со значениями в web/src/App.vue.
+// Ключи localStorage и длительность подавления — должны совпадать со значениями в web/src/App.vue.
 const SUPPRESS_KEY = 'memAdmin.deleteUserConfirmSuppressedUntil';
-const SUPPRESS_MS = 5 * 60 * 1000;
+const FACT_SUPPRESS_KEY = 'memAdmin.deleteFactConfirmSuppressedUntil';
+const SUPPRESS_MS = 60 * 1000;
 
 // ---- Мини-фреймворк проверок (как в остальных тестах проекта) ---------------
 let passed = 0,
@@ -44,9 +46,15 @@ const USERS = [
   { id: 'u-3', externalId: 'tg-1003', name: 'Вера', timezone: 'Europe/Moscow', isAdmin: true, memoryCount: 0 },
 ];
 const EMPTY_MEMORY = { profile: [], dialog: [], domain: [], secure: [], reminder: [] };
+// У Анны одна запись памяти — на ней проверяется диалог подтверждения удаления записи.
+const ANNA_MEMORY = {
+  ...EMPTY_MEMORY,
+  profile: [{ id: 'f-1', kind: 'preference', text: 'Любит зелёный чай', confidence: 0.9 }],
+};
 
-// Журнал DELETE-запросов, дошедших до «сервера»: сюда маршрут-заглушка пишет id удаляемых пользователей.
+// Журналы DELETE-запросов, дошедших до «сервера»: id удаляемых пользователей и пути удаляемых записей памяти.
 const deleteCalls = [];
+const factDeleteCalls = [];
 
 // Навесить на страницу перехват всех запросов к /api с ответами-заглушками.
 async function stubApi(page) {
@@ -68,8 +76,14 @@ async function stubApi(page) {
       deleteCalls.push(decodeURIComponent(delMatch[1]));
       return json({ ok: true });
     }
-    if (/^\/api\/users\/[^/]+\/memory$/.test(p) && req.method() === 'GET') {
-      return json(EMPTY_MEMORY);
+    const factDelMatch = p.match(/^\/api\/users\/([^/]+)\/memory\/([^/]+)\/([^/]+)$/);
+    if (factDelMatch && req.method() === 'DELETE') {
+      factDeleteCalls.push(factDelMatch.slice(1).map(decodeURIComponent).join('/'));
+      return json({ ok: true });
+    }
+    const memMatch = p.match(/^\/api\/users\/([^/]+)\/memory$/);
+    if (memMatch && req.method() === 'GET') {
+      return json(decodeURIComponent(memMatch[1]) === 'u-1' ? ANNA_MEMORY : EMPTY_MEMORY);
     }
     return json({ error: `Неожиданный запрос в тесте: ${req.method()} ${p}` }, 500);
   });
@@ -111,6 +125,47 @@ async function main() {
       (await page.locator('.user-item .user-delete').count()) === USERS.length,
     );
 
+    section('Удаление записи памяти через диалог подтверждения');
+    await page.locator('.user-item', { hasText: 'Анна' }).click();
+    await page.waitForFunction(() => document.body.innerText.includes('Любит зелёный чай'));
+    const factDeleteBtn = page.locator('button[aria-label="Удалить запись"]').first();
+    await factDeleteBtn.click();
+    await page.waitForSelector(dialogSel);
+    const factDialogText = await page.locator(dialogSel).innerText();
+    check('Диалог озаглавлен «Удаление записи памяти»', factDialogText.includes('Удаление записи памяти'));
+    check('Диалог содержит текст удаляемой записи', factDialogText.includes('Любит зелёный чай'));
+    check(
+      'В диалоге записи есть флажок «Не напоминать в течение 1 минуты»',
+      /Не напоминать в течение 1 минуты/.test(factDialogText),
+    );
+
+    await page.locator(`${dialogSel} button`, { hasText: 'Отмена' }).click();
+    await page.waitForSelector(dialogSel, { state: 'detached' });
+    check('После отмены DELETE-запрос на запись не отправлен', factDeleteCalls.length === 0);
+
+    const tFactBefore = Date.now();
+    await factDeleteBtn.click();
+    await page.waitForSelector(dialogSel);
+    await page.locator(`${dialogSel} label`, { hasText: 'Не напоминать' }).click();
+    await page.locator(`${dialogSel} button`, { hasText: 'Удалить' }).click();
+    await page.waitForSelector(dialogSel, { state: 'detached' });
+    await page.waitForFunction(() => !document.body.innerText.includes('Любит зелёный чай'));
+    check(
+      'DELETE-запрос отправлен на нужную запись памяти',
+      factDeleteCalls.length === 1 && factDeleteCalls[0] === 'u-1/profile/f-1',
+    );
+    const factStoredUntil = Number(await page.evaluate((k) => localStorage.getItem(k), FACT_SUPPRESS_KEY));
+    check(
+      'Флажок записал срок подавления для записей ≈ сейчас + 1 минута',
+      factStoredUntil >= tFactBefore + SUPPRESS_MS && factStoredUntil <= Date.now() + SUPPRESS_MS,
+      `записано ${factStoredUntil}`,
+    );
+    check(
+      'Подавление для записей не затрагивает ключ подавления для пользователей',
+      (await page.evaluate((k) => localStorage.getItem(k), SUPPRESS_KEY)) === null,
+    );
+
+    section('Диалог удаления пользователя');
     await clickDelete(page, 'Анна');
     await page.waitForSelector(dialogSel);
     const dialogText = await page.locator(dialogSel).innerText();
@@ -120,8 +175,8 @@ async function main() {
       /безвозвратно/.test(dialogText) && /Журналы/.test(dialogText) && /сохранятся/.test(dialogText),
     );
     check(
-      'В диалоге есть флажок «Не напоминать в течение 5 минут»',
-      /Не напоминать в течение 5 минут/.test(dialogText),
+      'В диалоге есть флажок «Не напоминать в течение 1 минуты»',
+      /Не напоминать в течение 1 минуты/.test(dialogText),
     );
 
     section('Отмена удаления');
@@ -158,7 +213,7 @@ async function main() {
     );
     const storedUntil = Number(await page.evaluate((k) => localStorage.getItem(k), SUPPRESS_KEY));
     check(
-      'Флажок записал срок подавления ≈ сейчас + 5 минут',
+      'Флажок записал срок подавления ≈ сейчас + 1 минута',
       storedUntil >= tBefore + SUPPRESS_MS && storedUntil <= Date.now() + SUPPRESS_MS,
       `записано ${storedUntil}`,
     );
