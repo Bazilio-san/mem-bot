@@ -7,6 +7,8 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS vector;
+-- pg_trgm даёт word_similarity() для неточного текстового поиска по базе знаний (опечатки, словоформы).
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE SCHEMA IF NOT EXISTS mem;
 
@@ -438,6 +440,30 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_search_tsv    ON mem.global_know
 CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_knowledge
                                                               USING hnsw (embedding vector_cosine_ops)
                                                               WHERE embedding IS NOT NULL;
+
+-- Триггер целостности «текст ↔ эмбеддинг». Любое изменение title/content, в котором тем же UPDATE не
+-- передан новый вектор, обнуляет embedding: устаревший вектор больше не описывает содержимое и не должен
+-- участвовать в семантическом поиске. Это закрывает рассинхрон даже при правках в обход приложения
+-- (psql, скрипты) — запись остаётся доступной через полнотекстовый фолбэк, а админка и фоновая задача
+-- пересчёта восстанавливают вектор. Если приложение пишет текст и свежий вектор одним UPDATE, сброса нет.
+-- Заодно триггер поддерживает updated_at.
+CREATE OR REPLACE FUNCTION mem.global_knowledge_reset_embedding()
+RETURNS trigger AS $$
+BEGIN
+    IF (NEW.title IS DISTINCT FROM OLD.title OR NEW.content IS DISTINCT FROM OLD.content)
+       AND NEW.embedding IS NOT DISTINCT FROM OLD.embedding THEN
+        NEW.embedding := NULL;
+    END IF;
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_global_knowledge_reset_embedding ON mem.global_knowledge;
+CREATE TRIGGER trg_global_knowledge_reset_embedding
+    BEFORE UPDATE ON mem.global_knowledge
+    FOR EACH ROW
+    EXECUTE FUNCTION mem.global_knowledge_reset_embedding();
 
 -- 3. Засев базовых глобальных фактов. Идемпотентно: каждый факт вставляется, только если его ещё нет
 --    (сверка по тексту), поэтому повторный прогон дублей не создаёт.

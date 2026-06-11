@@ -67,8 +67,8 @@ CREATE INDEX IF NOT EXISTS idx_global_knowledge_embedding     ON mem.global_know
                                                               WHERE embedding IS NOT NULL;
 ```
 
-The knowledge base additionally carries a **text-to-vector integrity trigger** (migration
-`002_global_knowledge_embedding_trigger.sql`). Any `UPDATE` that changes `title` or `content` without supplying a
+The knowledge base additionally carries a **text-to-vector integrity trigger**, defined in the same
+initialisation script. Any `UPDATE` that changes `title` or `content` without supplying a
 new vector in the same statement resets `embedding` to `NULL`: a stale vector no longer describes the content and
 must not participate in semantic search. This guarantee holds **by construction** — even when a record is edited
 bypassing the application (psql, a script, third-party code) — while the record stays discoverable through the
@@ -161,8 +161,8 @@ on demand or by the background repair pass.
 **Fuzzy text search for management interfaces.** Besides the semantic `searchGlobalKnowledge` used by the
 response pipeline, the module exposes `searchGlobalKnowledgeText` — an inexact, embeddings-free search over
 titles and contents for administrative tooling. It combines exact full-text matching by `search_tsv` with the
-trigram `word_similarity` from the `pg_trgm` extension (installed by migration
-`003_global_knowledge_text_search.sql`), so records are also found by misspelled words and other word forms that
+trigram `word_similarity` from the `pg_trgm` extension (installed by the initialisation script
+`001_init.sql`), so records are also found by misspelled words and other word forms that
 full-text matching misses. The relevance of each hit is the best of the two signals, normalised to 0..1, and the
 results come best first. No trigram index is created: the knowledge base is small (tens to hundreds of records),
 so a sequential scan is cheaper than maintaining an index.
