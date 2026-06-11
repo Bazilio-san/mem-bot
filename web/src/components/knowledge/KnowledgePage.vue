@@ -40,18 +40,32 @@ const error = ref('');
 // Запись, открытая в диалоге: null — диалог закрыт, {} без id — создание, с id — редактирование.
 const dialogRecord = ref(null);
 
-// Фильтры столбцов. Статус по умолчанию ограничен active и archived, чтобы корзина не мешала работе;
-// удалённые записи доступны выбором статуса deleted в этом же фильтре.
+// Фильтры столбцов. Статус по умолчанию скрывает корзину: после загрузки данных фильтру присваиваются
+// только статусы, реально присутствующие в записях, кроме deleted (см. defaultStatusFilter) — иначе
+// предвыбранное, но отсутствующее в данных значение раздувает счётчик «выбрано» в мультиселекте.
+// Удалённые записи доступны выбором статуса deleted в этом же фильтре.
 const defaultFilters = () => ({
   embeddingLabel: { value: null, matchMode: FilterMatchMode.EQUALS },
   title: { value: null, matchMode: FilterMatchMode.CONTAINS },
   content: { value: null, matchMode: FilterMatchMode.CONTAINS },
   domainLabel: { value: null, matchMode: FilterMatchMode.IN },
   tags: { value: null, matchMode: TAGS_MATCH_MODE },
-  status: { value: ['active', 'archived'], matchMode: FilterMatchMode.IN },
+  status: { value: null, matchMode: FilterMatchMode.IN },
   source: { value: null, matchMode: FilterMatchMode.CONTAINS },
 });
 const filters = ref(defaultFilters());
+
+// Статусы для фильтра по умолчанию: все, что есть в данных, кроме deleted. Если удалённых записей нет
+// вовсе, фильтр остаётся пустым (null) — это «показывать всё», и счётчик мультиселекта не вводит в
+// заблуждение лишними предвыбранными значениями.
+function defaultStatusFilter(rows) {
+  const present = new Set(rows.map((r) => r.status));
+  if (!present.has('deleted')) {
+    return null;
+  }
+  present.delete('deleted');
+  return Array.from(present).sort();
+}
 
 const EMBEDDING_OPTIONS = ['есть', 'нет'];
 
@@ -86,6 +100,9 @@ async function load() {
     const [list, doms] = await Promise.all([fetchKnowledge('all'), fetchDomains()]);
     records.value = list.map(decorate);
     domains.value = doms;
+    if (filters.value.status.value === null) {
+      filters.value.status.value = defaultStatusFilter(records.value);
+    }
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -182,6 +199,11 @@ async function removeRecord(record) {
     const idx = records.value.findIndex((r) => r.id === record.id);
     if (idx >= 0) {
       records.value[idx] = decorate({ ...records.value[idx], status: 'deleted' });
+    }
+    // Если фильтр статуса не задан (удалённых до сих пор не было — «показывать всё»), задаём его сейчас,
+    // чтобы только что удалённая запись скрылась из представления по умолчанию.
+    if (filters.value.status.value === null) {
+      filters.value.status.value = defaultStatusFilter(records.value);
     }
   } catch (err) {
     error.value = err.message;
@@ -312,6 +334,7 @@ onMounted(load);
             :options="domainOptions"
             placeholder="Все"
             :max-selected-labels="1"
+            selected-items-label="выбрано: {0}"
             fluid
             @change="filterCallback()"
           />
@@ -325,6 +348,7 @@ onMounted(load);
             :options="tagOptions"
             placeholder="Все"
             :max-selected-labels="1"
+            selected-items-label="выбрано: {0}"
             filter
             fluid
             @change="filterCallback()"
@@ -343,7 +367,8 @@ onMounted(load);
             v-model="filterModel.value"
             :options="statusOptions"
             placeholder="Все"
-            :max-selected-labels="1"
+            :max-selected-labels="2"
+            selected-items-label="выбрано: {0}"
             fluid
             @change="filterCallback()"
           />
