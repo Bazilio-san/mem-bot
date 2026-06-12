@@ -41,8 +41,8 @@ export const debugMcpTool = Debug('mcp:tool', {
 });
 
 /**
- * Image generation: every stage from the tool call to the Telegram delivery — prompt translation,
- * API request/response, sending the photo by URL and the multipart-upload fallback.
+ * Image generation: every stage from the tool call to the Telegram delivery — API request/response,
+ * sending the photo by URL and the multipart-upload fallback.
  * Enable: DEBUG=img-gen
  */
 export const debugImgGen = Debug('img-gen', {

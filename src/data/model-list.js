@@ -19,6 +19,7 @@ export const openAiModelMeta = {
   'gpt-5.4': { kT: 1025, mot: 128, inp: 2.5, out: 15, inpB: 1.25, outB: 7.5 },
   'gpt-5.4-mini': { kT: 400, mot: 128, inp: 0.75, out: 4.5, inpB: 0.375, outB: 2.25 },
   'gpt-5.4-nano': { kT: 400, mot: 128, inp: 0.2, out: 1.25, inpB: 0.1, outB: 0.625 },
+  'gpt-5.5': { kT: 1025, mot: 128, inp: 5, out: 30, inpB: 2.5, outB: 15 },
 
   'gpt-5-mini': { kT: 400, mot: 128, inp: 0.25, out: 2, inpB: 0.125, outB: 1 },
 

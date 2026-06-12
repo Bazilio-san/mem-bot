@@ -1,57 +1,5 @@
 import { config } from '../../../config.js';
 import { debugImgGen } from '../../../debug.js';
-import { chatJSON } from '../../../llm.js';
-
-// The image model understands only English prompts. The tool definition already asks the agent to translate,
-// but that is advisory — the agent sometimes passes the user's wording verbatim. This is the guaranteed step:
-// any prompt containing non-ASCII letters is translated by the auxiliary model right before the API call.
-const TRANSLATE_SYSTEM = `You translate image-generation prompts into English. Return JSON with "prompt" and
-"negative_prompt": faithful English translations preserving every detail of the subject, style, lighting,
-composition, and quality hints. Text already in English must be returned unchanged. Do not add new details,
-do not censor, do not comment.`;
-
-const TRANSLATE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['prompt', 'negative_prompt'],
-  properties: {
-    prompt: { type: 'string' },
-    negative_prompt: { type: 'string' },
-  },
-};
-
-const hasNonEnglish = (text) => /[^\x00-\x7F]/.test(text || '');
-
-// Returns { prompt, negativePrompt } in English. On any translation failure falls back to the original text:
-// a missing translation degrades the picture quality but must not block generation entirely.
-async function ensureEnglishPrompt(prompt, negativePrompt) {
-  if (!hasNonEnglish(prompt) && !hasNonEnglish(negativePrompt)) {
-    debugImgGen('prompt is already English, translation skipped');
-    return { prompt, negativePrompt };
-  }
-  debugImgGen(
-    `translating prompt to English via ${config.llm.auxModel}: ${JSON.stringify({ prompt, negativePrompt })}`,
-  );
-  try {
-    const res = await chatJSON({
-      model: config.llm.auxModel,
-      kind: 'image_prompt_translate',
-      schema: TRANSLATE_SCHEMA,
-      schemaName: 'image_prompt_translate',
-      system: TRANSLATE_SYSTEM,
-      user: JSON.stringify({ prompt, negative_prompt: negativePrompt }),
-    });
-    const translated = {
-      prompt: res?.prompt?.trim() || prompt,
-      negativePrompt: res?.negative_prompt?.trim() || negativePrompt,
-    };
-    debugImgGen(`translation done: ${JSON.stringify(translated)}`);
-    return translated;
-  } catch (err) {
-    debugImgGen(`translation failed (${String(err?.message || err)}), using the original prompt as is`);
-    return { prompt, negativePrompt };
-  }
-}
 
 // Generates an image from a text prompt via the external image-generation API and returns a descriptor of the
 // created picture. The tool itself does NOT send anything to Telegram: it stays channel-agnostic (it works the
@@ -115,12 +63,9 @@ If the user asked only for the picture, reply with an empty string — the photo
       debugImgGen(`size clamped to allowed list: requested ${args.width}x${args.height}, using ${width}x${height}`);
     }
 
-    // Guaranteed English: translate the prompt (and negative prompt) when the agent passed non-English text.
-    const translated = await ensureEnglishPrompt(args.prompt, args.negative_prompt || '');
-
     const body = {
-      prompt: translated.prompt,
-      negative_prompt: translated.negativePrompt || '',
+      prompt: args.prompt,
+      negative_prompt: args.negative_prompt || '',
       width,
       height,
       model: cfg.model,
@@ -174,7 +119,7 @@ If the user asked only for the picture, reply with an empty string — the photo
       structuredContent: {
         image: {
           url: data.imageUrl,
-          prompt: translated.prompt,
+          prompt: args.prompt,
           model: data.model,
           seed: data.seed,
         },
