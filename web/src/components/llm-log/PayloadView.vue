@@ -6,7 +6,10 @@
 // 3) tools — по строке на инструмент (имя + первые слова описания), первый клик раскрывает описание,
 //    отдельная кнопка показывает JSON Schema параметров.
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import ContentViewer from './ContentViewer.vue';
+import { renderJsonHtml } from './pretty-print-json.js';
 
 const props = defineProps({
   payload: { type: [Object, Array, String], default: null },
@@ -89,10 +92,39 @@ function prettyJson(raw) {
   }
 }
 
+// Раскрашенная pretty-печать схемы (без слоя вложенного JSON: у этого блока нет обработчика
+// переключателей, а схемы сериализованных строк не содержат). null — если raw не валидный JSON.
+function prettyJsonHtml(raw) {
+  return renderJsonHtml(raw, {}, { withEmbeds: false });
+}
+
 // Режим показа встроенного JSON по индексу сообщения: 'JSON' (pretty, по умолчанию) или 'RAW'.
 const embedModes = ref({});
 function embedMode(idx) {
   return embedModes.value[idx] || 'JSON';
+}
+
+// Формат отображения ТЕКСТА сообщения со схемой (по индексу сообщения) — тот же набор, что у селекта
+// ContentViewer. По умолчанию RAW, как у обычного system/user-сообщения (roleFormat).
+const TEXT_FORMATS = ['RAW', 'MD', 'HTML', 'JSON'];
+const textModes = ref({});
+function textMode(idx) {
+  return textModes.value[idx] || 'RAW';
+}
+
+// Рендер текста промпта в выбранном формате. Фрагмент логики ContentViewer: содержимое логов
+// недоверенное, поэтому MD и HTML проходят только через DOMPurify. Возвращает {html} либо {text}.
+function renderText(text, mode) {
+  if (mode === 'MD') {
+    return { html: DOMPurify.sanitize(marked.parse(text, { async: false })) };
+  }
+  if (mode === 'HTML') {
+    return { html: DOMPurify.sanitize(text) };
+  }
+  if (mode === 'JSON') {
+    return { text: prettyJson(text) };
+  }
+  return { text };
 }
 
 // Сообщение-носитель схемы в режиме json_schema: схема приходит отдельным полем запроса, но показываем
@@ -353,11 +385,22 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <!-- Сообщение со схемой ответа (json_object — тег в тексте, json_schema — поле запроса):
-               текст промпта, затем сама схема в том же контейнере. Селект JSON/RAW (JSON по умолчанию —
-               pretty-печать) стоит инлайном сразу после последней строки текста перед схемой. -->
+               текст промпта, затем сама схема в том же контейнере. В правом верхнем углу блока — панель
+               из двух селектов (как .cv-bar у ContentViewer): формат отображения текста (RAW/MD/HTML/JSON)
+               и формат схемы (JSON — pretty-печать по умолчанию, RAW). Панель позиционирована абсолютно
+               относительно блока и при прокрутке тела остаётся на месте. -->
           <div v-if="messageContent(m) && embedOf(m, idx)" class="pv-embed">
-            <div class="pv-embed-txt">
-              <span class="pv-embed-pre">{{ embedOf(m, idx).before }}</span>
+            <div class="pv-embed-bar">
+              <span class="pv-embed-cap">текст</span>
+              <select
+                class="pv-embed-select"
+                :value="textMode(idx)"
+                title="Формат отображения текста"
+                @change="textModes[idx] = $event.target.value"
+              >
+                <option v-for="f in TEXT_FORMATS" :key="f" :value="f">{{ f }}</option>
+              </select>
+              <span class="pv-embed-cap">схема</span>
               <select
                 class="pv-embed-select"
                 :value="embedMode(idx)"
@@ -368,10 +411,23 @@ onBeforeUnmount(() => {
                 <option value="RAW">RAW</option>
               </select>
             </div>
-            <pre class="pv-embed-json">{{
-              embedMode(idx) === 'JSON' ? prettyJson(embedOf(m, idx).raw) : embedOf(m, idx).raw
-            }}</pre>
-            <pre v-if="embedOf(m, idx).after" class="pv-embed-txt">{{ embedOf(m, idx).after }}</pre>
+            <div class="pv-embed-body">
+              <pre v-if="!renderText(embedOf(m, idx).before, textMode(idx)).html" class="pv-embed-txt">{{
+                renderText(embedOf(m, idx).before, textMode(idx)).text
+              }}</pre>
+              <!-- eslint-disable-next-line vue/no-v-html — содержимое прошло DOMPurify -->
+              <div v-else class="pv-embed-rendered" v-html="renderText(embedOf(m, idx).before, textMode(idx)).html" />
+              <!-- eslint-disable-next-line vue/no-v-html — HTML собран из экранированных фрагментов -->
+              <pre
+                v-if="embedMode(idx) === 'JSON' && prettyJsonHtml(embedOf(m, idx).raw)"
+                class="pv-embed-json"
+                v-html="prettyJsonHtml(embedOf(m, idx).raw)"
+              />
+              <pre v-else class="pv-embed-json">{{
+                embedMode(idx) === 'JSON' ? prettyJson(embedOf(m, idx).raw) : embedOf(m, idx).raw
+              }}</pre>
+              <pre v-if="embedOf(m, idx).after" class="pv-embed-txt">{{ embedOf(m, idx).after }}</pre>
+            </div>
           </div>
           <ContentViewer
             v-else-if="messageContent(m)"
@@ -437,11 +493,21 @@ onBeforeUnmount(() => {
             <button type="button" class="pv-dlg-x" title="Закрыть" @click="bigContent = null">✕</button>
           </div>
           <div class="pv-dlg-b">
-            <!-- Сообщение со схемой ответа: в окне тот же блок, что и в инлайн-виде, — текст промпта,
-                 инлайн-селект JSON/RAW после последней строки и сама схема под ним. -->
+            <!-- Сообщение со схемой ответа: в окне тот же блок, что и в инлайн-виде, — панель с двумя
+                 селектами (формат текста и формат схемы) в правом верхнем углу, текст промпта и сама
+                 схема под ним. Режимы селектов общие с инлайн-видом — по индексу сообщения. -->
             <div v-if="bigContent.embed" class="pv-embed pv-embed-dlg">
-              <div class="pv-embed-txt">
-                <span class="pv-embed-pre">{{ bigContent.embed.before }}</span>
+              <div class="pv-embed-bar">
+                <span class="pv-embed-cap">текст</span>
+                <select
+                  class="pv-embed-select"
+                  :value="textMode(bigContent.idx)"
+                  title="Формат отображения текста"
+                  @change="textModes[bigContent.idx] = $event.target.value"
+                >
+                  <option v-for="f in TEXT_FORMATS" :key="f" :value="f">{{ f }}</option>
+                </select>
+                <span class="pv-embed-cap">схема</span>
                 <select
                   class="pv-embed-select"
                   :value="embedMode(bigContent.idx)"
@@ -452,10 +518,27 @@ onBeforeUnmount(() => {
                   <option value="RAW">RAW</option>
                 </select>
               </div>
-              <pre class="pv-embed-json">{{
-                embedMode(bigContent.idx) === 'JSON' ? prettyJson(bigContent.embed.raw) : bigContent.embed.raw
-              }}</pre>
-              <pre v-if="bigContent.embed.after" class="pv-embed-txt">{{ bigContent.embed.after }}</pre>
+              <div class="pv-embed-body">
+                <pre v-if="!renderText(bigContent.embed.before, textMode(bigContent.idx)).html" class="pv-embed-txt">{{
+                  renderText(bigContent.embed.before, textMode(bigContent.idx)).text
+                }}</pre>
+                <!-- eslint-disable-next-line vue/no-v-html — содержимое прошло DOMPurify -->
+                <div
+                  v-else
+                  class="pv-embed-rendered"
+                  v-html="renderText(bigContent.embed.before, textMode(bigContent.idx)).html"
+                />
+                <!-- eslint-disable-next-line vue/no-v-html — HTML собран из экранированных фрагментов -->
+                <pre
+                  v-if="embedMode(bigContent.idx) === 'JSON' && prettyJsonHtml(bigContent.embed.raw)"
+                  class="pv-embed-json"
+                  v-html="prettyJsonHtml(bigContent.embed.raw)"
+                />
+                <pre v-else class="pv-embed-json">{{
+                  embedMode(bigContent.idx) === 'JSON' ? prettyJson(bigContent.embed.raw) : bigContent.embed.raw
+                }}</pre>
+                <pre v-if="bigContent.embed.after" class="pv-embed-txt">{{ bigContent.embed.after }}</pre>
+              </div>
             </div>
             <ContentViewer v-else :content="bigContent.text" />
             <div class="pv-dlg-f">
@@ -648,16 +731,41 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 /* Блок «текст промпта + встроенная JSON Schema» (json_object и json_schema): текст — шрифтом
-   интерфейса, как обычное раскрытое сообщение; сам JSON — моноширинный на лёгкой подложке. */
+   интерфейса, как обычное раскрытое сообщение; сам JSON — моноширинный на лёгкой подложке.
+   Сам блок не прокручивается (он лишь относительный контейнер для панели селектов); прокрутка
+   идёт во вложенном .pv-embed-body, поэтому панель при скроллинге остаётся на месте. */
 .pv-embed {
-  padding: 4px 24px 4px 8px;
-  max-height: 260px;
-  overflow: auto;
+  position: relative;
 }
 .pv-embed pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.pv-embed-body {
+  padding: 4px 24px 4px 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+/* Панель селектов в правом верхнем углу блока — позиция и отступы как у .cv-bar в ContentViewer
+   (запас справа под вертикальный скроллбар тела). */
+.pv-embed-bar {
+  position: absolute;
+  top: 4px;
+  right: 22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 3;
+}
+/* Подписи селектов на белой подложке: панель плавает над текстом сообщения, без подложки серые
+   надписи сливаются с ним. */
+.pv-embed-cap {
+  font-size: 10px;
+  color: #999;
+  background: #fff;
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 .pv-embed-txt {
   font:
@@ -669,26 +777,51 @@ onBeforeUnmount(() => {
 .pv-embed-txt:first-child {
   text-indent: var(--pv-indent, 0);
 }
-/* Текст до схемы — инлайн-спан с сохранением переносов: следом за его последней строкой
-   в потоке стоит селект формата схемы. */
-.pv-embed-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
+/* Текст промпта, отрендеренный как MD/HTML, — оформление как .cv-rendered у ContentViewer.
+   Отступ под бэдж роли получает только первая строка первого блока. */
+.pv-embed-rendered {
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
 }
-/* Тот же блок в модальном окне: занимает всю высоту диалога (лимит 260px снят), рамка и подложка —
-   как у ContentViewer, чтобы не отличаться от обычного просмотра сообщений. */
+.pv-embed-rendered > :first-child {
+  text-indent: var(--pv-indent, 0);
+}
+.pv-embed-rendered :deep(h1),
+.pv-embed-rendered :deep(h2),
+.pv-embed-rendered :deep(h3) {
+  margin: 6px 0 4px;
+}
+.pv-embed-rendered :deep(ul) {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.pv-embed-rendered :deep(code) {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.pv-embed-rendered :deep(p) {
+  margin: 4px 0;
+}
+/* Тот же блок в модальном окне: тело занимает всю высоту диалога (лимит 260px снят), рамка и
+   подложка — как у ContentViewer, чтобы не отличаться от обычного просмотра сообщений. */
 .pv-embed-dlg {
   flex: 1;
   min-height: 0;
-  max-height: none;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 6px;
   background: #fcfcfc;
+}
+.pv-embed-dlg .pv-embed-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
   padding: 8px 10px;
 }
 /* Оформление селекта — точно как у селекта формата в ContentViewer (.cv-bar select). */
 .pv-embed-select {
-  margin-left: 8px;
   font-size: 11px;
   border: 1px solid #ddd;
   border-radius: 4px;

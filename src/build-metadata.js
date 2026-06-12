@@ -36,7 +36,7 @@ function readPackageVersion() {
 }
 
 function resolveFromEnv() {
-  const env = process.env;
+  const { env } = process;
   const version = normalize(env.BOT_VERSION) || normalize(env.BUILD_VERSION) || normalize(env.APP_VERSION);
   const commit = normalize(
     env.BOT_COMMIT ||
@@ -48,10 +48,7 @@ function resolveFromEnv() {
   );
   const shortCommit = normalize(env.BOT_COMMIT_SHORT) || normalize(env.GITHUB_SHA_SHORT);
   const commitTime = normalize(
-    env.BOT_COMMIT_TIME ||
-      env.BUILD_COMMIT_TIME ||
-      env.GIT_COMMIT_TIME ||
-      env.GITHUB_COMMITTER_DATE,
+    env.BOT_COMMIT_TIME || env.BUILD_COMMIT_TIME || env.GIT_COMMIT_TIME || env.GITHUB_COMMITTER_DATE,
   );
 
   return {
@@ -71,9 +68,9 @@ function buildMetadata() {
   }
 
   let version = env.version || packageVersion || 'unknown';
-  let commit = env.commit;
-  let shortCommit = env.shortCommit;
-  let commitTime = env.commitTime;
+  let { commit } = env;
+  let { shortCommit } = env;
+  let { commitTime } = env;
   let commitSource = env.commit ? 'env' : null;
   let shortCommitSource = env.shortCommit ? 'env' : null;
   let commitTimeSource = env.commitTime ? 'env' : null;

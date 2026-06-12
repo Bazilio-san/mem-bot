@@ -6,6 +6,7 @@
 import { ref, computed, watch } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { renderJsonHtml } from './pretty-print-json.js';
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -47,34 +48,34 @@ function initialMode(content) {
 }
 
 const mode = ref(initialMode(props.content));
+
+// Режимы инлайн-селектов JSON | RAW вложенного сериализованного JSON, по пути поля. Смена
+// содержимого сбрасывает их вместе с режимом формата.
+const embedModes = ref({});
 watch(
   () => props.content,
   (v) => {
     mode.value = initialMode(v);
+    embedModes.value = {};
   },
 );
 
-// Подсветка pretty-print JSON: экранируем текст и оборачиваем ключи/значения в классы.
-function jsonHighlight(src) {
-  let pretty;
-  try {
-    pretty = JSON.stringify(JSON.parse(src), null, 2);
-  } catch {
-    return null;
+// Селекты вложенного JSON вставлены через v-html и Vue-биндингов не имеют: переключение ловится
+// делегированием события change на контейнере содержимого.
+function onOutChange(e) {
+  const t = e.target;
+  if (t?.classList?.contains('cv-embed-sel') && t.dataset.embedPath) {
+    embedModes.value = { ...embedModes.value, [decodeURIComponent(t.dataset.embedPath)]: t.value };
   }
-  const esc = pretty.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
-  return esc
-    .replace(/("[^"\\]*(?:\\.[^"\\]*)*")(\s*:)/g, '<span class="cv-jk">$1</span>$2')
-    .replace(/: ("[^"\\]*(?:\\.[^"\\]*)*")/g, ': <span class="cv-js">$1</span>')
-    .replace(/: (-?\d+(?:\.\d+)?)/g, ': <span class="cv-jn">$1</span>')
-    .replace(/: (true|false|null)/g, ': <span class="cv-jb">$1</span>');
 }
 
 const rendered = computed(() => {
   const src = String(props.content ?? '');
   switch (mode.value) {
     case 'JSON': {
-      const html = jsonHighlight(src);
+      // Pretty-печать с раскраской типов, кликабельными ссылками и инлайн-селектами JSON | RAW
+      // у строковых значений с сериализованным JSON (порт pretty-print-json, см. модуль).
+      const html = renderJsonHtml(src, embedModes.value);
       return html != null ? { html: `<pre>${html}</pre>`, plain: false } : { text: src, plain: true };
     }
     case 'MD':
@@ -111,8 +112,14 @@ async function copy() {
       </button>
     </div>
     <pre v-if="rendered.plain" class="cv-out cv-plain">{{ rendered.text }}</pre>
-    <!-- eslint-disable-next-line vue/no-v-html — содержимое прошло DOMPurify -->
-    <div v-else class="cv-out" :class="mode === 'JSON' ? 'cv-json' : 'cv-rendered'" v-html="rendered.html" />
+    <!-- eslint-disable-next-line vue/no-v-html — JSON собирается из экранированных фрагментов, MD/HTML прошли DOMPurify -->
+    <div
+      v-else
+      class="cv-out"
+      :class="mode === 'JSON' ? 'cv-json' : 'cv-rendered'"
+      @change="onOutChange"
+      v-html="rendered.html"
+    />
   </div>
 </template>
 
@@ -180,16 +187,6 @@ async function copy() {
 .cv-rendered :deep(p) {
   margin: 4px 0;
 }
-.cv-json :deep(.cv-jk) {
-  color: #000080;
-}
-.cv-json :deep(.cv-js) {
-  color: #1a7a1a;
-}
-.cv-json :deep(.cv-jn) {
-  color: #0000ff;
-}
-.cv-json :deep(.cv-jb) {
-  color: #007300;
-}
+/* Раскраска типов JSON (классы json-*), контейнеры длинных строк и инлайн-селекты вложенного
+   JSON — общие глобальные стили в styles.css: та же разметка используется и вне ContentViewer. */
 </style>

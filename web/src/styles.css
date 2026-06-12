@@ -224,3 +224,59 @@ body {
 .error {
   color: #b3261e;
 }
+
+/* ===== Pretty-печать JSON в просмотрщике логов (порт pretty-print-json, см.
+   components/llm-log/pretty-print-json.js). Классы общие для ContentViewer и встроенных
+   блоков схем в PayloadView, поэтому стили глобальные. ===== */
+.json-key {
+  color: #000080;
+}
+.json-string {
+  color: #1a7a1a;
+}
+.json-number {
+  color: #0000ff;
+}
+.json-boolean {
+  color: #007300;
+}
+.json-null {
+  color: #777;
+}
+.json-mark {
+  color: #999;
+}
+a.json-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+/* Длинные строковые значения — прокручиваемый инлайн-контейнер с разэкранированным текстом. */
+.json-long-text-inline {
+  display: inline-block;
+  vertical-align: top;
+  min-width: var(--min-text-width, 300px);
+  max-width: 100%;
+}
+.json-long-text-content {
+  max-height: 7.5em;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Инлайн-селект JSON | RAW у строковых значений с вложенным сериализованным JSON. */
+.cv-embed-sel {
+  font-size: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  margin-right: 4px;
+  vertical-align: top;
+}

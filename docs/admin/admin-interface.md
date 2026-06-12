@@ -201,9 +201,9 @@ cycle being analysed. The *CLI tool* engine spawns a preset command from `config
 (for example, `claude -p`) in the project root, feeding the prompt through stdin — this gives the analyser
 visibility of the project code. The command comes exclusively from the configuration; the client only names a
 preset, and the dialog's preset select labels each preset with the bare executable name (`claude`, `codex`) —
-command arguments never leave the server. Because this engine executes a command on the server, it is accepted **only when
-`config.admin.host` is `localhost`** — otherwise the server answers 403 and the front-end shows the engine as
-unavailable. In both engines the result streams into the dialog as Server-Sent Events and renders as Markdown.
+command arguments never leave the server. Because this engine executes a command on the server, it is accepted
+**only when `config.admin.host` is `localhost`** — otherwise the server answers 403 and the front-end shows the
+engine as unavailable. In both engines the result streams into the dialog as Server-Sent Events and renders as Markdown.
 
 ## Knowledge Base Tab
 
