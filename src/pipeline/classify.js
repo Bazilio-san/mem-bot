@@ -62,9 +62,10 @@ Keep the language and script of the original message; do not translate or transl
       },
       needs_memory: {
         type: 'boolean',
-        description: `Whether the reply may depend on stored knowledge about the user. Default true.
-Set false ONLY when the answer is fully self-contained and cannot change depending on who is asking:
-a greeting, a translation, arithmetic, a general-knowledge question with all needed data in the message itself.
+        description: `Whether stored user/context knowledge could improve the reply. 
+Default true. 
+Set false ONLY for fully self-contained requests whose answer should not vary by user, prior conversation, 
+or preferences (e.g. greeting, translation, arithmetic, or general-knowledge question with all needed data). 
 When unsure, set true.`,
       },
       needed_memory_scopes: {
@@ -102,9 +103,9 @@ When unsure, set true.`,
 function buildSystemPrompt(routes) {
   const list = routes.map((r) => `- ${r.name} — ${r.hint}`).join('\n');
   return `You are an incoming-message classifier.
-Classify ONLY the text inside <last-user-message>. Use <recent-dialog> and the "Current thread" line only to
-resolve pronouns, ellipsis and short follow-ups and to stay in the thread the conversation is already in;
-never classify an earlier message instead of the last one.
+Classify ONLY the text inside <last-user-message>. 
+Use <recent-dialog> and the "Current thread" line to resolve pronouns, ellipsis, 
+short follow-ups, and whether the reply is context/personality-sensitive.
 
 Skills (pick one; 'general' is the default fallback):
 ${list}

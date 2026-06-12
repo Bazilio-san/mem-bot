@@ -117,7 +117,7 @@ Return only JSON matching the schema.`;
 }
 ```
 
-Prompt, field descriptions, and the user-message template (`Current agent domain / Last dialog state /
+Prompt, field descriptions, and the user-message template (`Current agent domain / Current thread /
 <last-user-message>`, preceded by an optional `<recent-dialog>` block) are written in English; the trigger words
 inside the hints come from SKILL.md front matter and stay in the language users actually type them in. The field
 descriptions reach the model in both response-format modes: in `json_schema` the provider passes the schema to
