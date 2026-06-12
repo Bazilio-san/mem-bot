@@ -51,9 +51,7 @@ async function main() {
       chars += chunk.length;
     },
   });
-  console.log(
-    `     chunks: ${deltas}, total characters: ${chars}, answer: ${(textMsg.content || '').slice(0, 80)}`,
-  );
+  console.log(`     chunks: ${deltas}, total characters: ${chars}, answer: ${(textMsg.content || '').slice(0, 80)}`);
   check('Proxy returns the answer text as streamed chunks', deltas >= 1 && (textMsg.content || '').length > 0);
   check('Final text answer contains no tool_calls', !textMsg.tool_calls);
 

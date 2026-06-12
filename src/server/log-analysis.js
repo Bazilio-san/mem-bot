@@ -1,4 +1,4 @@
-// AI analysis of a logged LLM request from the admin log viewer. Two engines:
+"nb"// AI analysis of a logged LLM request from the admin log viewer. Two engines:
 // • 'llm' — the project's own LLM (chatStream from src/llm.js) with a model from the allowed config list;
 //   the analysis call itself is journaled under its own request_id with kind 'log_analysis', so it never
 //   mixes into the cycle being analyzed.

@@ -23,7 +23,9 @@ const FILE = process.argv[2];
 const LANG = process.argv[3] || 'ru';
 
 if (!FILE) {
-  console.error('Provide a path to an audio or video file: node scripts/stt-experiment.js path/to/file [language_code]');
+  console.error(
+    'Provide a path to an audio or video file: node scripts/stt-experiment.js path/to/file [language_code]',
+  );
   process.exit(1);
 }
 

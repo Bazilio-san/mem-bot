@@ -741,7 +741,10 @@ async function mandatory() {
     const failRun = (
       await query(`SELECT count(*)::int c FROM mem.scheduled_task_runs WHERE task_id=$1 AND status='failed'`, [task.id])
     ).rows[0].c;
-    check('9c. The task error is recorded and a retry is scheduled', r.ok === false && t.attempts === 1 && failRun === 1);
+    check(
+      '9c. The task error is recorded and a retry is scheduled',
+      r.ok === false && t.attempts === 1 && failRun === 1,
+    );
   }
 
   // 9d. Cron/RRULE are computed calendar-wise, with timezone and explicit error diagnostics.
@@ -961,10 +964,7 @@ async function mandatory() {
     const left = await listMemory(u.id);
     const addrGone = !left.some((m) => /Ленина/.test(m.fact_text));
     const colorKept = left.some((m) => /синий/.test(m.fact_text));
-    check(
-      '13. Deletion by name marks the right record and keeps the rest',
-      res.deleted === 1 && addrGone && colorKept,
-    );
+    check('13. Deletion by name marks the right record and keeps the rest', res.deleted === 1 && addrGone && colorKept);
   }
 
   // 13b. Deletion by exact text works for strings the user copies from memory_list.
@@ -1462,11 +1462,7 @@ async function layerProactivity() {
     const ctx = buildTemporalContext('Europe/Moscow', new Date(Date.now() - 3 * 3600000));
     const todOk = ['утро', 'день', 'вечер', 'ночь'].includes(ctx.timeOfDay);
     const dayOk = ['будний день', 'выходной', 'пятница вечер', 'начало рабочей недели'].includes(ctx.dayType);
-    check(
-      '6.2. Temporal context: correct time of day and day type',
-      todOk && dayOk,
-      `${ctx.timeOfDay}/${ctx.dayType}`,
-    );
+    check('6.2. Temporal context: correct time of day and day type', todOk && dayOk, `${ctx.timeOfDay}/${ctx.dayType}`);
     check(
       '6.2. A three-hour pause is formatted as hours',
       /час/.test(ctx.timeSinceLastMessage || ''),

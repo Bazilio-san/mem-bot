@@ -72,9 +72,7 @@ function parseArgs(argv) {
 // unique rows (deduplicated by id). Throws if no criteria are given.
 async function findUsers({ ids, externalIds, names, prefixes, testUsers }) {
   if (!ids.length && !externalIds.length && !names.length && !prefixes.length && !testUsers) {
-    throw new Error(
-      'No search criteria specified. Use --id, --external-id, --name, --prefix or --test-users.',
-    );
+    throw new Error('No search criteria specified. Use --id, --external-id, --name, --prefix or --test-users.');
   }
 
   const byId = new Map();

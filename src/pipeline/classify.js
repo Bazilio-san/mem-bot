@@ -1,7 +1,7 @@
 // Pipeline stage 1: fast classification of the incoming message with a cheap model.
-// The classifier picks the single best-fitting skill (skill_name is the source of truth), and the domain key
-// for addressing memory is derived from the chosen skill in code. It also determines the intent, important
-// entities, which kinds of memory are needed, and whether tools are needed.
+// The classifier picks the single best-fitting skill (skill_name is the source of truth). The domain key
+// for memory is always derived in code from the resolved skill — the model does not return it.
+// It also determines the intent, important entities, which kinds of memory are needed, and whether tools are needed.
 import { chatJSON } from '../llm.js';
 import { config } from '../config.js';
 import { listSkillRoutes } from './skills/registry.js';
@@ -17,16 +17,14 @@ export function buildSchema(routeNames) {
     properties: {
       intent: {
         type: 'string',
-        description: "The user's intent in one short phrase: what they want to get or do with this message.",
+        description: `A concise first-person phrase capturing the user's latest intent:
+what I want to know, find, remember, change, or do.
+Use the user's language and keep only the core meaning`,
       },
       skill_name: {
         type: 'string',
         enum: routeNames,
-        description: `Name of the SINGLE best-fitting skill by meaning — exactly as in the list of available skills. If no specialized skill fits, pick general.`,
-      },
-      domain_key: {
-        type: 'string',
-        description: 'Domain key of the chosen skill — copy it from the list of available skills.',
+        description: `Name of the SINGLE best-fitting skill by meaning. If no specialized skill fits, pick 'general'.`,
       },
       confidence: {
         type: 'number',
@@ -85,7 +83,6 @@ export function buildSchema(routeNames) {
     required: [
       'intent',
       'skill_name',
-      'domain_key',
       'confidence',
       'entities',
       'needs_memory',
@@ -96,22 +93,27 @@ export function buildSchema(routeNames) {
   };
 }
 
-const ds = '  '; // double space
 // System prompt: a markdown list of skills with a usage rule for each one. Signal values come from
 // SKILL.md frontmatter and stay in the language users actually type them in (mostly Russian).
 function buildSystemPrompt(routes) {
   const list = routes
     .map((r) => {
-      const pos = r.positive_signals?.length ? `\n**Positive signals**: ${r.positive_signals.join('; ')}${ds}` : '';
-      const neg = r.negative_signals?.length ? `\n**Negative signals**: ${r.negative_signals.join('; ')}${ds}` : '';
-      return `### ${r.name}
-
-**domain**: ${r.domain_key}${ds}
-**Purpose**: ${r.description}${ds}
-**When to use**: ${r.when_to_use}${pos}${neg}${ds}`;
+      const arr = [
+        ['domain', r.domain_key],
+        ['Purpose', r.description],
+        ['When to use', r.when_to_use],
+      ];
+      if (r.positive_signals?.length) {
+        arr.push(['Positive signals', r.positive_signals.join('; ')]);
+      }
+      if (r.negative_signals?.length) {
+        arr.push(['Negative signals', r.negative_signals.join('; ')]);
+      }
+      const s = arr.map(([k, v]) => `**${k}**: ${v}`).join('  \n');
+      return `### ${r.name}\n\n${s}`;
     })
     .join('\n\n');
-  return `You are the incoming-message classifier for an agent application with memory.
+  return `You are the incoming-message classifier.
 Fill in every response field according to its description in the JSON schema.
 Positive and negative signals are hints, not a strict list: choose the skill by meaning.
 
@@ -119,7 +121,7 @@ Positive and negative signals are hints, not a strict list: choose the skill by 
 
 ${list}
 
-Do not reply to the user. Return only JSON conforming to the schema.`;
+Do not reply to the user.`;
 }
 
 export async function classifyIntent(userMessage, currentDomainKey = 'general', shortState = '') {

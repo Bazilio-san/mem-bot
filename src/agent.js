@@ -24,7 +24,7 @@ import { buildHistoryContext } from './pipeline/history-context.js';
 import { buildGlobalFactsBlock } from './pipeline/global-memory.js';
 import { formatReactionToken } from './pipeline/reactions.js';
 import { recordUserInboundForContactPolicy } from './pipeline/proactiveContactPolicy.js';
-import { getSkill, getSkillByDomain } from './pipeline/skills/registry.js';
+import { getSkill } from './pipeline/skills/registry.js';
 import { runWithLlmContext } from './pipeline/llm-context.js';
 import { REQUEST_KINDS } from './pipeline/llm-log.js';
 import { logAgentEvent, AGENT_EVENTS } from './pipeline/agent-event-log.js';
@@ -479,13 +479,12 @@ export async function handleMessage({
     try {
       intent = await classifyIntent(userMessage, domainKey);
     } catch {
-      intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: [] };
+      intent = { needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: [] };
     }
-    // Resolving the active skill. The source of truth is the classifier's skill_name; if it is not recognized,
-    // we pick a skill by domain key, otherwise we take the fallback general. The domain key for addressing memory
-    // is derived from the chosen skill, not from the model's response.
-    const activeSkill = getSkill(intent.skill_name) || getSkillByDomain(intent.domain_key) || getSkill('general');
-    const effectiveDomain = activeSkill ? activeSkill.domain_key : intent.domain_key || domainKey;
+    // skill_name is an enum — always resolves; falls back to 'general' when classification fails entirely.
+    // The domain key is always derived from the resolved skill, never from the model's response.
+    const activeSkill = getSkill(intent.skill_name) || getSkill('general');
+    const effectiveDomain = activeSkill?.domain_key ?? domainKey;
     ctx.domainKey = effectiveDomain;
     ctx.skillName = activeSkill?.name || null;
     ctx.activeSkill = activeSkill;

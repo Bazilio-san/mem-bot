@@ -265,6 +265,7 @@ export async function chatJSON({
   if (mode === 'json_schema') {
     const { schema: prepared, strict } = prepareJsonSchema(schema);
     format = { type: 'json_schema', json_schema: { name: schemaName, strict, schema: prepared } };
+    sys = `${sys}\nReturn only JSON conforming to the schema.`;
   } else {
     // json_object: the provider only guarantees syntactically valid JSON, so the schema goes into the
     // prompt as text and conformance is requested verbally. The schema is ALWAYS wrapped in a
@@ -276,7 +277,7 @@ Respond STRICTLY with one JSON object that matches JSON Schema (${schemaName}):
 <json-schema>
 ${JSON.stringify(schema)}
 </json-schema>
-Без markdown, без пояснений, без текста до или после JSON. Только сам объект.`;
+No markdown, no explanations, no text before or after the JSON. Only the object itself.`;
     format = { type: 'json_object' };
   }
 
