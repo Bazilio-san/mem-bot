@@ -889,7 +889,7 @@ async function mandatory() {
     check(
       '9e. MEMORY_CONTEXT shows the local time and cron of the active task',
       ctx.includes('Будний отчёт') &&
-        ctx.includes('следующее:') &&
+        ctx.includes('next:') &&
         ctx.includes('Europe/Moscow') &&
         ctx.includes('UTC:') &&
         ctx.includes('schedule: cron') &&
