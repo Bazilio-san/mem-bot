@@ -129,7 +129,14 @@ const hasBody = computed(() => props.row.body != null);
         :content="row.body.content || ''"
         :default-format="row.body.displayFormat || null"
       />
-      <div v-else-if="row.body.kind === 'text'" class="lr-text">{{ row.body.text }}</div>
+      <!-- Сообщение пользователя оформляется так же, как «Ответ пользователю»: тот же ContentViewer
+           (белый блок с рамкой и переключателем формата), но без автодетекции — всегда сырой текст. -->
+      <ContentViewer
+        v-else-if="row.body.kind === 'text'"
+        class="lr-usertext"
+        :content="row.body.text || ''"
+        default-format="RAW"
+      />
     </div>
   </div>
 </template>
@@ -211,13 +218,14 @@ const hasBody = computed(() => props.row.body != null);
   padding: 8px 12px 10px 44px;
   background: rgba(255, 255, 255, 0.45);
 }
-.lr-text {
+/* Сырой текст сообщения пользователя — тем же шрифтом, что и отрендеренный ответ пользователю
+   (.cv-rendered в ContentViewer), а не моноширинным. */
+.lr-usertext :deep(.cv-plain) {
   font:
-    12px/1.5 Consolas,
-    'Cascadia Mono',
-    monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
+    13px/1.5 system-ui,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
 }
 .lr-trunc {
   font-size: 11px;

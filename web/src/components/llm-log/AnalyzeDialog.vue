@@ -45,17 +45,23 @@ const running = ref(false);
 const output = ref('');
 const error = ref('');
 
-onMounted(async () => {
+async function loadAnalysisConfig() {
   try {
     const cfg = await fetchLogAnalysisConfig();
     models.value = cfg.models || [];
     model.value = cfg.defaultModel || models.value[0] || null;
     presets.value = cfg.cliPresets || [];
-    preset.value = presets.value[0]?.name || null;
+    if (!presets.value.some((item) => item?.name === preset.value)) {
+      preset.value = presets.value[0]?.name || null;
+    }
     cliAvailable.value = cfg.cliAvailable === true && presets.value.length > 0;
   } catch (err) {
     error.value = err.message;
   }
+}
+
+onMounted(async () => {
+  await loadAnalysisConfig();
 });
 
 // Автоматически собранный текст запроса: шаблон из поля ввода, где {selected-data} заменяется выбранным
@@ -103,6 +109,7 @@ watch(
   () => [props.visible, props.contextText],
   ([visible]) => {
     if (visible) {
+      loadAnalysisConfig();
       output.value = '';
       error.value = '';
       promptOverride.value = null;
@@ -304,19 +311,25 @@ async function run() {
               <span>Штатная LLM</span>
             </label>
             <Select v-model="model" :options="models" :disabled="engine !== 'llm'" size="small" class="ad-select" />
-            <label class="ad-radio" :class="{ disabled: !cliAvailable }">
-              <RadioButton v-model="engine" input-id="eng-cli" value="cli" :disabled="!cliAvailable" />
-              <span>CLI-инструмент</span>
-            </label>
-            <Select
-              v-model="preset"
-              :options="presets"
-              option-label="title"
-              option-value="name"
-              :disabled="engine !== 'cli' || !cliAvailable"
-              size="small"
-              class="ad-select"
-            />
+            <div
+              class="ad-cli-inline"
+              :class="{ disabled: !cliAvailable }"
+              :title="!cliAvailable ? 'CLI доступны только при локальной разарботке' : undefined"
+            >
+              <label class="ad-radio" :class="{ disabled: !cliAvailable }">
+                <RadioButton v-model="engine" input-id="eng-cli" value="cli" :disabled="!cliAvailable" />
+                <span>CLI-инструмент</span>
+              </label>
+              <Select
+                v-model="preset"
+                :options="presets"
+                option-label="title"
+                option-value="name"
+                :disabled="engine !== 'cli' || !cliAvailable"
+                size="small"
+                class="ad-select"
+              />
+            </div>
           </div>
           <div v-if="!cliAvailable" class="ad-note">
             CLI-движок доступен только когда админка слушает на localhost и в конфиге заданы пресеты.
@@ -355,7 +368,7 @@ async function run() {
 
   <!-- Редактор полного текста запроса к LLM: поверх диалога, одно большое поле. -->
   <Teleport to="body">
-    <div v-if="editorVisible" class="ad-ovl" @click.self="editorVisible = false">
+    <div v-if="editorVisible" class="ad-ovl">
       <div class="ad-ed">
         <div class="ad-ed-h">
           <span class="ad-ed-title">Текст запроса в LLM — можно править перед отправкой</span>
@@ -365,6 +378,7 @@ async function run() {
         <div class="ad-ed-f">
           <Button size="small" severity="warn" :loading="running" @click="sendFromEditor">Отправить в LLM</Button>
           <Button size="small" @click="applyEditor">Применить</Button>
+          <Button size="small" severity="secondary" @click="editorVisible = false">Закрыть</Button>
           <Button size="small" text @click="resetEditor">Сбросить к автотексту</Button>
           <span class="ad-ed-len">{{ promptDraft.length.toLocaleString('ru-RU') }} симв.</span>
         </div>
@@ -494,6 +508,14 @@ async function run() {
   gap: 6px;
   align-items: center;
   cursor: pointer;
+}
+.ad-cli-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ad-cli-inline.disabled {
+  opacity: 0.5;
 }
 .ad-radio.disabled {
   opacity: 0.5;

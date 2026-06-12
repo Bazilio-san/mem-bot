@@ -235,7 +235,7 @@ function buildHeader(records, rows) {
 //
 // Row model: { n, rowType, kind, title, indent, groupId, isGroupHeader, createdAt, model, tokens, priceUsd,
 // durationMs, status, error, body }. body is one of:
-//   { kind: 'text', text }                — plain text (user message; always RAW, no format select)
+//   { kind: 'text', text }                — plain text (user message; rendered like 'content' but always RAW)
 //   { kind: 'payload', payload }          — LLM request body (progressive disclosure on the frontend)
 //   { kind: 'content', content, displayFormat } — response/tool content; displayFormat comes from the
 //     server-side type dictionaries (REQUEST_KIND_DISPLAY / EVENT_DISPLAY); null = frontend auto-detection

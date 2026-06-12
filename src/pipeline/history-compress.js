@@ -310,6 +310,7 @@ ${renderZone(zones.far) || '(нет сообщений)'}`;
       schemaName: 'history_summary',
       system: SUMMARY_SYSTEM,
       user,
+      responseFormat: config.historyCompression.responseFormat,
     });
   } catch (err) {
     debugSummarizer(`summarizer returned an error, active summary unchanged: ${err.message}`);

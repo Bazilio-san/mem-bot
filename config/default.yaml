@@ -23,7 +23,13 @@ admin:
         - args: ['-p']
           command: 'claude'
           name: 'claude-code'
-          timeoutSec: 300
+          timeoutSec: 500
+        - args:
+            - exec
+            - --dangerously-bypass-approvals-and-sandbox
+          command: 'codex'
+          name: 'codex-exec'
+          timeoutSec: 500
     #> Анализ штатной LLM проекта.
     llm:
       #> Модель по умолчанию для анализа.
@@ -153,6 +159,9 @@ historyCompression:
   minCompressGain: 0.35
   #> Модель суммаризатора истории. Совпадает с дефолтом llm.auxModel; при смене auxModel задать явно.
   model: 'gpt-5.4-nano'
+  #> Формат структурированных ответов суммаризатора ('json_schema' | 'json_object').
+  #> null — наследуется от llm.responseFormat.
+  responseFormat: null
   #> Целевой размер дайджеста (в токенах). Должен быть строго меньше maxTokens (проверяется в коде).
   shrinkTokens: 800
   #> Доли бюджета дайджеста на ближнюю/среднюю/дальнюю зоны (YAML-массив).
@@ -207,8 +216,14 @@ llm:
   embedModel: 'text-embedding-3-small'
   #> Модель извлечения фактов в память.
   extractModel: 'gpt-5.4-mini'
+  #> Формат структурированных ответов при извлечении фактов ('json_schema' | 'json_object').
+  #> null — наследуется от llm.responseFormat.
+  extractResponseFormat: null
   #> Основная модель агента (ответы пользователю, вызов инструментов).
   mainModel: 'gpt-5.4-mini'
+  #> Формат структурированных ответов (chatJSON) по умолчанию: 'json_schema' — строгий structured outputs
+  #> провайдера (схема валидируется API); 'json_object' — только валидный JSON, схема передаётся текстом в промпте.
+  responseFormat: 'json_schema'
 
 #> Логирование обращений к LLM и смежным сервисам в БД (журнал запросов + узкий журнал затрат).
 llmLog:
@@ -345,6 +360,9 @@ skills:
     enabled: true
     #> Модель генерации навыков. null → берётся llm.mainModel (обрабатывается потребителем).
     model: null
+    #> Формат структурированных ответов генерации навыков ('json_schema' | 'json_object').
+    #> null — наследуется от llm.responseFormat.
+    responseFormat: null
   #> Каталог с навыками (читается при старте).
   dir: 'skills'
   #> Предел размера одного справочника, читаемого инструментом (в байтах).

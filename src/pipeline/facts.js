@@ -227,6 +227,7 @@ ${assistantBlock}<user>${current}</user>`;
     schemaName: 'user_facts',
     system: EXTRACT_SYSTEM + skillBlock,
     user,
+    responseFormat: config.llm.extractResponseFormat,
   });
   return Array.isArray(result?.facts) ? result.facts : [];
 }

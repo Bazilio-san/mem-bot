@@ -199,18 +199,86 @@ export async function chatStream({
   return message;
 }
 
-// Chat with structured output per a JSON Schema. Returns the parsed object.
-// The json_object mode is used with the schema described directly in the prompt: the strict
-// json_schema mode rejects schemas with free-form fields (data, entities),
-// so it is more reliable to specify the schema as text and require conformance to it.
-// The optional kind parameter sets the request type for the journal.
-export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result', kind }) {
-  const schemaText = JSON.stringify(schema);
-  const sys = `${system || ''}
+// Allowed response_format modes for structured output. Resolution order in chatJSON:
+// explicit call argument → config.llm.responseFormat → 'json_schema'.
+const RESPONSE_FORMATS = ['json_schema', 'json_object'];
 
-Ответь СТРОГО одним JSON-объектом, который соответствует следующей JSON Schema (${schemaName}):
-${schemaText}
+// Prepare an arbitrary JSON Schema for the provider's json_schema mode. Strict structured outputs require
+// `additionalProperties: false` and a complete `required` list on EVERY object node, so both are filled in
+// recursively (on a deep copy — the caller's schema is not mutated). Free-form objects
+// (`additionalProperties: true` or an object type without declared properties) cannot be expressed in strict
+// mode at all — for such schemas strict is turned off: the schema is still passed to the provider and guides
+// the model, but conformance is not enforced by the API. Exported for unit tests.
+export function prepareJsonSchema(schema) {
+  const root = structuredClone(schema);
+  let strict = true;
+  const isObjectType = (node) => node.type === 'object' || (Array.isArray(node.type) && node.type.includes('object'));
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (node.additionalProperties === true) {
+      strict = false;
+    }
+    if (node.properties && typeof node.properties === 'object') {
+      if (node.additionalProperties === undefined) {
+        node.additionalProperties = false;
+      }
+      node.required = Object.keys(node.properties);
+      Object.values(node.properties).forEach(walk);
+    } else if (isObjectType(node)) {
+      strict = false; // a free-form object without declared keys
+    }
+    walk(node.items);
+    for (const key of ['anyOf', 'oneOf', 'allOf']) {
+      if (Array.isArray(node[key])) {
+        node[key].forEach(walk);
+      }
+    }
+  };
+  walk(root);
+  return { schema: root, strict };
+}
+
+// Chat with structured output per a JSON Schema. Returns the parsed object.
+// The default mode is the provider-enforced json_schema (structured outputs). The legacy json_object mode —
+// the schema described as text in the system prompt — is kept for providers/models without json_schema
+// support; it is selected per call via the responseFormat argument or globally via config.llm.responseFormat.
+// Historical note: json_object used to be the only mode because strict json_schema rejects free-form fields
+// (data, entities); now such schemas are sent as json_schema with strict:false instead.
+export async function chatJSON({
+  model = config.llm.auxModel,
+  system,
+  user,
+  schema,
+  schemaName = 'result',
+  kind,
+  responseFormat,
+}) {
+  const mode = [responseFormat, config.llm.responseFormat].find((v) => RESPONSE_FORMATS.includes(v)) || 'json_schema';
+  let sys = system || '';
+  let format;
+  if (mode === 'json_schema') {
+    const { schema: prepared, strict } = prepareJsonSchema(schema);
+    format = { type: 'json_schema', json_schema: { name: schemaName, strict, schema: prepared } };
+  } else {
+    // json_object: the provider only guarantees syntactically valid JSON, so the schema goes into the
+    // prompt as text and conformance is requested verbally. The schema is ALWAYS wrapped in a
+    // <json-schema> tag — the model sees an unambiguous boundary, and consumers (e.g. the admin log
+    // viewer) can extract the schema from the prompt deterministically instead of guessing by braces.
+    sys = `${sys}
+
+Ответь СТРОГО одним JSON-объектом, который соответствует JSON Schema (${schemaName}), приведённой в теге <json-schema>:
+<json-schema>
+${JSON.stringify(schema)}
+</json-schema>
 Без markdown, без пояснений, без текста до или после JSON. Только сам объект.`;
+    format = { type: 'json_object' };
+  }
 
   const body = {
     model,
@@ -218,9 +286,9 @@ ${schemaText}
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ],
-    response_format: { type: 'json_object' },
+    response_format: format,
   };
-  debugLlm(`chatJSON -> ${model} ${schemaName}`);
+  debugLlm(`chatJSON -> ${model} ${schemaName} (${mode})`);
   const startedAt = Date.now();
   let res;
   try {

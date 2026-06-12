@@ -36,13 +36,69 @@ const chips = computed(() => {
   if (!p || Array.isArray(p)) {
     return [];
   }
-  return Object.entries(p)
+  const list = Object.entries(p)
     .filter(([, v]) => v !== null && typeof v !== 'object')
     .map(([k, v]) => ({ key: k, value: String(v) }));
+  // response_format — объект и в общий фильтр не попадает, но режим структурированного ответа важен:
+  // показываем его тип отдельным чипом (json_object | json_schema).
+  if (p.response_format?.type) {
+    list.push({ key: 'response_format', value: p.response_format.type });
+  }
+  return list;
 });
 
 const messages = computed(() => (Array.isArray(payloadObj.value?.messages) ? payloadObj.value.messages : []));
 const tools = computed(() => (Array.isArray(payloadObj.value?.tools) ? payloadObj.value.tools : []));
+
+// Режим json_schema: схема ответа идёт отдельным блоком запроса (response_format.json_schema) —
+// показываем её собственной секцией с раскрытием в pretty JSON.
+const rfSchema = computed(() => {
+  const rf = payloadObj.value?.response_format;
+  if (rf?.type !== 'json_schema' || !rf.json_schema) {
+    return null;
+  }
+  return {
+    name: rf.json_schema.name || 'schema',
+    strict: rf.json_schema.strict === true,
+    json: JSON.stringify(rf.json_schema.schema ?? {}),
+  };
+});
+const rfOpen = ref(false);
+
+// Режим json_object: схема вписана текстом в системный промпт и ВСЕГДА обёрнута в тег <json-schema>
+// (контракт chatJSON в src/llm.js). Тег даёт детерминированную границу фрагмента — никакого поиска по
+// скобкам. Возвращает текст до тега, содержимое тега и текст после.
+function embeddedJson(text) {
+  const m = text.match(/<json-schema>\s*([\s\S]*?)\s*<\/json-schema>/);
+  if (!m) {
+    return null;
+  }
+  const start = text.indexOf(m[0]);
+  return {
+    before: text.slice(0, start).trimEnd(),
+    raw: m[1],
+    after: text.slice(start + m[0].length).trim(),
+  };
+}
+
+function prettyJson(raw) {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+// Режим показа встроенного JSON по индексу сообщения: 'JSON' (pretty, по умолчанию) или 'RAW'.
+const embedModes = ref({});
+function embedMode(idx) {
+  return embedModes.value[idx] || 'JSON';
+}
+
+// Встроенный JSON ищем только в текстовых ролях (system/user): содержимое tool и так JSON целиком.
+function embedOf(m) {
+  return roleFormat(m.role) === 'RAW' ? embeddedJson(messageContent(m)) : null;
+}
 
 // Имя и описание инструмента: поддерживаем оба формата — «плоский» и обёртку {type:'function', function:{…}}.
 function toolInfo(t) {
@@ -271,12 +327,47 @@ onBeforeUnmount(() => {
               <ContentViewer :content="tc.function?.arguments || '{}'" compact default-format="JSON" />
             </div>
           </div>
+          <!-- json_object: схема вписана текстом в промпт. Текст до JSON — как обычно, затем
+               переключатель JSON/RAW (JSON по умолчанию — pretty-печать схемы) и текст после. -->
+          <div v-if="messageContent(m) && embedOf(m)" class="pv-embed">
+            <pre class="pv-embed-txt">{{ embedOf(m).before }}</pre>
+            <div class="pv-embed-bar">
+              <select :value="embedMode(idx)" title="Формат схемы" @change="embedModes[idx] = $event.target.value">
+                <option value="JSON">JSON</option>
+                <option value="RAW">RAW</option>
+              </select>
+              <span class="pv-embed-cap">JSON Schema, встроенная в текст промпта</span>
+            </div>
+            <pre class="pv-embed-json">{{
+              embedMode(idx) === 'JSON' ? prettyJson(embedOf(m).raw) : embedOf(m).raw
+            }}</pre>
+            <pre v-if="embedOf(m).after" class="pv-embed-txt">{{ embedOf(m).after }}</pre>
+          </div>
           <ContentViewer
-            v-if="messageContent(m)"
+            v-else-if="messageContent(m)"
             :content="messageContent(m)"
             compact
             :default-format="roleFormat(m.role)"
           />
+        </div>
+      </div>
+    </div>
+
+    <!-- json_schema: схема ответа — отдельный блок запроса (response_format.json_schema).
+         Секция в стиле tools: заголовок с именем схемы и режимом strict, по клику — pretty JSON. -->
+    <div v-if="rfSchema" class="pv-sect">
+      <div class="pv-sect-h">response_format — JSON Schema</div>
+      <div class="pv-tool" :class="{ open: rfOpen }">
+        <div class="pv-tool-h" @click="rfOpen = !rfOpen">
+          <span class="pv-tool-name">{{ rfSchema.name }}</span>
+          <span class="pv-tool-desc">
+            {{
+              rfSchema.strict ? 'strict — формат ответа гарантируется API' : 'strict выключен — схема рекомендательная'
+            }}
+          </span>
+        </div>
+        <div v-if="rfOpen" class="pv-tool-b">
+          <ContentViewer :content="rfSchema.json" compact default-format="JSON" />
         </div>
       </div>
     </div>
@@ -502,6 +593,56 @@ onBeforeUnmount(() => {
 }
 .pv-tcalls {
   margin-bottom: 6px;
+}
+/* Блок «текст промпта + встроенная JSON Schema» (режим json_object): текст — шрифтом интерфейса,
+   как обычное раскрытое сообщение; сам JSON — моноширинный на лёгкой подложке. */
+.pv-embed {
+  padding: 4px 20px 4px 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.pv-embed pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pv-embed-txt {
+  font:
+    12px/1.4 system-ui,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+.pv-embed-txt:first-child {
+  text-indent: var(--pv-indent, 0);
+}
+.pv-embed-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+.pv-embed-bar select {
+  font-size: 11px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+}
+.pv-embed-cap {
+  font-size: 11px;
+  color: #8a909a;
+}
+.pv-embed-json {
+  font:
+    12px/1.5 Consolas,
+    'Cascadia Mono',
+    monospace;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
 }
 /* Блок вызовов инструментов в раскрытом сообщении тоже сдвигается правее бэджа. */
 .pv-msg-o .pv-tcalls {
