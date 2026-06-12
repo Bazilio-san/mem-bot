@@ -114,7 +114,8 @@ function isLong(m) {
 // шрифт 10px полужирный в верхнем регистре — примерно 6.5px на символ плюс горизонтальные паддинги.
 function indentFor(m) {
   const badge = Math.round(m.role.length * 6.5) + 12;
-  const pop = isLong(m) ? 18 : 0;
+  // Кнопка «открыть в окне»: зазор 8px + иконка с паддингами и белой подложкой (~22px).
+  const pop = isLong(m) ? 30 : 0;
   return `${badge + pop + 8}px`;
 }
 
@@ -459,10 +460,16 @@ onBeforeUnmount(() => {
   z-index: 3;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px; /* тот же зазор, что и в свёрнутой строке, — иконка не «прилипает» к бэджу */
 }
 .pv-float .pv-role {
   cursor: pointer;
+}
+/* На цветном фоне раскрытого блока кнопка получает белую подложку, как в свёрнутой строке. */
+.pv-float .pv-pop {
+  background: #fff;
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 /* У просмотрщика содержимого убираются собственная рамка и белая подложка — фон задаёт .pv-msg-o. */
 .pv-msg-o :deep(.cv) {
