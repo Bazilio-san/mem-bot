@@ -416,13 +416,13 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <!-- Сообщение со схемой ответа (json_object — тег в тексте, json_schema — поле запроса):
-               текст промпта, затем сама схема в том же контейнере. В правом верхнем углу блока — панель
-               из двух селектов (как .cv-bar у ContentViewer): формат отображения текста (RAW/MD/HTML/JSON)
-               и формат схемы (JSON — pretty-печать по умолчанию, RAW). Панель позиционирована абсолютно
-               относительно блока и при прокрутке тела остаётся на месте. -->
+               текст промпта, затем сама схема в том же контейнере. В правом верхнем углу блока — селект
+               формата отображения текста (RAW/MD/HTML/JSON), позиционирован абсолютно, как .cv-bar у
+               ContentViewer. Селект формата схемы (JSON — pretty-печать по умолчанию, RAW) стоит в потоке
+               текста, прямо перед схемой: где начинался тег <json-schema> (json_object) либо в конце
+               текста промпта (json_schema) — позиция сама объясняет назначение, подписи не нужны. -->
           <div v-if="messageContent(m) && embedOf(m, idx)" class="pv-embed">
             <div class="pv-embed-bar">
-              <span class="pv-embed-cap">текст</span>
               <select
                 class="pv-embed-select"
                 :value="textMode(idx)"
@@ -431,16 +431,6 @@ onBeforeUnmount(() => {
               >
                 <option v-for="f in TEXT_FORMATS" :key="f" :value="f">{{ f }}</option>
               </select>
-              <span class="pv-embed-cap">схема</span>
-              <select
-                class="pv-embed-select"
-                :value="embedMode(idx)"
-                :title="embedOf(m, idx).cap"
-                @change="embedModes[idx] = $event.target.value"
-              >
-                <option value="JSON">JSON</option>
-                <option value="RAW">RAW</option>
-              </select>
             </div>
             <div class="pv-embed-body">
               <pre v-if="!renderText(embedOf(m, idx).before, textMode(idx)).html" class="pv-embed-txt">{{
@@ -448,6 +438,17 @@ onBeforeUnmount(() => {
               }}</pre>
               <!-- eslint-disable-next-line vue/no-v-html — содержимое прошло DOMPurify -->
               <div v-else class="pv-embed-rendered" v-html="renderText(embedOf(m, idx).before, textMode(idx)).html" />
+              <div class="pv-embed-schema-bar">
+                <select
+                  class="pv-embed-select"
+                  :value="embedMode(idx)"
+                  :title="embedOf(m, idx).cap"
+                  @change="embedModes[idx] = $event.target.value"
+                >
+                  <option value="JSON">JSON</option>
+                  <option value="RAW">RAW</option>
+                </select>
+              </div>
               <!-- eslint-disable-next-line vue/no-v-html — HTML собран из экранированных фрагментов -->
               <pre
                 v-if="embedMode(idx) === 'JSON' && prettyJsonHtml(embedOf(m, idx).raw)"
@@ -522,12 +523,11 @@ onBeforeUnmount(() => {
             <button type="button" class="pv-dlg-x" title="Закрыть" @click="bigContent = null">✕</button>
           </div>
           <div class="pv-dlg-b">
-            <!-- Сообщение со схемой ответа: в окне тот же блок, что и в инлайн-виде, — панель с двумя
-                 селектами (формат текста и формат схемы) в правом верхнем углу, текст промпта и сама
-                 схема под ним. Режимы селектов общие с инлайн-видом — по индексу сообщения. -->
+            <!-- Сообщение со схемой ответа: в окне тот же блок, что и в инлайн-виде, — селект формата
+                 текста в правом верхнем углу, селект формата схемы в потоке текста перед самой схемой.
+                 Режимы селектов общие с инлайн-видом — по индексу сообщения. -->
             <div v-if="bigContent.embed" class="pv-embed pv-embed-dlg">
               <div class="pv-embed-bar">
-                <span class="pv-embed-cap">текст</span>
                 <select
                   class="pv-embed-select"
                   :value="textMode(bigContent.idx)"
@@ -535,16 +535,6 @@ onBeforeUnmount(() => {
                   @change="textModes[bigContent.idx] = $event.target.value"
                 >
                   <option v-for="f in TEXT_FORMATS" :key="f" :value="f">{{ f }}</option>
-                </select>
-                <span class="pv-embed-cap">схема</span>
-                <select
-                  class="pv-embed-select"
-                  :value="embedMode(bigContent.idx)"
-                  :title="bigContent.embed.cap"
-                  @change="embedModes[bigContent.idx] = $event.target.value"
-                >
-                  <option value="JSON">JSON</option>
-                  <option value="RAW">RAW</option>
                 </select>
               </div>
               <div class="pv-embed-body">
@@ -557,6 +547,17 @@ onBeforeUnmount(() => {
                   class="pv-embed-rendered"
                   v-html="renderText(bigContent.embed.before, textMode(bigContent.idx)).html"
                 />
+                <div class="pv-embed-schema-bar">
+                  <select
+                    class="pv-embed-select"
+                    :value="embedMode(bigContent.idx)"
+                    :title="bigContent.embed.cap"
+                    @change="embedModes[bigContent.idx] = $event.target.value"
+                  >
+                    <option value="JSON">JSON</option>
+                    <option value="RAW">RAW</option>
+                  </select>
+                </div>
                 <!-- eslint-disable-next-line vue/no-v-html — HTML собран из экранированных фрагментов -->
                 <pre
                   v-if="embedMode(bigContent.idx) === 'JSON' && prettyJsonHtml(bigContent.embed.raw)"
@@ -776,7 +777,7 @@ onBeforeUnmount(() => {
   max-height: 260px;
   overflow: auto;
 }
-/* Панель селектов в правом верхнем углу блока — позиция и отступы как у .cv-bar в ContentViewer
+/* Селект формата текста в правом верхнем углу блока — позиция и отступы как у .cv-bar в ContentViewer
    (запас справа под вертикальный скроллбар тела). */
 .pv-embed-bar {
   position: absolute;
@@ -787,14 +788,10 @@ onBeforeUnmount(() => {
   gap: 4px;
   z-index: 3;
 }
-/* Подписи селектов на белой подложке: панель плавает над текстом сообщения, без подложки серые
-   надписи сливаются с ним. */
-.pv-embed-cap {
-  font-size: 10px;
-  color: #999;
-  background: #fff;
-  border-radius: 4px;
-  padding: 1px 4px;
+/* Селект формата схемы — в потоке текста, прямо перед блоком схемы: его позиция показывает, к чему
+   он относится, поэтому подпись не нужна. */
+.pv-embed-schema-bar {
+  margin: 6px 0 2px;
 }
 .pv-embed-txt {
   font:
