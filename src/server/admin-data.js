@@ -41,7 +41,7 @@ export async function listUsers() {
 // everything else (the general domain) → profile.
 export async function getUserMemory(userId) {
   const { rows: items } = await query(
-    `SELECT id, domain_key, fact_type, fact_text, confidence, evidence_count, last_confirmed_at, updated_at
+    `SELECT id, domain_key, fact_type, fact_text, confidence, evidence_count, last_confirmed_at, created_at, updated_at
        FROM mem.user_facts
       WHERE user_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > now())
       ORDER BY confidence DESC, updated_at DESC`,
@@ -57,13 +57,14 @@ export async function getUserMemory(userId) {
       text: it.fact_text,
       confidence: Number(it.confidence),
       usage: Number(it.evidence_count || 1),
+      created: it.created_at,
       updated: it.updated_at,
       domain: it.domain_key,
     });
   }
 
   const { rows: secureRows } = await query(
-    `SELECT id, record_type, subject_key, display_name, redacted_summary, consent_status, updated_at
+    `SELECT id, record_type, subject_key, display_name, redacted_summary, consent_status, created_at, updated_at
        FROM mem.secure_records
       WHERE user_id = $1 AND consent_status <> 'revoked'
       ORDER BY updated_at DESC`,
@@ -75,11 +76,12 @@ export async function getUserMemory(userId) {
     displayName: r.display_name,
     text: r.redacted_summary,
     consent: r.consent_status,
+    created: r.created_at,
     updated: r.updated_at,
   }));
 
   const { rows: taskRows } = await query(
-    `SELECT id, title, instruction, next_run_at, priority
+    `SELECT id, title, instruction, next_run_at, priority, created_at
        FROM mem.scheduled_tasks
       WHERE user_id = $1 AND status = 'active'
       ORDER BY next_run_at ASC`,
@@ -91,6 +93,7 @@ export async function getUserMemory(userId) {
     instruction: r.instruction,
     due: r.next_run_at,
     priority: Number(r.priority),
+    created: r.created_at,
   }));
 
   return { profile: group.profile, dialog: group.dialog, domain: group.domain, secure, reminder };

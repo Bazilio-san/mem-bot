@@ -6,6 +6,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import MultiSelect from 'primevue/multiselect';
+import DatePicker from 'primevue/datepicker';
 import Button from 'primevue/button';
 import Dialog from 'primevue/dialog';
 import Checkbox from 'primevue/checkbox';
@@ -89,14 +90,41 @@ const MEMORY_GROUPS = [
 ];
 
 // Возможные колонки метаданных записи. Поле filter: 'multi' помечает столбцы, для которых выводится фильтр-мультиселект
-// (по «Виду» и «Домену»). Для каждой группы реально показываются только те столбцы, по которым есть хоть одно значение.
+// (по «Виду» и «Домену»); filter: 'dateRange' — столбцы с фильтром по диапазону дат (календарь с выбором периода).
+// Для каждой группы реально показываются только те столбцы, по которым есть хоть одно значение.
 const META_COLUMNS = [
+  { field: 'created', header: 'Записано', filter: 'dateRange', width: '13rem' },
   { field: 'kind', header: 'Вид', filter: 'multi', width: '11rem' },
   { field: 'domain', header: 'Домен', filter: 'multi', width: '11rem' },
   { field: 'confidence', header: 'Уверенность', width: '7rem' },
   { field: 'due', header: 'Срок', width: '11rem' },
   { field: 'consent', header: 'Согласие', width: '11rem' },
 ];
+
+// Формат отображения времени записи: «дд.мм.гггг чч:мм» в локали интерфейса.
+const dateTimeFormat = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+function formatDateTime(value) {
+  return value instanceof Date ? dateTimeFormat.format(value) : '';
+}
+
+// Перед применением фильтра-диапазона конец периода сдвигается на самый конец суток (23:59:59.999):
+// календарь отдаёт даты с временем 00:00, и без поправки записи последнего дня выпадали бы из выборки.
+function onDateRangeFilter(filterModel, filterCallback) {
+  const range = filterModel.value;
+  if (Array.isArray(range) && range[1] instanceof Date) {
+    const end = new Date(range[1]);
+    end.setHours(23, 59, 59, 999);
+    range[1] = end;
+  }
+  filterCallback();
+}
 
 // Короткая подпись для одного элемента памяти: основной текст плюс заголовок напоминания/защищённой записи.
 function itemText(item) {
@@ -121,17 +149,21 @@ function optionsFor(groupKey, field) {
 }
 
 // Инициализация фильтров после загрузки памяти: для каждой группы, где присутствуют фильтруемые столбцы,
-// заводим запись с режимом сопоставления IN (значение ячейки должно входить в выбранный набор).
+// заводим запись с подходящим режимом сопоставления — IN для мультиселектов (значение ячейки должно входить
+// в выбранный набор) и BETWEEN для диапазонов дат (значение должно попадать в выбранный период).
 function initFilters() {
   const next = {};
   for (const grp of MEMORY_GROUPS) {
-    const cols = columnsFor(grp.key).filter((c) => c.filter === 'multi');
+    const cols = columnsFor(grp.key).filter((c) => c.filter);
     if (!cols.length) {
       continue;
     }
     next[grp.key] = {};
     for (const c of cols) {
-      next[grp.key][c.field] = { value: null, matchMode: FilterMatchMode.IN };
+      next[grp.key][c.field] = {
+        value: null,
+        matchMode: c.filter === 'dateRange' ? FilterMatchMode.BETWEEN : FilterMatchMode.IN,
+      };
     }
   }
   filters.value = next;
@@ -157,11 +189,15 @@ async function selectUser(user) {
   try {
     const data = await fetchUserMemory(user.id);
     // Заранее раскладываем основной текст записи в отдельное поле factText, чтобы DataTable мог сортировать
-    // столбец «Факт» по обычному полю, не вызывая функцию на каждую отрисовку строки.
+    // столбец «Факт» по обычному полю, не вызывая функцию на каждую отрисовку строки. Время записи (created)
+    // приходит строкой ISO и сразу превращается в Date — так работают и сортировка, и фильтр-диапазон BETWEEN.
     for (const key of Object.keys(data)) {
       if (Array.isArray(data[key])) {
         for (const it of data[key]) {
           it.factText = itemText(it);
+          if (it.created) {
+            it.created = new Date(it.created);
+          }
         }
       }
     }
@@ -439,6 +475,29 @@ onBeforeUnmount(() => {
                     filter
                     fluid
                     @change="filterCallback()"
+                  />
+                </template>
+              </Column>
+              <Column
+                v-else-if="c.filter === 'dateRange'"
+                :field="c.field"
+                :header="c.header"
+                sortable
+                data-type="date"
+                :show-filter-menu="false"
+                :style="{ width: c.width }"
+              >
+                <template #body="{ data }">{{ formatDateTime(data[c.field]) }}</template>
+                <template #filter="{ filterModel, filterCallback }">
+                  <DatePicker
+                    v-model="filterModel.value"
+                    selection-mode="range"
+                    :manual-input="false"
+                    date-format="dd.mm.yy"
+                    placeholder="Период"
+                    show-button-bar
+                    fluid
+                    @update:model-value="onDateRangeFilter(filterModel, filterCallback)"
                   />
                 </template>
               </Column>
