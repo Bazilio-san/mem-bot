@@ -195,8 +195,12 @@ export function createAdminApi() {
   );
 
   // Send a message on behalf of the user from the admin chat pane. Runs the full agent pipeline with the
-  // 'admin' channel (no markup profile is registered for it, so the reply comes as plain text) and returns
-  // the answer together with the turn's request_id, so the frontend can open the fresh cycle's journal.
+  // 'admin' channel (no markup profile is registered for it, so the reply comes as plain text). The success
+  // path is an SSE stream over the POST response: pipeline progress (stage/tool statuses via onEvent,
+  // streamed answer chunks) is relayed as it happens, and the final frame carries the full answer together
+  // with the turn's request_id, so the frontend can open the fresh cycle's journal. Validation errors are
+  // returned as plain JSON before the stream starts; after the SSE header any failure is reported inside
+  // the stream (the same contract as the log-analysis streaming).
   router.post(
     '/users/:id/chat-message',
     wrap(async (req, res) => {
@@ -208,8 +212,35 @@ export function createAdminApi() {
       if (!user) {
         return res.status(404).json({ error: 'Пользователь не найден.' });
       }
-      const result = await handleMessage({ externalId: user.external_id, userMessage: text, channel: 'admin' });
-      res.json({ answer: result.answer, requestId: result.requestId });
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const result = await handleMessage({
+          externalId: user.external_id,
+          userMessage: text,
+          channel: 'admin',
+          stream: true,
+          // Кадры статуса минимальны: фронту нужны только заголовок текущего шага и куски текста.
+          onEvent: (event) => {
+            if (event.type === 'stage.started') {
+              send({ type: 'status', title: event.title });
+            } else if (event.type === 'tool.started') {
+              send({ type: 'status', title: event.toolTitle || event.toolName });
+            } else if (event.type === 'assistant.delta' && event.text) {
+              send({ type: 'delta', text: event.text });
+            }
+          },
+        });
+        send({ type: 'done', answer: result.answer, requestId: result.requestId });
+      } catch (err) {
+        send({ type: 'error', error: String(err.message || err) });
+      }
+      res.end();
     }),
   );
 

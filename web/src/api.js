@@ -156,14 +156,68 @@ export function fetchSingleRequest(llmRequestId) {
   return request(`/llm-log/request/${encodeURIComponent(llmRequestId)}`);
 }
 
-// Отправка сообщения от имени пользователя из чат-панели админки. Ответ содержит текст бота и
-// request_id свежего цикла — по нему сразу открывается журнал.
-export function sendChatMessage(userId, text) {
-  return request(`/users/${encodeURIComponent(userId)}/chat-message`, {
+// Отправка сообщения от имени пользователя из чат-панели админки. Ответ приходит потоком (SSE поверх
+// fetch): onEvent вызывается на каждый кадр хода конвейера — {type:'status', title} со сменой текущего
+// шага и {type:'delta', text} с куском потокового текста ответа. По завершении промис разрешается
+// объектом {answer, requestId} — по requestId сразу открывается журнал свежего цикла. Ошибка HTTP-статуса
+// и кадр {type:'error'} бросаются как исключение с сообщением сервера.
+export async function sendChatMessage(userId, text, onEvent) {
+  const res = await fetch(`/api/users/${encodeURIComponent(userId)}/chat-message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
+  if (!res.ok) {
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent('admin-auth-required'));
+    }
+    let detail = '';
+    try {
+      const body = await res.json();
+      detail = body?.error ? `: ${body.error}` : '';
+    } catch {
+      /* тело не JSON */
+    }
+    throw new Error(`Отправка сообщения вернула статус ${res.status}${detail}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    // Разбор кадров SSE: события разделены пустой строкой, полезная нагрузка — в строках "data: …".
+    let sep;
+    while ((sep = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const data = frame
+        .split('\n')
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice(6))
+        .join('\n');
+      if (!data) {
+        continue;
+      }
+      const parsed = JSON.parse(data);
+      if (parsed.type === 'error') {
+        throw new Error(parsed.error || 'Ошибка обработки сообщения.');
+      }
+      if (parsed.type === 'done') {
+        result = { answer: parsed.answer, requestId: parsed.requestId };
+      } else if (onEvent) {
+        onEvent(parsed);
+      }
+    }
+  }
+  if (!result) {
+    throw new Error('Поток ответа оборвался до завершения обработки.');
+  }
+  return result;
 }
 
 // Подписка на события чата пользователя в реальном времени (SSE). Сервер присылает событие на каждое

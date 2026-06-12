@@ -32,16 +32,42 @@ function autosizeDraft() {
 
 watch(draft, () => nextTick(autosizeDraft));
 
-// Отправка сообщения от имени пользователя: полный проход агентского конвейера на сервере, затем
-// перезагрузка ленты и автоматическое открытие журнала свежего цикла.
+// Ход обработки отправленного сообщения: пока конвейер работает, в конце ленты висят два временных
+// пузыря — отправленная фраза (сообщение пользователя пишется в БД только в конце конвейера, поэтому
+// до завершения её нет в ленте) и черновик ответа бота со строкой текущего шага (стадии и инструменты)
+// и растущим потоковым текстом. По завершении временные пузыри заменяются настоящими из ленты.
+const pending = ref(null); // { userText, status, text } | null
+
+// Прокрутка ленты в самый низ — чтобы временные пузыри и растущий черновик оставались на виду.
+async function scrollToBottom() {
+  await nextTick();
+  if (scrollHost.value) {
+    scrollHost.value.scrollTop = scrollHost.value.scrollHeight;
+  }
+}
+
+// Отправка сообщения от имени пользователя: полный проход агентского конвейера на сервере с трансляцией
+// хода по SSE, затем перезагрузка ленты и автоматическое открытие журнала свежего цикла.
 async function send() {
   const text = draft.value.trim();
   if (!text || !props.userId || sending.value) {
     return;
   }
   sending.value = true;
+  pending.value = { userText: text, status: 'Отправляю…', text: '' };
+  scrollToBottom();
   try {
-    const result = await sendChatMessage(props.userId, text);
+    const result = await sendChatMessage(props.userId, text, (event) => {
+      if (!pending.value) {
+        return;
+      }
+      if (event.type === 'status') {
+        pending.value.status = event.title || '';
+      } else if (event.type === 'delta') {
+        pending.value.text += event.text;
+      }
+      scrollToBottom();
+    });
     draft.value = '';
     await loadInitial();
     if (result.requestId) {
@@ -51,6 +77,7 @@ async function send() {
   } catch (err) {
     emit('error', err.message);
   } finally {
+    pending.value = null;
     sending.value = false;
   }
 }
@@ -318,6 +345,20 @@ defineExpose({ reload: loadInitial });
             </button>
           </div>
         </template>
+
+        <!-- Временные пузыри на время обработки: отправленная фраза и черновик ответа со строкой
+             текущего шага конвейера и растущим потоковым текстом. -->
+        <template v-if="pending">
+          <div class="cp-msg user">
+            <div class="cp-bubble cp-pending">{{ pending.userText }}</div>
+          </div>
+          <div class="cp-msg bot">
+            <div class="cp-bubble cp-pending">
+              <span v-if="pending.text">{{ pending.text }}</span>
+              <div class="cp-status"><span class="cp-spin">⏳</span> {{ pending.status }}</div>
+            </div>
+          </div>
+        </template>
       </template>
     </div>
     <div v-if="userId" class="cp-input">
@@ -410,6 +451,31 @@ defineExpose({ reload: loadInitial });
 }
 .cp-msg.active .cp-bubble {
   outline: 2px solid #e8a33d;
+}
+/* Временные пузыри обработки: чуть приглушены, чтобы отличались от настоящих сообщений ленты. */
+.cp-pending {
+  opacity: 0.85;
+}
+.cp-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+.cp-spin {
+  display: inline-block;
+  animation: cp-spin-pulse 1.2s ease-in-out infinite;
+}
+@keyframes cp-spin-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 .cp-time {
   font-size: 10px;
