@@ -72,8 +72,7 @@ export async function runLogRetentionOnce() {
   const total = deleted.llmRequest + deleted.agentEvent + deleted.llmUsage;
   if (total > 0) {
     console.log(
-      `[log-retention] Удалены устаревшие записи журналов: llm_request — ${deleted.llmRequest}, ` +
-        `agent_event — ${deleted.agentEvent}, llm_usage — ${deleted.llmUsage}.`,
+      `[log-retention] Deleted stale journal rows: llm_request — ${deleted.llmRequest}, agent_event — ${deleted.agentEvent}, llm_usage — ${deleted.llmUsage}.`,
     );
   }
   return deleted;
@@ -86,11 +85,11 @@ export function startLogRetention() {
     return;
   }
   runLogRetentionOnce().catch((err) => {
-    console.warn(`[log-retention] Стартовая чистка журналов не удалась: ${String(err.message || err)}`);
+    console.warn(`[log-retention] Startup journal cleanup failed: ${String(err.message || err)}`);
   });
   timer = setInterval(() => {
     runLogRetentionOnce().catch((err) => {
-      console.warn(`[log-retention] Суточная чистка журналов не удалась: ${String(err.message || err)}`);
+      console.warn(`[log-retention] Daily journal cleanup failed: ${String(err.message || err)}`);
     });
   }, DAY_MS);
   if (typeof timer.unref === 'function') {

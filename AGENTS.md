@@ -6,6 +6,14 @@ Any edit or new file under `.claude/**` (SKILL.md, scripts, hooks, agents, `sett
 by `settings.json` — direct `Write`/`Edit` will fail. Invoke the `/edit-claude-files` skill, which
 describes the required `scripts/fcp.js` temp-copy protocol.
 
+## Language in code
+
+All code comments, `console.*` / logger calls, and `throw new Error(...)` messages must be written in **English**.
+
+Keep Russian for strings that are user-facing at runtime: Telegram bot replies, admin web UI error responses, LLM system/user
+prompts, tool descriptions and result strings passed to the model, tool `title` fields shown as Telegram progress statuses,
+and test fixtures (seed data, sample user messages, expected values).
+
 ## Formatting
 
 MD lines ≤120 chars. Break at 120. Target 100-120. No short lines (60-80). Fill to ~120.

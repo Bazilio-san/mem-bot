@@ -1,10 +1,10 @@
-// Порт кастомной версии pretty-print-json (multi-bot, common/lib/af-tools-ts/pretty-print-json.ts):
-// pretty-печать JSON в HTML с раскраской типов (классы json-key/string/number/boolean/null/mark),
-// кликабельными ссылками (target=_blank) и прокручиваемыми контейнерами для длинных строк.
-// Поверх порта — слой вложенного сериализованного JSON (renderJsonHtml): строковые значения, которые
-// парсятся как объект или массив, получают инлайн-селект JSON | RAW. Селект — обычный <select> с
-// data-атрибутом пути; обработка переключения — делегированием события change на контейнере
-// (HTML вставляется через v-html, Vue-биндинги внутри него не работают).
+// Port of the custom pretty-print-json version (multi-bot, common/lib/af-tools-ts/pretty-print-json.ts):
+// pretty-printing JSON into HTML with type highlighting (json-key/string/number/boolean/null/mark classes),
+// clickable links (target=_blank) and scrollable containers for long strings.
+// On top of the port — a nested serialized JSON layer (renderJsonHtml): string values that parse
+// as an object or array get an inline JSON | RAW select. The select is a plain <select> with a
+// data attribute holding the path; switching is handled by delegating the change event on the container
+// (the HTML is inserted via v-html, Vue bindings do not work inside it).
 
 export const prettyPrintJson = {
   toHtml(thing, options) {
@@ -15,8 +15,8 @@ export const prettyPrintJson = {
       linksNewTab: true,
       quoteKeys: false,
       trailingComma: true,
-      maxTextLength: 100, // максимальная длина строки для показа в одну строку
-      minTextContainerWidth: 300, // минимальная ширина контейнера длинного текста, px
+      maxTextLength: 100, // maximum string length to show on a single line
+      minTextContainerWidth: 300, // minimum width of the long-text container, px
     };
     const settings = { ...defaults, ...options };
 
@@ -32,7 +32,7 @@ export const prettyPrintJson = {
         }
       });
 
-    // Разэкранирование спецсимволов в длинных строках: контейнер показывает человекочитаемый текст.
+    // Unescaping special characters in long strings: the container shows human-readable text.
     const deserializeString = (str) =>
       str
         .replace(/\\"/g, '"')
@@ -72,7 +72,7 @@ export const prettyPrintJson = {
     };
 
     const replacer = (match, p1, p2, p3, p4) => {
-      // Четыре скобочные группы строки (отступ, ключ, значение, конец) превращаются в HTML.
+      // The four capture groups of the line (indent, key, value, end) are turned into HTML.
       const part = { indent: p1, key: p2, value: p3, end: p4 };
       const findName = settings.quoteKeys ? /(.*)(): / : /"([\w$]+)": |(.*): /;
       const indentHtml = part.indent || '';
@@ -86,13 +86,13 @@ export const prettyPrintJson = {
 
       const hasLongText = valueHtml.includes('json-long-text-inline');
       if (hasLongText && part.key) {
-        // Для строк с длинными текстами — отдельная структура: ключ в своём контейнере.
+        // Lines with long texts get a separate structure: the key in its own container.
         return `${indentHtml}<span class="json-key-container">${keyHtml}</span>${valueHtml}${endHtml}`;
       }
       return indentHtml + keyHtml + valueHtml + endHtml;
     };
 
-    // Регулярка разбирает каждую строку JSON на четыре части: отступ, ключ, значение, завершение.
+    // The regex splits every JSON line into four parts: indent, key, value, terminator.
     const jsonLine = /^( *)("[^"]+": )?((?:"(?:[^"\\]|\\.)*")|[\w.+-]*)?([{}[\],]*)?$/gm;
     const json = JSON.stringify(thing, null, settings.indent) || 'undefined';
     const html = htmlEntities(json).replace(jsonLine, replacer);
@@ -106,8 +106,8 @@ export const prettyPrintJson = {
   },
 };
 
-// Строка с сериализованным JSON-объектом/массивом внутри? Только такие значения получают
-// инлайн-селект JSON | RAW (примитивы в строках — «"42"», «"true"» — переключателя не стоят).
+// Is this a string with a serialized JSON object/array inside? Only such values get the inline
+// JSON | RAW select (primitives in strings — '"42"', '"true"' — get no switcher).
 function looksNestedJson(v) {
   if (typeof v !== 'string') {
     return false;
@@ -126,10 +126,10 @@ function looksNestedJson(v) {
 
 const OPTS = { indent: 2 };
 
-// Основной рендер для просмотрщика: src — строка с JSON, modes — карта «путь поля → 'JSON' | 'RAW'»
-// для вложенного сериализованного JSON (по умолчанию JSON — распарсенное дерево на месте строки).
-// withEmbeds=false отключает слой вложенного JSON (для блоков без обработчика change, например схемы).
-// Возвращает HTML или null, если src — не валидный JSON.
+// Main render for the viewer: src — a JSON string, modes — a map "field path → 'JSON' | 'RAW'"
+// for nested serialized JSON (default is JSON — the parsed tree in place of the string).
+// withEmbeds=false disables the nested JSON layer (for blocks without a change handler, e.g. schemas).
+// Returns HTML or null if src is not valid JSON.
 export function renderJsonHtml(src, modes = {}, { withEmbeds = true } = {}) {
   let parsed;
   try {
@@ -143,10 +143,10 @@ export function renderJsonHtml(src, modes = {}, { withEmbeds = true } = {}) {
   return renderValue(parsed, '$', modes, { n: 0 });
 }
 
-// Рекурсивный рендер уровня: вложенные JSON-строки заменяются на placeholder-токены, дерево
-// печатается целиком, затем каждый токен заменяется на «селект + содержимое» (распарсенное дерево
-// в режиме JSON или исходная строка в режиме RAW). Токен — алфавитно-цифровой, переживает и
-// экранирование HTML, и построчную регулярку toHtml.
+// Recursive render of one level: nested JSON strings are replaced with placeholder tokens, the tree
+// is printed as a whole, then each token is replaced with "select + content" (the parsed tree
+// in JSON mode or the original string in RAW mode). The token is alphanumeric, so it survives both
+// HTML escaping and the line-based toHtml regex.
 function renderValue(value, basePath, modes, counter) {
   const embeds = [];
   const strip = (v, path) => {
@@ -183,7 +183,7 @@ function renderValue(value, basePath, modes, counter) {
     }>JSON</option><option value="RAW"${mode === 'RAW' ? ' selected' : ''}>RAW</option></select>`;
     let content;
     if (mode === 'JSON') {
-      // Вложенное дерево печатается с продолжением отступа родительской строки.
+      // The nested tree is printed continuing the parent line's indentation.
       const inner = renderValue(e.parsed, e.path, modes, counter);
       content = inner
         .split('\n')

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Ручной запуск семантической чистки дубликатов в плоской таблице фактов mem.user_facts.
-// Дубликаты одного пользователя и типа (косинусное сходство выше facts.confirmSimilarity) сливаются:
-// остаётся строка с большим числом подтверждений, дубликат архивируется. Dry-run — по умолчанию.
+// Manual run of semantic duplicate cleanup in the flat facts table mem.user_facts.
+// Duplicates of the same user and type (cosine similarity above facts.confirmSimilarity) are merged:
+// the row with more confirmations is kept, the duplicate is archived. Dry-run is the default.
 import { query, closePool } from '../src/db.js';
 import { dedupeFactsSweep } from '../src/pipeline/facts.js';
 

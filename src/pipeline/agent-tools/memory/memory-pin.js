@@ -1,8 +1,8 @@
 import { saveFact, FACT_TYPES } from '../../facts.js';
 
-// «Запомни навсегда»: явная просьба пользователя закрепить факт. Записывается с source = 'manual'
-// (высший ранг) и persistent = true — без срока забывания, фоновый sweep строку не трогает,
-// заместить её может только новое явное высказывание пользователя.
+// "Remember forever": the user explicitly asked to pin a fact. Stored with source = 'manual'
+// (highest rank) and persistent = true — no forget deadline, the background sweep leaves the row alone,
+// and only a new explicit user statement can replace it.
 export const memoryPinTool = {
   name: 'memory_pin',
   title: 'Запоминаю навсегда...',

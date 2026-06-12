@@ -1,14 +1,16 @@
-// Долговременные факты о пользователе: извлечение из диалога, саммари ответа ассистента,
-// сохранение с семантической дедупликацией и фоновая чистка дубликатов.
+// Long-term facts about the user: extraction from the dialog, assistant answer summary,
+// saving with semantic deduplication, and a background duplicate sweep.
 //
-// Принципы (см. docs/ai-bot-with-memory/06-memory.md):
-// - Источник фактов — ТОЛЬКО реплики пользователя. Ответ ассистента подаётся в контекст извлечения
-//   как короткое саммари без HTML в теге <assistant> и явно исключается из извлечения, иначе модель
-//   принимает перечисленные ботом сохранённые факты за новые сведения и память лавинообразно растёт.
-// - Хранилище плоское: mem.user_facts (пользователь × домен × тип × текст + embedding).
-//   Никаких entity-схем и второго прохода уточнения — одно обращение к LLM на ход.
-// - Дедупликация на записи: близкий по смыслу факт того же типа подтверждает существующую строку
-//   (evidence_count+1, свежесть) либо замещает её (новое значение той же темы), а не плодит дубликаты.
+// Principles (see docs/ai-bot-with-memory/06-memory.md):
+// - The source of facts is ONLY the user's messages. The assistant's answer is fed into the extraction
+//   context as a short HTML-free summary inside the <assistant> tag and is explicitly excluded from
+//   extraction, otherwise the model treats facts the bot listed back as new information and memory
+//   snowballs.
+// - Flat storage: mem.user_facts (user × domain × type × text + embedding).
+//   No entity schemas and no second refinement pass — a single LLM call per turn.
+// - Write-time deduplication: a semantically close fact of the same type confirms the existing row
+//   (evidence_count+1, freshness) or replaces it (a new value of the same topic) instead of spawning
+//   duplicates.
 import { query, vectorToSql } from '../db.js';
 import { chatJSON, embed } from '../llm.js';
 import { config } from '../config.js';
@@ -28,8 +30,8 @@ export const FACT_TYPES = [
   'discovery_seed',
 ];
 
-// Типы, описывающие человека вне предметной области: хранятся в домене general и доступны из любого
-// домена. Остальные (goal, open_loop) привязываются к домену текущего разговора.
+// Types describing the person outside any subject area: stored in the general domain and available from
+// any domain. The rest (goal, open_loop) are bound to the domain of the current conversation.
 const GENERAL_TYPES = new Set([
   'profile',
   'preference',
@@ -41,9 +43,9 @@ const GENERAL_TYPES = new Set([
   'discovery_seed',
 ]);
 
-// Ранги источников фактов для разрешения конфликтов при записи: замещение существующей строки
-// разрешено, только если ранг нового источника не ниже ранга старого. Закреплённые (persistent)
-// строки замещает только источник ранга user_statement и выше — человек явно передумал.
+// Fact source ranks for resolving conflicts at write time: replacing an existing row is allowed only
+// when the new source rank is not below the old one. Pinned (persistent) rows can be replaced only by
+// a source of rank user_statement or higher — the person has explicitly changed their mind.
 export const SOURCE_RANK = {
   manual: 3,
   user_statement: 2,
@@ -57,8 +59,8 @@ function normalizeSource(source) {
   return FACT_SOURCES.includes(source) ? source : 'user_statement';
 }
 
-// Грубая очистка от HTML-разметки: ответы бота в Telegram-канале содержат <b>/<i> и т.п.
-// Используется для саммари-фолбэка и для текста цели реакции.
+// Rough cleanup of HTML markup: bot replies in the Telegram channel contain <b>/<i> and the like.
+// Used for the summary fallback and for the reaction target text.
 export function stripHtml(text) {
   return String(text || '')
     .replace(/<[^>]*>/g, '')
@@ -68,7 +70,7 @@ export function stripHtml(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Саммари ответа ассистента
+// Assistant answer summary
 // ---------------------------------------------------------------------------
 
 const SUMMARY_SCHEMA = {
@@ -83,9 +85,9 @@ const SUMMARY_SYSTEM = `Ты сжимаешь ответ ассистента в
 (если задал). Без HTML и markdown, без списков, без цитирования перечней — перечни описывай обобщённо
 (например: «показал список сохранённых заметок»). Не упоминай конкретные факты о пользователе.`;
 
-// Краткое содержание ответа ассистента. Хранится в metadata сообщения и заменяет полный текст ответа
-// в контексте извлечения фактов. При любой ошибке LLM возвращается обрезанный plain-text — конвейер
-// не зависит от доступности модели.
+// Short summary of the assistant's answer. Stored in the message metadata and replaces the full answer
+// text in the fact extraction context. On any LLM error a truncated plain-text is returned — the pipeline
+// does not depend on model availability.
 export async function summarizeAnswer(answer, { model = config.llm.auxModel } = {}) {
   const plain = stripHtml(answer);
   const maxChars = config.facts.summaryMaxChars;
@@ -93,7 +95,7 @@ export async function summarizeAnswer(answer, { model = config.llm.auxModel } = 
     return '';
   }
   if (plain.length <= 120) {
-    return plain; // короткий ответ сам себе саммари — не тратим вызов модели
+    return plain; // a short answer is its own summary — don't spend a model call
   }
   try {
     const res = await chatJSON({
@@ -112,11 +114,11 @@ export async function summarizeAnswer(answer, { model = config.llm.auxModel } = 
 }
 
 // ---------------------------------------------------------------------------
-// Извлечение фактов
+// Fact extraction
 // ---------------------------------------------------------------------------
 
-// Строгая форма одного факта-кандидата — единая точка истины для всех схем, где модель возвращает
-// факты для долговременной памяти (извлечение фактов здесь и facts_to_memory суммаризатора истории).
+// Strict shape of a single candidate fact — the single source of truth for every schema where the model
+// returns facts for long-term memory (fact extraction here and the history summarizer's facts_to_memory).
 export const FACT_ITEM_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -190,9 +192,9 @@ preference «Пользователь любит торты». Вежливое 
 
 Если сохранять нечего — верни {"facts": []}. Чаще всего так и есть.`;
 
-// Извлечение фактов из реплик пользователя. assistantSummary — краткое содержание ОТВЕТА АССИСТЕНТА,
-// НА КОТОРЫЙ пользователь отвечал (контекст реплики), не текущего ответа. userMessages — последние
-// реплики пользователя, последняя — текущая. intent — результат классификатора (намерение текущей фразы).
+// Fact extraction from user messages. assistantSummary is the summary of the ASSISTANT ANSWER the user
+// was REPLYING TO (context of the message), not of the current answer. userMessages — the user's latest
+// messages, the last one being the current one. intent — classifier result (intent of the current phrase).
 export async function extractFacts({
   skillName = null,
   domainKey,
@@ -237,11 +239,11 @@ ${assistantBlock}<user>${current}</user>`;
 }
 
 // ---------------------------------------------------------------------------
-// Сохранение с семантической дедупликацией
+// Saving with semantic deduplication
 // ---------------------------------------------------------------------------
 
-// Ближайший по смыслу активный факт того же пользователя и типа. Возвращает строку с полем similarity
-// (косинусное сходство 0..1) либо null. Без embedding-сервиса ищем точное совпадение текста.
+// The semantically closest active fact of the same user and type. Returns a row with a similarity field
+// (cosine similarity 0..1) or null. Without the embedding service we look for an exact text match.
 async function findNearestFact({ userId, factType, vector, factText }) {
   if (vector) {
     const { rows } = await query(
@@ -265,21 +267,21 @@ async function findNearestFact({ userId, factType, vector, factText }) {
   return rows[0] || null;
 }
 
-// Срок забывания (expires_at) по типу факта: явный ttl_days из извлечения имеет приоритет,
-// иначе берётся таблица facts.retention из конфига (0 — бессрочно, expires_at = NULL).
+// Forgetting deadline (expires_at) by fact type: an explicit ttl_days from extraction takes priority,
+// otherwise the facts.retention table from the config is used (0 — indefinite, expires_at = NULL).
 function retentionExpiry(factType, ttlDays) {
   const days = Number(ttlDays) > 0 ? Number(ttlDays) : Number(config.facts.retention?.[factType]) || 0;
   return days > 0 ? new Date(Date.now() + days * 86400000) : null;
 }
 
-// Сохранить один факт с дедупликацией. opts.source — тип источника (см. SOURCE_RANK, дефолт
-// 'user_statement'); fact.persistent = true закрепляет факт («запомни навсегда»): expires_at = NULL,
-// фоновый sweep строку не трогает, замещение доступно только источникам ранга user_statement и выше.
-// Возвращает { action, id, ... }:
-//   confirmed — близкий факт уже есть, строка обновлена (свежесть, evidence_count, формулировка);
-//   replaced  — та же тема с новым значением: старая строка архивирована, вставлена новая;
-//   created   — новый факт;
-//   skipped   — не прошёл порог уверенности или неизвестный тип.
+// Save a single fact with deduplication. opts.source — source type (see SOURCE_RANK, default
+// 'user_statement'); fact.persistent = true pins the fact ("remember forever"): expires_at = NULL,
+// the background sweep leaves the row alone, replacement is available only to sources of rank
+// user_statement and above. Returns { action, id, ... }:
+//   confirmed — a close fact already exists, the row was updated (freshness, evidence_count, wording);
+//   replaced  — same topic with a new value: the old row is archived, a new one inserted;
+//   created   — a new fact;
+//   skipped   — failed the confidence threshold or unknown type.
 export async function saveFact(userId, domainKey, fact, sourceConversationId = null, opts = {}) {
   const factType = FACT_TYPES.includes(fact.type) ? fact.type : null;
   const factText = String(fact.fact_text || '').trim();
@@ -302,13 +304,13 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   const nearestRank = nearest ? (SOURCE_RANK[nearest.source] ?? SOURCE_RANK.user_statement) : 0;
 
   if (nearest && similarity >= config.facts.confirmSimilarity) {
-    // Подтверждение: тот же смысл. Свежая формулировка принимается, только если ранг источника
-    // не ниже ранга строки (для закреплённой строки — не ниже user_statement) — слабый источник
-    // не переписывает текст сильного, но продлевает свежесть.
+    // Confirmation: same meaning. A fresh wording is accepted only if the source rank is not below
+    // the row's rank (for a pinned row — not below user_statement) — a weak source does not rewrite
+    // a strong one's text, but it does extend freshness.
     const keepPersistent = nearest.persistent === true || persistent;
     const rewriteText = sourceRank >= (nearest.persistent === true ? SOURCE_RANK.user_statement : nearestRank);
-    // Подтверждение продлевает срок забывания от текущего момента для любого типа с ненулевым
-    // retention; закреплённая строка остаётся бессрочной.
+    // A confirmation extends the forgetting deadline from the current moment for any type with non-zero
+    // retention; a pinned row stays indefinite.
     const nextExpiry = keepPersistent ? null : retentionExpiry(factType, fact.ttl_days);
     await query(
       `UPDATE mem.user_facts
@@ -325,11 +327,12 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   }
 
   if (nearest && similarity >= config.facts.replaceSimilarity) {
-    // Та же тема, новое значение («переехал в Казань» поверх «живёт в Москве»): замещение.
-    // Правило конфликтов: замещать может только источник ранга не ниже старого. Для закреплённой
-    // (persistent) строки порог фиксированный — user_statement и выше: человек явно передумал
-    // («Тебя зовут Бобик» поверх закреплённого «Тебя зовут Шарик») — штатная смена с архивацией.
-    // Иначе слабый источник лишь подтверждает свежесть строки, не трогая её текст.
+    // Same topic, new value ("moved to Kazan" on top of "lives in Moscow"): replacement.
+    // Conflict rule: only a source of rank not below the old one may replace. For a pinned
+    // (persistent) row the threshold is fixed — user_statement and above: the person explicitly
+    // changed their mind ("Your name is Bobik" over the pinned "Your name is Sharik") — a regular
+    // change with archiving. Otherwise a weak source merely confirms the row's freshness without
+    // touching its text.
     const requiredRank = nearest.persistent === true ? SOURCE_RANK.user_statement : nearestRank;
     if (sourceRank < requiredRank) {
       await query(
@@ -340,7 +343,7 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
       );
       return { action: 'confirmed', id: nearest.id, similarity, source, reason: 'source rank below existing' };
     }
-    // Закрепление наследуется: явная смена закреплённого факта остаётся закреплённой (и бессрочной).
+    // Pinning is inherited: an explicit change of a pinned fact stays pinned (and indefinite).
     const insertPersistent = persistent || nearest.persistent === true;
     const { rows } = await query(
       `INSERT INTO mem.user_facts
@@ -394,9 +397,9 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   return { action: 'created', id: rows[0].id, source };
 }
 
-// Сохранить пачку извлечённых фактов. Последовательно: дедупликация внутри пачки должна видеть
-// результат предыдущих вставок (две формулировки одного факта в одном ходе схлопнутся).
-// opts.source передаётся каждому saveFact.
+// Save a batch of extracted facts. Sequentially: deduplication within the batch must see the result
+// of the previous inserts (two wordings of the same fact in one turn collapse into one).
+// opts.source is passed to each saveFact.
 export async function saveFacts(userId, domainKey, facts, sourceConversationId = null, opts = {}) {
   const results = [];
   for (const fact of facts || []) {
@@ -410,13 +413,13 @@ export async function saveFacts(userId, domainKey, facts, sourceConversationId =
 }
 
 // ---------------------------------------------------------------------------
-// Фоновая чистка: схлопывание накопившихся семантических дубликатов
+// Background sweep: collapsing accumulated semantic duplicates
 // ---------------------------------------------------------------------------
 
-// Проход по активным фактам пользователя: пары одного типа со сходством выше confirmSimilarity
-// сливаются — остаётся строка с большим evidence_count (при равенстве — более свежая), её
-// evidence_count увеличивается на счётчик дубликата, дубликат архивируется.
-// Возвращает { merged, checked } (в dry-run — список пар без изменений).
+// A pass over the user's active facts: same-type pairs with similarity above confirmSimilarity are
+// merged — the row with the larger evidence_count survives (on a tie — the fresher one), its
+// evidence_count is increased by the duplicate's counter, and the duplicate is archived.
+// Returns { merged, checked } (in dry-run — the list of pairs without changes).
 export async function dedupeFactsSweep({ userId, dryRun = false, limit = 500 } = {}) {
   const { rows: facts } = await query(
     `SELECT id, fact_type, fact_text, confidence, evidence_count, last_confirmed_at, embedding IS NOT NULL AS has_vec
@@ -427,10 +430,10 @@ export async function dedupeFactsSweep({ userId, dryRun = false, limit = 500 } =
     [userId, limit],
   );
   const pairs = [];
-  // Пары ищем в SQL одним самосоединением по типу: косинусное сходство выше порога.
-  // Закреплённые (persistent) строки не архивируются как дубликаты: они могут быть только
-  // «выжившей» стороной пары, поэтому сторона b всегда не закреплена, а при сравнении
-  // закрепление весит больше evidence_count и свежести.
+  // Pairs are found in SQL with a single self-join by type: cosine similarity above the threshold.
+  // Pinned (persistent) rows are never archived as duplicates: they can only be the "surviving"
+  // side of a pair, so side b is always unpinned, and in the comparison pinning outweighs
+  // evidence_count and freshness.
   const { rows: dupRows } = await query(
     `SELECT a.id AS keep_id, b.id AS drop_id, 1 - (a.embedding <=> b.embedding) AS similarity
        FROM mem.user_facts a
@@ -446,7 +449,7 @@ export async function dedupeFactsSweep({ userId, dryRun = false, limit = 500 } =
   const dropped = new Set();
   for (const row of dupRows) {
     if (dropped.has(row.keep_id) || dropped.has(row.drop_id)) {
-      continue; // транзитивные цепочки сливаем за несколько проходов, не каскадом за один
+      continue; // transitive chains are merged over several passes, not as a cascade in one
     }
     dropped.add(row.drop_id);
     pairs.push({ keepId: row.keep_id, dropId: row.drop_id, similarity: Number(row.similarity) });
@@ -470,8 +473,8 @@ export async function dedupeFactsSweep({ userId, dryRun = false, limit = 500 } =
       [pair.dropId, pair.keepId],
     );
   }
-  // Итог чистки — событие memory.sweep. Запускается вне request-контекста (задача планировщика или
-  // ручной скрипт), поэтому корреляционные поля события NULL — просмотрщик покажет его как сервисное.
+  // Sweep summary — the memory.sweep event. Runs outside the request context (a scheduler task or
+  // a manual script), so the event's correlation fields are NULL — the viewer shows it as a service one.
   logAgentEvent({
     eventType: AGENT_EVENTS.MEMORY_SWEEP,
     title: 'Чистка дубликатов памяти',

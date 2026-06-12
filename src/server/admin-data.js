@@ -37,8 +37,8 @@ export async function listUsers() {
 
 // All active memory of the user, split into the prototype's five categories.
 // Fields are mapped to names the page understands, so the frontend does not depend on DB column names.
-// Группировка плоских фактов: open_loop → dialog (незакрытые линии), факты непустого домена → domain,
-// остальное (домен general) → profile.
+// Grouping of flat facts: open_loop → dialog (unclosed threads), facts with a non-empty domain → domain,
+// everything else (the general domain) → profile.
 export async function getUserMemory(userId) {
   const { rows: items } = await query(
     `SELECT id, domain_key, fact_type, fact_text, confidence, evidence_count, last_confirmed_at, updated_at
@@ -96,11 +96,11 @@ export async function getUserMemory(userId) {
   return { profile: group.profile, dialog: group.dialog, domain: group.domain, secure, reminder };
 }
 
-// Полное удаление пользователя со всеми его данными. Одна команда DELETE по mem.users: связанные таблицы
-// (диалоги, сообщения, факты, задачи планировщика, уведомления и т.д.) объявлены с ON DELETE CASCADE и
-// удаляются на уровне БД атомарно. Журналы при этом сохраняются: в mem.tool_calls ссылка на пользователя
-// обнуляется правилом ON DELETE SET NULL, а журнал LLM-запросов живёт в отдельной БД логов без внешних
-// ключей на mem.users. Возвращает true, если пользователь существовал и был удалён.
+// Full deletion of a user with all their data. A single DELETE on mem.users: related tables (dialogs,
+// messages, facts, scheduler tasks, notifications, etc.) are declared with ON DELETE CASCADE and are
+// removed atomically at the DB level. Logs are preserved: in mem.tool_calls the user reference is nulled
+// by an ON DELETE SET NULL rule, and the LLM request journal lives in a separate log DB with no foreign
+// keys to mem.users. Returns true if the user existed and was deleted.
 export async function deleteUser(userId) {
   const { rowCount } = await query('DELETE FROM mem.users WHERE id = $1', [userId]);
   return rowCount > 0;

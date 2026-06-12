@@ -1,20 +1,20 @@
-// Экспериментальный модуль распознавания речи (речь в текст, STT).
-// Назначение: получить на вход один готовый аудио- или видеофайл (как его присылает Telegram —
-// голосовое сообщение в формате OGG/OPUS, видео-кружок в формате MP4, аудиофайл или видеофайл)
-// и прогнать его через несколько облачных распознавателей, замерив время и показав результат.
+// Experimental speech recognition module (speech to text, STT).
+// Purpose: take one finished audio or video file as input (as Telegram sends it —
+// a voice message in OGG/OPUS format, a video note in MP4 format, an audio file or a video file)
+// and run it through several cloud recognizers, measuring time and showing the result.
 //
-// Проверяемые модели:
-//   AssemblyAI  : universal-2          (распознавание готового файла, поддержка русского)
-//   OpenAI      : gpt-4o-transcribe, gpt-4o-mini-transcribe   (через прокси litellm.my-proxy.com)
-//   Groq        : whisper-large-v3, whisper-large-v3-turbo    (напрямую через api.groq.com)
+// Models under test:
+//   AssemblyAI  : universal-2          (pre-recorded file transcription, Russian supported)
+//   OpenAI      : gpt-4o-transcribe, gpt-4o-mini-transcribe   (via the litellm.my-proxy.com proxy)
+//   Groq        : whisper-large-v3, whisper-large-v3-turbo    (directly via api.groq.com)
 //
-// Запуск: node scripts/stt-experiment.js путь/к/файлу [код_языка]
-//   код_языка необязателен (по умолчанию «ru»). Влияет на OpenAI и Groq; для AssemblyAI включается
-//   автоопределение языка.
+// Run: node scripts/stt-experiment.js path/to/file [language_code]
+//   language_code is optional (defaults to "ru"). Affects OpenAI and Groq; for AssemblyAI automatic
+//   language detection is enabled.
 //
-// Важное наблюдение: все перечисленные сервисы принимают сжатые форматы (ogg/opus, mp3, mp4, m4a, wav,
-// webm) напрямую, поэтому для пути «распознавание готового файла» внешняя утилита ffmpeg НЕ требуется.
-// ffmpeg нужен только для потокового whisper-rt, где на вход идёт сырой PCM.
+// Important observation: all the listed services accept compressed formats (ogg/opus, mp3, mp4, m4a, wav,
+// webm) directly, so the external ffmpeg utility is NOT required for the pre-recorded file path.
+// ffmpeg is only needed for streaming whisper-rt, which takes raw PCM as input.
 import { config } from '../src/config.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -23,7 +23,7 @@ const FILE = process.argv[2];
 const LANG = process.argv[3] || 'ru';
 
 if (!FILE) {
-  console.error('Укажите путь к аудио- или видеофайлу: node scripts/stt-experiment.js путь/к/файлу [код_языка]');
+  console.error('Provide a path to an audio or video file: node scripts/stt-experiment.js path/to/file [language_code]');
   process.exit(1);
 }
 
@@ -31,7 +31,7 @@ const OPENAI_BASE = (config.llm.baseURL || '').replace(/\/$/, '');
 const GROQ_BASE = (config.providers.groqBaseURL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
 const AAI_BASE = 'https://api.assemblyai.com';
 
-// Угадать MIME-тип по расширению, чтобы корректно подписать файл в multipart-запросе.
+// Guess the MIME type by extension to label the file correctly in the multipart request.
 function guessMime(file) {
   const ext = path.extname(file).toLowerCase();
   const map = {
@@ -49,7 +49,7 @@ function guessMime(file) {
   return map[ext] || 'application/octet-stream';
 }
 
-// --- Распознавание через OpenAI-совместимый интерфейс (подходит и для прокси, и для Groq) -------------
+// --- Transcription via the OpenAI-compatible interface (works for both the proxy and Groq) ------------
 async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fileName, language }) {
   const form = new FormData();
   form.append('file', new Blob([fileBuf], { type: guessMime(fileName) }), path.basename(fileName));
@@ -59,7 +59,7 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
   }
   form.append('response_format', 'json');
 
-  // Прокси иногда обрывает соединение по тайм-ауту (UND_ERR_CONNECT_TIMEOUT) — делаем несколько повторов.
+  // The proxy occasionally drops the connection on a timeout (UND_ERR_CONNECT_TIMEOUT) — retry a few times.
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const started = Date.now();
@@ -80,18 +80,18 @@ async function transcribeOpenAICompatible({ baseURL, apiKey, model, fileBuf, fil
       lastErr = err;
       const cause = err.cause ? ` (${err.cause.code || err.cause.message})` : '';
       if (attempt < 3) {
-        process.stdout.write(`повтор ${attempt}${cause}… `);
+        process.stdout.write(`retry ${attempt}${cause}… `);
       }
     }
   }
   throw lastErr;
 }
 
-// --- Распознавание через AssemblyAI (загрузка файла, создание задачи, опрос готовности) ---------------
+// --- Transcription via AssemblyAI (file upload, job creation, polling for completion) -----------------
 async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   const started = Date.now();
 
-  // Шаг 1: загрузка файла. Заголовок авторизации у AssemblyAI — сам ключ без префикса Bearer.
+  // Step 1: upload the file. AssemblyAI's authorization header is the key itself, no Bearer prefix.
   const up = await fetch(`${AAI_BASE}/v2/upload`, {
     method: 'POST',
     headers: { Authorization: apiKey, 'Content-Type': 'application/octet-stream' },
@@ -102,10 +102,10 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   }
   const { upload_url: uploadUrl } = await up.json();
 
-  // Шаг 2: создание задачи распознавания. Модель universal-2 поддерживает 99 языков, включая русский.
-  // Параметр speech_model устарел; текущий интерфейс принимает приоритетный список speech_models.
-  // Берём universal-2, так как universal-3-pro русский язык не поддерживает.
-  // Включаем автоопределение языка; код языка передаётся подсказкой через language_code, если задан.
+  // Step 2: create the transcription job. The universal-2 model supports 99 languages, including Russian.
+  // The speech_model parameter is deprecated; the current interface takes a priority list speech_models.
+  // We use universal-2 because universal-3-pro does not support Russian.
+  // Language auto-detection is enabled; the language code is passed as a hint via language_code if set.
   const body = { audio_url: uploadUrl, speech_models: ['universal-2'] };
   if (language) {
     body.language_code = language;
@@ -122,7 +122,7 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
   }
   const created = await cr.json();
 
-  // Шаг 3: опрос готовности раз в секунду, пока статус не станет completed или error.
+  // Step 3: poll once a second until the status becomes completed or error.
   for (;;) {
     await new Promise((r) => setTimeout(r, 1000));
     const pr = await fetch(`${AAI_BASE}/v2/transcript/${created.id}`, { headers: { Authorization: apiKey } });
@@ -134,12 +134,12 @@ async function transcribeAssemblyAI({ apiKey, fileBuf, language }) {
       return { elapsedMs: Date.now() - started, text: t.text };
     }
     if (t.status === 'error') {
-      throw new Error(`распознавание не удалось: ${t.error}`);
+      throw new Error(`transcription failed: ${t.error}`);
     }
   }
 }
 
-// --- Перечень проверяемых распознавателей ------------------------------------------------------------
+// --- List of recognizers under test -------------------------------------------------------------------
 function buildTargets() {
   const targets = [];
   if (config.providers.assemblyaiApiKey) {
@@ -186,33 +186,33 @@ function buildTargets() {
 async function main() {
   const fileBuf = await readFile(FILE);
   const sizeKb = (fileBuf.length / 1024).toFixed(1);
-  console.log(`Файл: ${FILE} (${sizeKb} КБ, тип «${guessMime(FILE)}»), язык-подсказка: ${LANG}\n`);
+  console.log(`File: ${FILE} (${sizeKb} KB, type "${guessMime(FILE)}"), language hint: ${LANG}\n`);
 
   const targets = buildTargets();
   const summary = [];
-  // Запускаем распознаватели по очереди (а не параллельно), чтобы замеры времени не влияли друг на друга
-  // через общий сетевой канал и ограничения прокси.
+  // Run the recognizers one by one (not in parallel) so the time measurements do not affect each other
+  // through the shared network channel and proxy limits.
   for (const target of targets) {
-    process.stdout.write(`[${target.label}] распознаю… `);
+    process.stdout.write(`[${target.label}] transcribing… `);
     try {
       const { elapsedMs, text } = await target.run(fileBuf, FILE);
-      console.log(`готово за ${elapsedMs} мс`);
-      console.log(`   текст: ${text}\n`);
+      console.log(`done in ${elapsedMs} ms`);
+      console.log(`   text: ${text}\n`);
       summary.push({ label: target.label, ms: elapsedMs, ok: true, text });
     } catch (err) {
-      console.log(`ОШИБКА: ${err.message}\n`);
+      console.log(`ERROR: ${err.message}\n`);
       summary.push({ label: target.label, ms: null, ok: false, text: err.message });
     }
   }
 
-  console.log('================ Сводка ================');
+  console.log('================ Summary ================');
   for (const s of summary) {
-    const time = s.ok ? `${String(s.ms).padStart(6)} мс` : '   —    ';
-    console.log(`${s.label.padEnd(34)} ${s.ok ? 'OK ' : 'ОШ '} ${time}`);
+    const time = s.ok ? `${String(s.ms).padStart(6)} ms` : '   —    ';
+    console.log(`${s.label.padEnd(34)} ${s.ok ? 'OK ' : 'ERR'} ${time}`);
   }
 }
 
 main().catch((err) => {
-  console.error('Критическая ошибка эксперимента распознавания:', err);
+  console.error('Fatal error in the STT experiment:', err);
   process.exit(1);
 });

@@ -33,7 +33,7 @@ export async function runEmbeddingRepairOnce() {
     repaired += 1;
   }
   if (repaired > 0) {
-    console.log(`[embedding-repair] Пересчитаны эмбеддинги базы знаний: ${repaired} из ${rows.length} записей.`);
+    console.log(`[embedding-repair] Recomputed knowledge base embeddings: ${repaired} of ${rows.length} records.`);
   }
   return { pending: rows.length, repaired };
 }
@@ -47,11 +47,11 @@ export function startEmbeddingRepair() {
   }
   const intervalMs = Math.max(60_000, Number(config.globalMemory.embeddingRepairIntervalMs) || 600_000);
   runEmbeddingRepairOnce().catch((err) => {
-    console.warn(`[embedding-repair] Стартовый проход не удался: ${String(err.message || err)}`);
+    console.warn(`[embedding-repair] Initial pass failed: ${String(err.message || err)}`);
   });
   timer = setInterval(() => {
     runEmbeddingRepairOnce().catch((err) => {
-      console.warn(`[embedding-repair] Очередной проход не удался: ${String(err.message || err)}`);
+      console.warn(`[embedding-repair] Periodic pass failed: ${String(err.message || err)}`);
     });
   }, intervalMs);
   if (typeof timer.unref === 'function') {

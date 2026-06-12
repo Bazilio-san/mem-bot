@@ -21,13 +21,13 @@ export const AGENT_EVENTS = Object.freeze({
   ASSISTANT_COMPLETED: 'assistant.completed',
   AGENT_COMPLETED: 'agent.completed',
   AGENT_FAILED: 'agent.failed',
-  // Итог стадии поиска памяти: извлечённые классификатором сущности, статистика сущностного буста
-  // и размеры групп выдачи retrieveMemory. Отдельное событие, потому что строка stage.started
-  // отображается в просмотрщике без тела (body: null) и данные в ней были бы не видны.
+  // Summary of the memory retrieval stage: entities extracted by the classifier, entity boost stats
+  // and the sizes of the retrieveMemory result groups. A separate event because the stage.started row
+  // is displayed in the viewer without a body (body: null), so any data in it would not be visible.
   MEMORY_RETRIEVED: 'memory.retrieved',
-  // Итог записи фактов в долговременную память (writeJob основного хода и путь реакций).
+  // Summary of writing facts to long-term memory (the main-turn writeJob and the reactions path).
   MEMORY_WRITTEN: 'memory.written',
-  // Итог фоновой чистки дубликатов памяти (dedupeFactsSweep): задача планировщика и ручной скрипт.
+  // Summary of the background memory duplicate sweep (dedupeFactsSweep): scheduler task and manual script.
   MEMORY_SWEEP: 'memory.sweep',
 });
 
@@ -43,7 +43,7 @@ export const EVENT_DISPLAY = Object.freeze({
   'memory.sweep': 'JSON',
   'mcp.connected': 'JSON',
   'mcp.failed': 'JSON',
-  // Текст ответа в формате канала (HTML/MD/plain) — автодетекция.
+  // Reply text in the channel format (HTML/MD/plain) — auto-detection.
   'assistant.completed': null,
 });
 

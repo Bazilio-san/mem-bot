@@ -35,9 +35,9 @@ function newRequestId() {
   return `llm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// Итог записи фактов в долговременную память — событие memory.written. Пишется и при пустом списке
-// (created=0 … — видно, что извлечение отработало и ничего не нашло). durationMs — длительность всего
-// writeJob; счётчики по действиям saveFacts; список фактов компактный (текст обрезан).
+// Outcome of writing facts to long-term memory — the memory.written event. Logged even for an empty list
+// (created=0 … — shows the extraction ran and found nothing). durationMs is the duration of the whole
+// writeJob; counters follow the saveFacts actions; the fact list is compact (text truncated).
 function logMemoryWritten({ facts = [], results = [], startedAt, error = null }) {
   const counts = { created: 0, confirmed: 0, replaced: 0, skipped: 0, errors: 0 };
   const items = (results || []).map((r, i) => {
@@ -371,9 +371,9 @@ export async function handleMessage({
   stream = false,
 }) {
   const streamingOn = stream && config.streaming.enabled;
-  // Время получения фразы пользователя. Сама строка сообщения пишется в БД только в конце конвейера
-  // (стадия 4), поэтому без явного created_at она получила бы время ПОСЛЕ всех событий цикла и ломала бы
-  // хронологию ленты чата и просмотрщика логов.
+  // Time the user's message was received. The message row itself is written to the DB only at the end of
+  // the pipeline (stage 4), so without an explicit created_at it would get a timestamp AFTER all events of
+  // the cycle and break the chronology of the chat timeline and the log viewer.
   const receivedAt = new Date();
   // Correlation metadata for the LLM request log. requestId groups all calls of one dialog turn
   // (classification, the main answer, fact extraction, etc.). The format matches what is shown in the
@@ -755,7 +755,7 @@ ${activeSkill.skillPrompt}`,
     const turnMetadata = { request_id: llmMeta.requestId };
     const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage, {
       metadata: turnMetadata,
-      // Реальное время получения фразы — а не момент INSERT в конце конвейера.
+      // The actual time the message was received — not the INSERT moment at the end of the pipeline.
       createdAt: receivedAt,
     });
     // Widget descriptors from tool results (MCP Apps: structuredContent.widget) go into the assistant
@@ -766,21 +766,21 @@ ${activeSkill.skillPrompt}`,
     });
 
     // Stage 5: extracting and writing facts. Asynchronous by default (does not slow down the response).
-    // Источник фактов — ТОЛЬКО реплики пользователя. Полный текст ответа ассистента в контекст
-    // извлечения не попадает: вместо него используется короткое саммари без HTML (защита от
-    // лавинообразного повторного извлечения фактов, которые бот сам перечислил в ответе).
+    // The source of facts is ONLY the user's utterances. The full assistant answer text never enters the
+    // extraction context: a short HTML-free summary is used instead (protection against an avalanche of
+    // re-extracting facts that the bot itself listed in its answer).
     const writeJob = (async () => {
       const writeStartedAt = Date.now();
       let extracted = [];
       let saved = null;
       try {
-        // Саммари ТЕКУЩЕГО ответа — в metadata сообщения ассистента; пригодится на следующем ходе.
+        // The summary of the CURRENT answer goes into the assistant message metadata; used on the next turn.
         const answerSummary = await summarizeAnswer(answer);
         if (answerSummary) {
           await setMessageSummary(assistantMessageRow.id, answerSummary);
         }
-        // Контекст реплики пользователя — ответ ассистента, на который он отвечал (последний
-        // assistant из истории ДО текущего хода): саммари из metadata, фолбэк — очищенный текст.
+        // The context of the user's utterance is the assistant answer it replied to (the last
+        // assistant message in the history BEFORE the current turn): summary from metadata, fallback — stripped text.
         const prevAssistant = [...history].reverse().find((m) => m.role === 'assistant');
         const prevSummary = prevAssistant
           ? prevAssistant.metadata?.summary || stripHtml(prevAssistant.content).slice(0, config.facts.summaryMaxChars)
@@ -931,8 +931,8 @@ export async function recordUserReaction({
 
     let memoryWrites = null;
     if (reactionKey && targetMessage?.role === 'assistant') {
-      // Цель реакции — сообщение ассистента: оно подаётся как контекст в теге <assistant> (без HTML),
-      // а извлечение работает только по реплике пользователя с описанием реакции.
+      // The reaction target is an assistant message: it is fed as context in the <assistant> tag (without HTML),
+      // while extraction works only on the user's utterance describing the reaction.
       const writeJob = (async () => {
         const writeStartedAt = Date.now();
         let extracted = [];

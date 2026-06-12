@@ -282,8 +282,8 @@ function factsToCandidates(facts = []) {
     .filter((c) => c.fact_text && !f_isSensitive(c.fact_text));
 }
 
-// Страховка от секретов в фактах суммаризатора: системный промпт запрещает их, но при срабатывании
-// эвристики факт просто не пишется в долговременную память (в дайджест он тоже не попадает).
+// Safety net against secrets in the summarizer's facts: the system prompt forbids them, but when the
+// heuristic fires the fact is simply not written to long-term memory (nor does it get into the digest).
 function f_isSensitive(text) {
   return /паспорт|карт[аы]\s*№|cvv|пин-?код/i.test(text);
 }

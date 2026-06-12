@@ -1,24 +1,24 @@
-// Экспериментальный модуль синтеза речи (текст в речь, TTS).
-// Назначение: проверить, отдаёт ли OpenAI-совместимый прокси litellm.my-proxy.com конечную точку audio/speech,
-// и в первую очередь модель gpt-4o-mini-tts, а также сравнить её с запасными вариантами.
-// Запуск: node scripts/tts-experiment.js ["произвольный текст для озвучивания"]
+// Experimental speech synthesis module (text to speech, TTS).
+// Purpose: check whether the OpenAI-compatible proxy litellm.my-proxy.com exposes the audio/speech endpoint,
+// primarily the gpt-4o-mini-tts model, and compare it with the fallback options.
+// Run: node scripts/tts-experiment.js ["arbitrary text to synthesize"]
 //
-// Для каждой модели замеряется время синтеза, проверяется, что вернулись непустые аудиоданные,
-// и результат сохраняется в каталог _tmp/ для прослушивания. Ошибки каждой модели перехватываются
-// по отдельности, чтобы сбой одной не мешал проверить остальные.
+// For each model the synthesis time is measured, the response is checked for non-empty audio data,
+// and the result is saved into the _tmp/ directory for listening. Errors of each model are caught
+// individually so that one failure does not prevent checking the others.
 import { config } from '../src/config.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const OUT_DIR = path.resolve('_tmp/tts');
 
-// Текст по умолчанию на русском — именно поддержку русского нам и нужно подтвердить.
+// Default text is in Russian — Russian support is exactly what we need to confirm.
 const DEFAULT_TEXT =
   process.argv[2] || 'Привет! Это проверка синтеза речи. Если вы слышите этот текст по-русски, значит синтез работает.';
 
-// Перечень проверяемых конфигураций синтеза. Каждая описывает поставщика, базовый адрес, ключ и модель.
-// Замечание по именам моделей: прокси litellm.my-proxy.com использует имена с префиксом поставщика,
-// поэтому модель называется «openai/gpt-4o-mini-tts», а не «gpt-4o-mini-tts».
+// List of synthesis configurations to test. Each one describes a provider, base URL, key and model.
+// Note on model names: the litellm.my-proxy.com proxy uses provider-prefixed names,
+// so the model is called "openai/gpt-4o-mini-tts", not "gpt-4o-mini-tts".
 const TARGETS = [
   {
     label: 'proxy/openai/gpt-4o-mini-tts (opus)',
@@ -26,7 +26,7 @@ const TARGETS = [
     apiKey: config.llm.apiKey,
     model: 'openai/gpt-4o-mini-tts',
     voice: 'ash',
-    format: 'opus', // Telegram sendVoice ожидает OGG/OPUS — проверяем именно этот формат
+    format: 'opus', // Telegram sendVoice expects OGG/OPUS — this is the exact format we test
   },
   {
     label: 'proxy/openai/gpt-4o-mini-tts (mp3)',
@@ -34,7 +34,7 @@ const TARGETS = [
     apiKey: config.llm.apiKey,
     model: 'openai/gpt-4o-mini-tts',
     voice: 'ash',
-    format: 'mp3', // запасной формат на случай, если прокси не поддерживает opus
+    format: 'mp3', // fallback format in case the proxy does not support opus
   },
   {
     label: 'proxy/openai/tts-1 (opus)',
@@ -46,7 +46,7 @@ const TARGETS = [
   },
 ];
 
-// Один вызов синтеза напрямую через HTTP (без SDK), чтобы точно видеть исходный ответ прокси и коды ошибок.
+// One synthesis call directly over HTTP (no SDK), so we see the raw proxy response and error codes exactly.
 async function synthesize(target, text) {
   const url = `${target.baseURL.replace(/\/$/, '')}/audio/speech`;
   const started = Date.now();
@@ -74,12 +74,12 @@ async function synthesize(target, text) {
 
 async function main() {
   await mkdir(OUT_DIR, { recursive: true });
-  console.log(`Текст для озвучивания: «${DEFAULT_TEXT}»`);
-  console.log(`Каталог для результатов: ${OUT_DIR}\n`);
+  console.log(`Text to synthesize: "${DEFAULT_TEXT}"`);
+  console.log(`Output directory: ${OUT_DIR}\n`);
 
   for (const target of TARGETS) {
     if (!target.apiKey) {
-      console.log(`[${target.label}] пропуск: не задан ключ доступа.`);
+      console.log(`[${target.label}] skipped: no API key configured.`);
       continue;
     }
     try {
@@ -88,17 +88,17 @@ async function main() {
       const outPath = path.join(OUT_DIR, `${target.label.replace(/[^\w.-]+/g, '_')}.${ext}`);
       await writeFile(outPath, buf);
       console.log(
-        `[${target.label}] УСПЕХ за ${elapsedMs} мс: получено ${buf.length} байт ` +
-          `(тип содержимого «${contentType}»), сохранено в ${outPath}.`,
+        `[${target.label}] SUCCESS in ${elapsedMs} ms: received ${buf.length} bytes ` +
+          `(content type "${contentType}"), saved to ${outPath}.`,
       );
     } catch (err) {
-      const cause = err.cause ? ` (причина: ${err.cause.code || err.cause.message})` : '';
-      console.log(`[${target.label}] ОШИБКА: ${err.message}${cause}`);
+      const cause = err.cause ? ` (cause: ${err.cause.code || err.cause.message})` : '';
+      console.log(`[${target.label}] ERROR: ${err.message}${cause}`);
     }
   }
 }
 
 main().catch((err) => {
-  console.error('Критическая ошибка эксперимента синтеза речи:', err);
+  console.error('Fatal error in the TTS experiment:', err);
   process.exit(1);
 });

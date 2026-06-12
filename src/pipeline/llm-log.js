@@ -19,7 +19,7 @@ export const REQUEST_KINDS = Object.freeze({
   DELIVERY_INTENT: 'delivery_intent',
   INTENT_CLASSIFY: 'intent_classify',
   FACT_EXTRACT: 'fact_extract',
-  // Саммари ответа ассистента (хранится в metadata сообщения; контекст извлечения фактов).
+  // Assistant answer summary (stored in the message metadata; fact extraction context).
   ANSWER_SUMMARY: 'answer_summary',
   TOPIC_EXTRACT: 'topic_extract',
   EVENT_RELEVANCE: 'event_relevance',

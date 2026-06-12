@@ -1,7 +1,7 @@
-// Конфигурация сборщика Vite для админки. В режиме разработки (npm run web:dev) поднимается сервер с
-// мгновенной горячей заменой модулей, а все запросы к /api проксируются на бэкенд (объединённый сервер
-// src/server/index.js), чтобы фронтенд и API выглядели для браузера одним адресом без настройки CORS.
-// При сборке (npm run web:build) результат кладётся в web/dist — этот каталог отдаёт express в продакшене.
+// Vite bundler configuration for the admin panel. In development mode (npm run web:dev) a server with
+// instant hot module replacement is started, and all /api requests are proxied to the backend (the combined
+// server src/server/index.js) so the frontend and API look like a single origin to the browser without CORS setup.
+// On build (npm run web:build) the result goes into web/dist — express serves that directory in production.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
@@ -12,8 +12,8 @@ const adminEntry = path.resolve(__dirname, 'src/main.js').replace(/\\/g, '/');
 const miniappEntry = path.resolve(__dirname, 'src/miniapp-notes.js').replace(/\\/g, '/');
 const normalizeModuleId = (id) => id.replace(/\\/g, '/');
 
-// Адрес бэкенда для проксирования API в режиме разработки. Порт должен совпадать с config.admin.port
-// (по умолчанию 9019). При необходимости переопределяется переменной окружения VITE_API_TARGET.
+// Backend address for proxying the API in development mode. The port must match config.admin.port
+// (9019 by default). Can be overridden with the VITE_API_TARGET environment variable if needed.
 const API_TARGET = process.env.VITE_API_TARGET || 'http://localhost:9019';
 
 // oxlint-disable-next-line import/no-default-export
@@ -33,17 +33,17 @@ export default defineConfig({
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
-      // Две страницы: SPA админки (index.html) и Telegram Mini App заметок (miniapp/notes.html).
-      // Mini App попадает в dist/miniapp/notes.html и отдаётся express по маршруту /miniapp/notes.
+      // Two pages: the admin SPA (index.html) and the notes Telegram Mini App (miniapp/notes.html).
+      // The Mini App ends up in dist/miniapp/notes.html and is served by express at /miniapp/notes.
       input: {
         index: path.resolve(__dirname, 'index.html'),
         'miniapp-notes': path.resolve(__dirname, 'miniapp/notes.html'),
       },
       output: {
         chunkFileNames: 'assets/[name]-[hash].js',
-        // Библиотека компонентов PrimeVue вместе с темой выносится в отдельный чанк vendor-primevue.
-        // Она меняется редко (только при обновлении версии), поэтому браузер кэширует её отдельно от
-        // кода приложения, а сам бандл приложения остаётся небольшим и пересобирается без перезагрузки темы.
+        // The PrimeVue component library together with its theme goes into a separate vendor-primevue chunk.
+        // It changes rarely (only on a version upgrade), so the browser caches it separately from the
+        // application code, and the app bundle itself stays small and rebuilds without reloading the theme.
         manualChunks(id) {
           const moduleId = normalizeModuleId(id);
           if (moduleId.startsWith(adminEntry)) {

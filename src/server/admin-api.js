@@ -225,7 +225,7 @@ export function createAdminApi() {
           userMessage: text,
           channel: 'admin',
           stream: true,
-          // Кадры статуса минимальны: фронту нужны только заголовок текущего шага и куски текста.
+          // Status frames are minimal: the frontend only needs the current step's title and chunks of text.
           onEvent: (event) => {
             if (event.type === 'stage.started') {
               send({ type: 'status', title: event.title });

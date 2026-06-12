@@ -96,18 +96,19 @@ export function buildSchema(routeNames) {
   };
 }
 
+const ds = '  '; // double space
 // System prompt: a markdown list of skills with a usage rule for each one. Signal values come from
 // SKILL.md frontmatter and stay in the language users actually type them in (mostly Russian).
 function buildSystemPrompt(routes) {
   const list = routes
     .map((r) => {
-      const pos = r.positive_signals?.length ? `\n**Positive signals**: ${r.positive_signals.join('; ')}` : '';
-      const neg = r.negative_signals?.length ? `\n**Negative signals**: ${r.negative_signals.join('; ')}` : '';
+      const pos = r.positive_signals?.length ? `\n**Positive signals**: ${r.positive_signals.join('; ')}${ds}` : '';
+      const neg = r.negative_signals?.length ? `\n**Negative signals**: ${r.negative_signals.join('; ')}${ds}` : '';
       return `### ${r.name}
 
-**domain**: ${r.domain_key}
-**Purpose**: ${r.description}
-**When to use**: ${r.when_to_use}${pos}${neg}`;
+**domain**: ${r.domain_key}${ds}
+**Purpose**: ${r.description}${ds}
+**When to use**: ${r.when_to_use}${pos}${neg}${ds}`;
     })
     .join('\n\n');
   return `You are the incoming-message classifier for an agent application with memory.

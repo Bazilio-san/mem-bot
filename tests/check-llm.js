@@ -1,22 +1,22 @@
-// Проверка доступности и поведения моделей на LLM-провайдерах и сравнение их скорости.
-// Список провайдеров задаётся константой PROVIDERS ниже. Запуск: node tests/check-llm.js
-// Для каждого провайдера проверяется: обычный чат, структурный вывод JSON, вызов инструмента, эмбеддинги.
-// В конце выводится сравнительная таблица времени отклика — главный интересующий нас показатель.
+// Check of model availability and behavior across LLM providers, plus a speed comparison.
+// The provider list is set by the PROVIDERS constant below. Run: node tests/check-llm.js
+// For each provider we check: plain chat, structured JSON output, tool calling, embeddings.
+// At the end a response-time comparison table is printed — the main metric we care about.
 import OpenAI from 'openai';
 import { config } from '../src/config.js';
 
-// ====== Провайдеры и проверяемые модели ======
-// Каждый провайдер — это свой клиент (свой ключ и базовый адрес) и своя модель.
-// Cerebras работает по тому же протоколу, что и OpenAI, поэтому используется тот же клиент OpenAI,
-// у которого подменены apiKey и baseURL.
+// ====== Providers and models under test ======
+// Each provider is its own client (its own key and base URL) and its own model.
+// Cerebras speaks the same protocol as OpenAI, so the same OpenAI client is used
+// with apiKey and baseURL swapped out.
 const PROVIDERS = [
   {
-    // Когда OPENAI_BASE_URL не задан, прокси не используется и клиент идёт напрямую к OpenAI.
-    label: config.llm.baseURL ? 'LiteLLM-прокси' : 'OpenAI напрямую',
+    // When OPENAI_BASE_URL is not set, the proxy is not used and the client goes directly to OpenAI.
+    label: config.llm.baseURL ? 'LiteLLM proxy' : 'OpenAI direct',
     model: process.env.MAIN_MODEL || 'gpt-5.4-mini',
     apiKey: config.llm.apiKey,
     baseURL: config.llm.baseURL,
-    // Модель эмбеддингов (для последнего теста). null — пропустить проверку эмбеддингов.
+    // Embedding model (for the last test). null — skip the embeddings check.
     embedModel: 'text-embedding-3-small',
   },
   {
@@ -24,13 +24,13 @@ const PROVIDERS = [
     model: 'gpt-oss-120b',
     apiKey: process.env.CEREBRAS_API_KEY,
     baseURL: process.env.CEREBRAS_BASE_URL || 'https://api.cerebras.ai/v1',
-    // У Cerebras нет API эмбеддингов — проверку пропускаем.
+    // Cerebras has no embeddings API — skip the check.
     embedModel: null,
   },
 ];
 // ============================================
 
-// Один прогон набора проверок для одного провайдера. Возвращает счётчики и замеры времени.
+// One run of the check suite for one provider. Returns counters and time measurements.
 async function runSuite(provider) {
   const client = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
   const MODEL = provider.model;
@@ -50,43 +50,43 @@ async function runSuite(provider) {
     }
   }
 
-  // Замер времени одного запроса. Возвращает результат, печатает и копит длительность.
+  // Time one request. Returns the result, prints and accumulates the duration.
   async function timed(label, fn) {
     const t0 = performance.now();
     try {
       const res = await fn();
       const ms = Math.round(performance.now() - t0);
       timings.push({ label, ms });
-      console.log(`     время ответа: ${ms} мс`);
+      console.log(`     response time: ${ms} ms`);
       return res;
     } catch (err) {
-      // Ошибочный запрос не участвует в сравнении скорости: время до ошибки не показательно.
-      // Поэтому в timings его не добавляем — в таблице сравнения у такого запроса будет прочерк.
+      // A failed request does not take part in the speed comparison: time-to-error is not representative.
+      // So we do not add it to timings — the comparison table shows a dash for such a request.
       const ms = Math.round(performance.now() - t0);
-      console.log(`     время до ошибки: ${ms} мс`);
+      console.log(`     time to error: ${ms} ms`);
       throw err;
     }
   }
 
   async function checkChat() {
-    console.log('\n[1] Обычный чат');
+    console.log('\n[1] Plain chat');
     try {
-      const res = await timed('чат', () =>
+      const res = await timed('chat', () =>
         client.chat.completions.create({
           model: MODEL,
           messages: [{ role: 'user', content: 'Ответь одним словом: привет' }],
         }),
       );
       const text = res.choices?.[0]?.message?.content || '';
-      console.log('     ответ:', JSON.stringify(text).slice(0, 120));
-      ok('Чат отвечает', text.length > 0);
+      console.log('     answer:', JSON.stringify(text).slice(0, 120));
+      ok('Chat responds', text.length > 0);
     } catch (err) {
-      ok('Чат отвечает', false, err.message);
+      ok('Chat responds', false, err.message);
     }
   }
 
   async function checkJsonObject() {
-    console.log('\n[2] Структурный вывод (json_object)');
+    console.log('\n[2] Structured output (json_object)');
     try {
       const res = await timed('json_object', () =>
         client.chat.completions.create({
@@ -99,15 +99,15 @@ async function runSuite(provider) {
         }),
       );
       const obj = JSON.parse(res.choices[0].message.content);
-      console.log('     объект:', JSON.stringify(obj).slice(0, 160));
-      ok('Возвращает валидный JSON-объект', typeof obj === 'object' && obj !== null);
+      console.log('     object:', JSON.stringify(obj).slice(0, 160));
+      ok('Returns a valid JSON object', typeof obj === 'object' && obj !== null);
     } catch (err) {
-      ok('Возвращает валидный JSON-объект', false, err.message);
+      ok('Returns a valid JSON object', false, err.message);
     }
   }
 
   async function checkJsonSchema() {
-    console.log('\n[3] Строгий json_schema (часто не работает на прокси)');
+    console.log('\n[3] Strict json_schema (often broken on proxies)');
     try {
       const res = await timed('json_schema', () =>
         client.chat.completions.create({
@@ -129,18 +129,18 @@ async function runSuite(provider) {
         }),
       );
       const obj = JSON.parse(res.choices[0].message.content);
-      ok('json_schema strict поддержан', typeof obj.answer === 'string');
+      ok('json_schema strict supported', typeof obj.answer === 'string');
     } catch (err) {
-      // Не провал модели как таковой — просто фиксируем, что строгий режим недоступен.
-      console.log('     строгий режим недоступен:', err.message.slice(0, 140));
-      ok('json_schema strict поддержан (опционально)', false, 'используй json_object');
+      // Not a failure of the model as such — we just record that strict mode is unavailable.
+      console.log('     strict mode unavailable:', err.message.slice(0, 140));
+      ok('json_schema strict supported (optional)', false, 'use json_object');
     }
   }
 
   async function checkJsonSchemaFreeform() {
-    console.log('\n[3b] Строгий json_schema со СВОБОДНЫМ полем (additionalProperties:true)');
-    // Проверяем конкретное утверждение: строгий режим отвергает схемы, где у вложенного
-    // объекта additionalProperties=true (как у наших полей data/entities). Ожидаем ошибку.
+    console.log('\n[3b] Strict json_schema with a FREE-FORM field (additionalProperties:true)');
+    // We verify a specific claim: strict mode rejects schemas where a nested object has
+    // additionalProperties=true (like our data/entities fields). An error is expected.
     try {
       const res = await timed('json_schema_freeform', () =>
         client.chat.completions.create({
@@ -155,7 +155,7 @@ async function runSuite(provider) {
                 additionalProperties: false,
                 required: ['data'],
                 properties: {
-                  // Свободное поле: произвольные ключи. Несовместимо со strict-режимом OpenAI.
+                  // Free-form field: arbitrary keys. Incompatible with OpenAI strict mode.
                   data: { type: 'object', additionalProperties: true },
                 },
               },
@@ -165,20 +165,20 @@ async function runSuite(provider) {
         }),
       );
       JSON.parse(res.choices[0].message.content);
-      // Если прошло — значит свободные поля в strict ДОПУСТИМЫ (утверждение неверно).
-      console.log('     свободное поле принято — strict со свободными полями работает');
-      ok('Свободное поле в strict ОТВЕРГАЕТСЯ (ожидаемо)', false, 'на самом деле принято');
+      // If it passed — free-form fields ARE allowed in strict (the claim is wrong).
+      console.log('     free-form field accepted — strict with free-form fields works');
+      ok('Free-form field in strict is REJECTED (expected)', false, 'actually accepted');
     } catch (err) {
-      console.log('     отклонено:', err.message.slice(0, 160));
-      // Ошибка ожидаема и подтверждает: причина — правило strict, а не модель.
-      ok('Свободное поле в strict ОТВЕРГАЕТСЯ (ожидаемо)', true);
+      console.log('     rejected:', err.message.slice(0, 160));
+      // The error is expected and confirms: the cause is the strict rule, not the model.
+      ok('Free-form field in strict is REJECTED (expected)', true);
     }
   }
 
   async function checkTool() {
-    console.log('\n[4] Вызов инструмента (function calling)');
+    console.log('\n[4] Tool call (function calling)');
     try {
-      const res = await timed('инструмент', () =>
+      const res = await timed('tool', () =>
         client.chat.completions.create({
           model: MODEL,
           tools: [
@@ -200,37 +200,37 @@ async function runSuite(provider) {
       );
       const calls = res.choices[0].message.tool_calls || [];
       if (calls.length) {
-        console.log('     вызов:', calls[0].function.name, calls[0].function.arguments.slice(0, 120));
+        console.log('     call:', calls[0].function.name, calls[0].function.arguments.slice(0, 120));
       }
-      ok('Модель вызывает инструмент', calls.length >= 1);
+      ok('Model calls the tool', calls.length >= 1);
     } catch (err) {
-      ok('Модель вызывает инструмент', false, err.message);
+      ok('Model calls the tool', false, err.message);
     }
   }
 
   async function checkEmbeddings() {
     if (!EMBED_MODEL) {
-      console.log('\n[5] Эмбеддинги — пропущено (провайдер не предоставляет эмбеддинги)');
+      console.log('\n[5] Embeddings — skipped (provider offers no embeddings)');
       return;
     }
-    console.log('\n[5] Эмбеддинги');
+    console.log('\n[5] Embeddings');
     try {
-      const res = await timed('эмбеддинги', () =>
+      const res = await timed('embeddings', () =>
         client.embeddings.create({ model: EMBED_MODEL, input: 'тест эмбеддинга' }),
       );
       const dim = res.data?.[0]?.embedding?.length || 0;
-      console.log('     размерность вектора:', dim);
-      ok(`Эмбеддинги работают (модель ${EMBED_MODEL})`, dim > 0);
+      console.log('     vector dimension:', dim);
+      ok(`Embeddings work (model ${EMBED_MODEL})`, dim > 0);
     } catch (err) {
-      ok(`Эмбеддинги работают (модель ${EMBED_MODEL})`, false, err.message);
+      ok(`Embeddings work (model ${EMBED_MODEL})`, false, err.message);
     }
   }
 
-  console.log(`\n############### Провайдер: ${provider.label} ###############`);
-  console.log(`Базовый адрес: ${provider.baseURL || 'по умолчанию (api.openai.com)'}`);
-  console.log(`Проверяемая модель: ${MODEL}`);
+  console.log(`\n############### Provider: ${provider.label} ###############`);
+  console.log(`Base URL: ${provider.baseURL || 'default (api.openai.com)'}`);
+  console.log(`Model under test: ${MODEL}`);
   if (!provider.apiKey) {
-    console.log('  ⚠️  Ключ доступа не задан — провайдер пропущен.');
+    console.log('  ⚠️  No API key configured — provider skipped.');
     return { provider, passed: 0, failed: 0, timings, skipped: true };
   }
 
@@ -241,7 +241,7 @@ async function runSuite(provider) {
   await checkTool();
   await checkEmbeddings();
 
-  console.log(`\n  Итог по «${provider.label}»: пройдено ${passed}, провалено ${failed}`);
+  console.log(`\n  Totals for "${provider.label}": passed ${passed}, failed ${failed}`);
   return { provider, passed, failed, timings, skipped: false };
 }
 
@@ -251,14 +251,14 @@ async function main() {
     results.push(await runSuite(provider));
   }
 
-  // Общий итог по числу пройденных и проваленных проверок.
+  // Overall totals of passed and failed checks.
   const totalPassed = results.reduce((s, r) => s + r.passed, 0);
   const totalFailed = results.reduce((s, r) => s + r.failed, 0);
-  console.log(`\n================ ИТОГ ================`);
-  console.log(`Пройдено: ${totalPassed}, провалено: ${totalFailed}`);
+  console.log(`\n================ TOTAL ================`);
+  console.log(`Passed: ${totalPassed}, failed: ${totalFailed}`);
 
-  // Сравнение скорости. Собираем все встретившиеся виды запросов и для каждого
-  // показываем время отклика каждого провайдера рядом — так видно, кто быстрее.
+  // Speed comparison. Collect every request kind we encountered and for each one
+  // show each provider's response time side by side — that makes it clear who is faster.
   const active = results.filter((r) => !r.skipped && r.timings.length);
   if (active.length) {
     const labels = [];
@@ -270,8 +270,8 @@ async function main() {
       }
     }
 
-    console.log(`\n============ СРАВНЕНИЕ СКОРОСТИ (мс) ============`);
-    const header = ['запрос'.padEnd(22), ...active.map((r) => r.provider.label.padStart(16))].join(' | ');
+    console.log(`\n============ SPEED COMPARISON (ms) ============`);
+    const header = ['request'.padEnd(22), ...active.map((r) => r.provider.label.padStart(16))].join(' | ');
     console.log(header);
     console.log('-'.repeat(header.length));
     for (const label of labels) {
@@ -283,7 +283,7 @@ async function main() {
       console.log(row.join(' | '));
     }
 
-    const avgRow = ['среднее'.padEnd(22)];
+    const avgRow = ['average'.padEnd(22)];
     for (const r of active) {
       const avg = Math.round(r.timings.reduce((s, t) => s + t.ms, 0) / r.timings.length);
       avgRow.push(String(avg).padStart(16));

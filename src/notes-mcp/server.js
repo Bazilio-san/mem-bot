@@ -235,7 +235,7 @@ export function buildNotesMcpServer() {
 
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     if (req.params.uri !== WIDGET_RESOURCE_URI) {
-      throw new Error(`Неизвестный ресурс: ${req.params.uri}`);
+      throw new Error(`Unknown resource: ${req.params.uri}`);
     }
     return {
       contents: [{ uri: WIDGET_RESOURCE_URI, mimeType: WIDGET_RESOURCE_MIME, text: readWidgetHtml() }],

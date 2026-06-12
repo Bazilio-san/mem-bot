@@ -412,7 +412,7 @@ async function sendWidgetButtons(chatId, result) {
       continue;
     }
     if (!w.miniAppUrl || !w.miniAppUrl.startsWith('https://')) {
-      console.error('notes: кнопка Mini App пропущена — notes.publicUrl не задан или не https.');
+      console.error('notes: Mini App button skipped — notes.publicUrl is not set or is not https.');
       continue;
     }
     const url = w.query ? `${w.miniAppUrl}?q=${encodeURIComponent(w.query)}` : w.miniAppUrl;

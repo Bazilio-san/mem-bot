@@ -1,43 +1,43 @@
-// Скрипт удаления одного или нескольких пользователей и всех связанных с ними сущностей из БД памяти.
+// Script that deletes one or more users and all their related entities from the memory DB.
 //
-// Пользователи ищутся по любому набору критериев: внутренний идентификатор (UUID),
-// внешний идентификатор (external_id), отображаемое имя (display_name) или префикс
-// внешнего идентификатора. Все совпадения объединяются и дедуплицируются по id.
-// Перед удалением выводится отчёт по количеству связанных строк.
+// Users are looked up by any combination of criteria: internal identifier (UUID),
+// external identifier (external_id), display name (display_name) or a prefix of the
+// external identifier. All matches are merged and deduplicated by id.
+// Before deletion a report with related row counts is printed.
 //
-// Большинство пользовательских таблиц объявлены с правилом ON DELETE CASCADE,
-// поэтому удаление строки из mem.users каскадно удаляет диалоги, сообщения,
-// сводки, элементы памяти, защищённые записи, задачи планировщика и их запуски,
-// уведомления, очередь заданий памяти, темы, триггеры проактивности и журнал событий.
+// Most user tables are declared with the ON DELETE CASCADE rule,
+// so deleting a row from mem.users cascades to conversations, messages,
+// summaries, memory items, secure records, scheduler tasks and their runs,
+// notifications, the memory job queue, topics, proactivity triggers and the event log.
 //
-// Исключения с правилом ON DELETE SET NULL (строки сохраняются, обнуляется лишь ссылка):
-//   - mem.tool_calls.user_id          — журнал вызовов инструментов остаётся для аналитики;
-//   - mem.global_facts.created_by     — глобальные факты остаются, теряется только авторство;
-//   - mem.global_knowledge.created_by — глобальная база знаний остаётся, теряется авторство.
+// Exceptions with the ON DELETE SET NULL rule (rows are kept, only the reference is nulled):
+//   - mem.tool_calls.user_id          — the tool call log is kept for analytics;
+//   - mem.global_facts.created_by     — global facts are kept, only authorship is lost;
+//   - mem.global_knowledge.created_by — the global knowledge base is kept, authorship is lost.
 //
-// Запуск (одиночное удаление):
+// Run (single deletion):
 //   node scripts/delete-user.js --external-id tg-123456789
 //   node scripts/delete-user.js --id 7f3c...-uuid
-//   node scripts/delete-user.js --name "Анна"
+//   node scripts/delete-user.js --name "Anna"
 //
-// Запуск (пакетное удаление):
+// Run (batch deletion):
 //   node scripts/delete-user.js --external-id tg-111,tg-222,tg-333
 //   node scripts/delete-user.js --external-id a --external-id b --id <uuid>
-//   node scripts/delete-user.js --prefix tg-               (все, чей external_id начинается с "tg-")
-//   node scripts/delete-user.js --prefix t --yes           (без интерактивного подтверждения)
+//   node scripts/delete-user.js --prefix tg-               (everyone whose external_id starts with "tg-")
+//   node scripts/delete-user.js --prefix t --yes           (no interactive confirmation)
 //
-// Запуск (удаление всех тестовых пользователей):
-//   node scripts/delete-user.js --test-users               (все, у кого mem.users.is_test = true)
-//   node scripts/delete-user.js --test-users --yes         (без интерактивного подтверждения)
+// Run (delete all test users):
+//   node scripts/delete-user.js --test-users               (everyone with mem.users.is_test = true)
+//   node scripts/delete-user.js --test-users --yes         (no interactive confirmation)
 //
-// Значения можно перечислять через запятую и повторять флаги — всё объединяется.
-// Без флага --yes скрипт запрашивает подтверждение и удаляет только при вводе "yes".
-// Всё удаление выполняется в одной транзакции: при ошибке изменения откатываются.
+// Values can be comma-separated and flags can be repeated — everything is merged.
+// Without the --yes flag the script asks for confirmation and deletes only when "yes" is typed.
+// The whole deletion runs in a single transaction: on error the changes are rolled back.
 
 import readline from 'node:readline';
 import { query, getPool, closePool } from '../src/db.js';
 
-// Разбить значение флага на части по запятой и убрать пустые/пробельные элементы.
+// Split a flag value by commas and drop empty/whitespace-only parts.
 function splitList(value) {
   return (value || '')
     .split(',')
@@ -45,8 +45,8 @@ function splitList(value) {
     .filter(Boolean);
 }
 
-// Разбор аргументов командной строки. Значения накапливаются в массивы,
-// чтобы поддержать и перечисление через запятую, и повторение флагов.
+// Command-line argument parsing. Values are accumulated into arrays
+// to support both comma-separated lists and repeated flags.
 function parseArgs(argv) {
   const args = { ids: [], externalIds: [], names: [], prefixes: [], testUsers: false, yes: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -68,12 +68,12 @@ function parseArgs(argv) {
   return args;
 }
 
-// Найти всех пользователей по объединённому набору критериев. Возвращает массив
-// уникальных строк (дедупликация по id). Бросает ошибку, если критерии не заданы.
+// Find all users by the combined set of criteria. Returns an array of
+// unique rows (deduplicated by id). Throws if no criteria are given.
 async function findUsers({ ids, externalIds, names, prefixes, testUsers }) {
   if (!ids.length && !externalIds.length && !names.length && !prefixes.length && !testUsers) {
     throw new Error(
-      'Не указан ни один критерий поиска. Используйте --id, --external-id, --name, --prefix или --test-users.',
+      'No search criteria specified. Use --id, --external-id, --name, --prefix or --test-users.',
     );
   }
 
@@ -97,7 +97,7 @@ async function findUsers({ ids, externalIds, names, prefixes, testUsers }) {
     addRows(rows);
   }
   for (const prefix of prefixes) {
-    // Экранируем спецсимволы LIKE (% и _), чтобы префикс трактовался буквально.
+    // Escape LIKE special characters (% and _) so the prefix is treated literally.
     const escaped = prefix.replace(/([%_\\])/g, '\\$1');
     const { rows } = await query("SELECT * FROM mem.users WHERE external_id LIKE $1 ESCAPE '\\'", [`${escaped}%`]);
     addRows(rows);
@@ -106,31 +106,31 @@ async function findUsers({ ids, externalIds, names, prefixes, testUsers }) {
   return [...byId.values()];
 }
 
-// Таблицы, удаляемые каскадно вместе с пользователем. Используются для отчёта;
-// само удаление выполняет каскад на уровне внешних ключей БД.
+// Tables deleted via cascade together with the user. Used for the report;
+// the actual deletion is done by the DB foreign-key cascade.
 const CASCADE_TABLES = [
-  ['mem.conversations', 'диалоги'],
-  ['mem.conversation_messages', 'сообщения диалогов'],
-  ['mem.conversation_summaries', 'сводки диалогов'],
-  ['mem.user_facts', 'факты о пользователе'],
-  ['mem.secure_records', 'защищённые записи'],
-  ['mem.scheduled_tasks', 'задачи планировщика'],
-  ['mem.notification_outbox', 'уведомления в очереди'],
-  ['mem.topic_mentions', 'упоминания тем'],
-  ['mem.proactive_triggers', 'триггеры проактивности'],
-  ['mem.event_deliveries', 'доставленные события'],
+  ['mem.conversations', 'conversations'],
+  ['mem.conversation_messages', 'conversation messages'],
+  ['mem.conversation_summaries', 'conversation summaries'],
+  ['mem.user_facts', 'user facts'],
+  ['mem.secure_records', 'secure records'],
+  ['mem.scheduled_tasks', 'scheduler tasks'],
+  ['mem.notification_outbox', 'queued notifications'],
+  ['mem.topic_mentions', 'topic mentions'],
+  ['mem.proactive_triggers', 'proactivity triggers'],
+  ['mem.event_deliveries', 'delivered events'],
 ];
 
-// Таблицы, где ссылка на пользователя будет обнулена (строки сохранятся).
+// Tables where the user reference will be nulled (rows are kept).
 const SET_NULL_TABLES = [
-  ['mem.tool_calls', 'user_id', 'вызовы инструментов'],
-  ['mem.global_facts', 'created_by', 'глобальные факты (авторство)'],
-  ['mem.global_knowledge', 'created_by', 'глобальная база знаний (авторство)'],
+  ['mem.tool_calls', 'user_id', 'tool calls'],
+  ['mem.global_facts', 'created_by', 'global facts (authorship)'],
+  ['mem.global_knowledge', 'created_by', 'global knowledge base (authorship)'],
 ];
 
-// Посчитать связанные строки сразу для всех удаляемых пользователей и вывести отчёт.
+// Count related rows for all users to be deleted at once and print the report.
 async function reportRelated(userIds) {
-  console.log('\nБудут удалены следующие связанные сущности (каскадом, суммарно по всем пользователям):');
+  console.log('\nThe following related entities will be deleted (via cascade, totals across all users):');
   let totalDeleted = 0;
   for (const [table, label] of CASCADE_TABLES) {
     const { rows } = await query(`SELECT count(*)::int AS n FROM ${table} WHERE user_id = ANY($1::uuid[])`, [userIds]);
@@ -141,10 +141,10 @@ async function reportRelated(userIds) {
     }
   }
   if (totalDeleted === 0) {
-    console.log('  (связанных строк нет)');
+    console.log('  (no related rows)');
   }
 
-  console.log('\nУ следующих сущностей ссылка на пользователя будет обнулена (строки сохранятся):');
+  console.log('\nFor the following entities the user reference will be nulled (rows are kept):');
   let totalNulled = 0;
   for (const [table, column, label] of SET_NULL_TABLES) {
     const { rows } = await query(`SELECT count(*)::int AS n FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [
@@ -157,11 +157,11 @@ async function reportRelated(userIds) {
     }
   }
   if (totalNulled === 0) {
-    console.log('  (таких строк нет)');
+    console.log('  (no such rows)');
   }
 }
 
-// Запросить подтверждение в консоли. Возвращает true только при вводе "yes".
+// Ask for confirmation in the console. Returns true only when "yes" is typed.
 function confirm(promptText) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -177,11 +177,11 @@ async function main() {
   const users = await findUsers(args);
 
   if (users.length === 0) {
-    console.log('Пользователи по заданным критериям не найдены. Ничего не удалено.');
+    console.log('No users found for the given criteria. Nothing deleted.');
     return;
   }
 
-  console.log(`Найдено пользователей к удалению: ${users.length}`);
+  console.log(`Users found for deletion: ${users.length}`);
   for (const u of users) {
     const ext = u.external_id || '—';
     const name = u.display_name || '—';
@@ -192,23 +192,23 @@ async function main() {
   await reportRelated(userIds);
 
   if (!args.yes) {
-    const word = users.length === 1 ? 'этого пользователя' : `этих пользователей (${users.length})`;
-    const ok = await confirm(`\nУдалить ${word} и все связанные данные? Введите "yes" для подтверждения: `);
+    const word = users.length === 1 ? 'this user' : `these users (${users.length})`;
+    const ok = await confirm(`\nDelete ${word} and all related data? Type "yes" to confirm: `);
     if (!ok) {
-      console.log('Отмена. Ничего не удалено.');
+      console.log('Cancelled. Nothing deleted.');
       return;
     }
   }
 
-  // Всё удаление — в одной транзакции. Каскадные внешние ключи убирают связанные строки,
-  // правила SET NULL обнуляют ссылки в сохраняемых таблицах.
+  // The whole deletion runs in one transaction. Cascading foreign keys remove related rows,
+  // SET NULL rules null the references in the tables that are kept.
   const pool = await getPool();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rowCount } = await client.query('DELETE FROM mem.users WHERE id = ANY($1::uuid[])', [userIds]);
     await client.query('COMMIT');
-    console.log(`\nГотово. Удалено пользователей: ${rowCount}. Связанные данные удалены каскадом.`);
+    console.log(`\nDone. Users deleted: ${rowCount}. Related data removed via cascade.`);
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -219,7 +219,7 @@ async function main() {
 
 main()
   .catch((err) => {
-    console.error('Ошибка удаления:', err.message);
+    console.error('Deletion error:', err.message);
     process.exitCode = 1;
   })
   .finally(async () => {

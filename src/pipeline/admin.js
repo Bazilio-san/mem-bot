@@ -1,5 +1,5 @@
-// User-facing memory management над таблицей фактов mem.user_facts: просмотр, удаление одной записи,
-// полное забывание. Удаление мягкое (status='deleted') — запись исчезает из выборок, но след остаётся.
+// User-facing memory management over the mem.user_facts fact table: listing, deleting a single record,
+// full forgetting. Deletion is soft (status='deleted') — the row disappears from queries, but a trace remains.
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 
@@ -161,13 +161,13 @@ async function deleteBySemanticMatch(userId, rawName) {
 }
 
 // Soft-delete facts by name, identifier, or fact text.
-// Сначала проверяются UUID и точное совпадение fact_text: это покрывает сценарий, когда пользователь
-// копирует строку из memory_list. Затем — нестрогое вхождение текста и фильтр по типу. Если точные
-// методы ничего не нашли, последним шагом работает семантический поиск по embedding с осторожными
-// порогами: явный лучший кандидат удаляется, близкие варианты возвращаются как ambiguous.
-// factType сужает тип, когда по имени совпадают записи разных типов. Возвращает { deleted, items }.
-// Если тип не указан и по имени совпали записи РАЗНЫХ типов — удаление не выполняется: возвращается
-// { deleted: 0, ambiguous: true, candidates }, чтобы агент уточнил у пользователя, что именно забыть.
+// UUID and an exact fact_text match are checked first: this covers the scenario where the user copies
+// a line from memory_list. Then comes a loose text containment match and a type filter. If the exact
+// methods found nothing, the last step is a semantic embedding search with cautious thresholds: a clear
+// best candidate is deleted, close variants are returned as ambiguous.
+// factType narrows the type when records of different types match by name. Returns { deleted, items }.
+// If no type is given and records of DIFFERENT types matched by name, no deletion is performed: it returns
+// { deleted: 0, ambiguous: true, candidates } so the agent can ask the user what exactly to forget.
 export async function deleteByEntity(userId, entityName, factType = null) {
   const rawName = String(entityName || '').trim();
   const name = normalizeLookupText(rawName);

@@ -327,8 +327,8 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
         });
         break;
       case 'memory.retrieved':
-        // Итог поиска памяти (сущности классификатора, статистика сущностного буста) — внутри
-        // группы текущей стадии, сразу под заголовком «Стадия: поиск релевантной памяти».
+        // Memory retrieval summary (classifier entities, entity-boost statistics) — placed inside
+        // the current stage's group, right under the «Стадия: поиск релевантной памяти» header.
         rows.push({
           ...base,
           rowType: 'memory',
@@ -341,8 +341,8 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
         break;
       case 'memory.written':
       case 'memory.sweep':
-        // Без groupId: итог записи памяти идёт после ответа и попадает в группу «Пост-обработка»
-        // (или наследует активную группу, когда пост-обработки в цикле нет).
+        // No groupId: the memory-write summary comes after the answer and lands in the «Пост-обработка»
+        // group (or inherits the active group when the cycle has no post-processing).
         rows.push({
           ...base,
           rowType: 'memory',
@@ -489,9 +489,9 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
     }
   }
 
-  // Суммарная длительность шага для заголовков групп: охват по строкам группы — от самого раннего
-  // старта до самого позднего конца (createdAt + durationMs). Заголовок с собственной длительностью
-  // (если журнал её записал) не перезаписывается.
+  // Total step duration for group headers: the span across the group's rows — from the earliest
+  // start to the latest end (createdAt + durationMs). A header with its own duration (when the
+  // journal recorded one) is not overwritten.
   const groupSpans = new Map();
   for (const row of rows) {
     if (row.isGroupHeader || !row.groupId) {

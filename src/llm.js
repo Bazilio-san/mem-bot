@@ -272,7 +272,7 @@ export async function chatJSON({
     // viewer) can extract the schema from the prompt deterministically instead of guessing by braces.
     sys = `${sys}
 
-Ответь СТРОГО одним JSON-объектом, который соответствует JSON Schema (${schemaName}), приведённой в теге <json-schema>:
+Respond STRICTLY with one JSON object that matches JSON Schema (${schemaName}):
 <json-schema>
 ${JSON.stringify(schema)}
 </json-schema>
@@ -319,7 +319,7 @@ ${JSON.stringify(schema)}
     return JSON.parse(content);
   } catch {
     // In case the model still wrapped the JSON in text — extract the first object.
-    const m = content.match(/\{[\s\S]*\}/);
+    const m = content.match(/\{[\s\S]*}/);
     if (m) {
       return JSON.parse(m[0]);
     }

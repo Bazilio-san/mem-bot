@@ -1,34 +1,34 @@
-// Memory retrieval stage над плоской таблицей фактов mem.user_facts. Возвращает только релевантный
-// и безопасный минимум, ранжируя по совокупному весу, и применяет жёсткие лимиты минимизации перед
-// сборкой промпта. Защищённые данные живут в отдельной таблице secure_records и попадают сюда только
-// в виде безопасных резюме.
+// Memory retrieval stage over the flat fact table mem.user_facts. Returns only the relevant
+// and safe minimum, ranking by the composite weight, and applies hard minimization limits before
+// prompt assembly. Protected data lives in the separate secure_records table and gets here only
+// as safe summaries.
 //
-// Форма результата — { profile, dialog, domain, reminders, secure }: потребители (агент, песочница,
-// сжатие истории) не зависят от устройства хранилища:
-//   profile — общечеловеческие факты (домен general): профиль, стиль, привычки, интересы;
-//   dialog  — незакрытые линии разговора (open_loop), всегда свежие — опора участливого собеседника;
-//   domain  — предметные факты текущего домена (goal и прочее вне general).
-// У каждого элемента есть memory_text (алиас fact_text) — текст, который попадает в промпт.
+// Result shape — { profile, dialog, domain, reminders, secure }: consumers (agent, sandbox,
+// history compression) do not depend on the storage layout:
+//   profile — general human facts (general domain): profile, style, habits, interests;
+//   dialog  — open conversation threads (open_loop), always fresh — the backbone of an attentive companion;
+//   domain  — subject facts of the current domain (goal and everything else outside general).
+// Each item has memory_text (alias of fact_text) — the text that goes into the prompt.
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 import { listSecureSummaries } from './secure.js';
 import { config } from '../config.js';
 import { formatLocalDateTime } from './scheduler.js';
 
-// Жёсткие лимиты минимизации: сколько фактов каждой группы попадает в промпт.
+// Hard minimization limits: how many facts of each group make it into the prompt.
 const LIMITS = config.memoryLimits;
 
-// Типы, которые нужны почти в каждом ответе (имя, стиль общения): получают надбавку к релевантности,
-// чтобы не вылетать из выдачи, когда запрос семантически далёк от них.
+// Types needed in almost every reply (name, communication style): they get a relevance boost
+// so they do not drop out of the results when the query is semantically far from them.
 const CORE_TYPES = new Set(['profile', 'communication_style']);
 
 function recencyScore(ts) {
   const days = (Date.now() - new Date(ts).getTime()) / 86400000;
-  return Math.max(0, 1 - days / 180); // линейное затухание за полгода
+  return Math.max(0, 1 - days / 180); // linear decay over half a year
 }
 
-// Вес источника факта: прямые высказывания пользователя и явные просьбы запомнить надёжнее
-// реакций и фактов из сжатия истории.
+// Fact source weight: direct user statements and explicit requests to remember are more reliable
+// than reactions and facts from history compression.
 const SOURCE_WEIGHT = {
   manual: 1.0,
   user_statement: 1.0,
@@ -36,8 +36,8 @@ const SOURCE_WEIGHT = {
   history_summary: 0.7,
 };
 
-// Совокупный вес факта: релевантность + уверенность + свежесть + подтверждения + надёжность
-// источника. Сумма весов слагаемых — 1.0.
+// Composite fact weight: relevance + confidence + recency + confirmations + source
+// reliability. The term weights sum to 1.0.
 function scoreFact(it, relevance) {
   const boosted = CORE_TYPES.has(it.fact_type) ? Math.max(relevance, 0.6) : relevance;
   return (
@@ -49,22 +49,22 @@ function scoreFact(it, relevance) {
   );
 }
 
-// Сортировка группы: по совокупному весу; при равных прочих закреплённые факты выше.
+// Group sorting: by composite weight; all else being equal, pinned facts rank higher.
 function byScore(a, b) {
   return b.score - a.score || Number(b.persistent === true) - Number(a.persistent === true);
 }
 
-// Минимальная длина сущности для буста: более короткие значения («я», «он») совпали бы
-// с половиной памяти. Дублирует фильтр вызывающей стороны как защита самой функции.
+// Minimum entity length for the boost: shorter values ("I", "he") would match
+// half of the memory. Duplicates the caller's filter as the function's own safeguard.
 const MIN_ENTITY_LENGTH = 3;
 
-// Пол релевантности для фактов, совпавших с упомянутой сущностью: выше «среднесемантических»
-// совпадений, но ниже точного попадания вектора (0.85–0.95) — смысл всей фразы остаётся главнее.
+// Relevance floor for facts that matched a mentioned entity: above "average semantic"
+// matches but below an exact vector hit (0.85–0.95) — the meaning of the whole phrase stays primary.
 const ENTITY_RELEVANCE_FLOOR = 0.7;
 
-// Основной retrieval. Возвращает структуру по группам + активные напоминания + безопасные резюме.
-// entityKeys — значения сущностей из классификатора (начальная форма): факты, в тексте которых
-// встречается сущность, добираются в пул кандидатов и получают гарантированный минимум релевантности.
+// Main retrieval. Returns a per-group structure + active reminders + safe summaries.
+// entityKeys — entity values from the classifier (base form): facts whose text contains
+// an entity are pulled into the candidate pool and get a guaranteed relevance minimum.
 export async function retrieveMemory({ userId, domainKey, query: userQuery, scopes, entityKeys = [] }) {
   const wantSecure = scopes?.includes('secure');
   const wantReminder = scopes?.includes('reminder');
@@ -72,8 +72,8 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     .map((v) => (typeof v === 'string' ? v.replace(/"/g, '').trim() : ''))
     .filter((v) => v.length >= MIN_ENTITY_LENGTH);
 
-  // Шаг 1. Дешёвый структурный фильтр кандидатов: активные, не истёкшие факты домена general
-  // и текущего домена.
+  // Step 1. Cheap structural candidate filter: active, non-expired facts of the general domain
+  // and the current domain.
   const { rows: candidates } = await query(
     `SELECT id, domain_key, fact_type, fact_text AS memory_text, fact_text, confidence,
             evidence_count, last_confirmed_at, updated_at, source, persistent
@@ -86,10 +86,10 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     [userId, domainKey],
   );
 
-  // Шаг 1б. Добор по сущностям: факты, в которых встречается хотя бы одна упомянутая сущность,
-  // попадают в пул кандидатов, даже если не прошли в топ-100 по уверенности. Один запрос на все
-  // сущности: websearch_to_tsquery понимает оператор OR и кавычки для фраз, идёт по тому же
-  // GIN-индексу, что и полнотекстовый шаг 3.
+  // Step 1b. Entity-based recall: facts containing at least one mentioned entity enter the
+  // candidate pool even if they did not make the confidence top-100. A single query for all
+  // entities: websearch_to_tsquery understands the OR operator and quotes for phrases, and uses
+  // the same GIN index as the full-text step 3.
   const entityIds = new Set();
   let entityRecallAdded = 0;
   if (entities.length) {
@@ -109,13 +109,13 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     for (const r of rows) {
       entityIds.add(r.id);
       if (!known.has(r.id)) {
-        candidates.push(r); // факт вне топ-100 всё равно попадает в ранжирование
+        candidates.push(r); // a fact outside the top-100 still enters the ranking
         entityRecallAdded++;
       }
     }
-    // Подстрочная пометка по уже загруженным кандидатам — страховка от отсутствия русского
-    // стемминга в конфигурации 'simple' полнотекстового индекса: «Берлин» не совпадёт с «Берлине»
-    // через tsquery, но начальная форма обычно является префиксом словоформы и ловится подстрокой.
+    // Substring marking over the already loaded candidates — a safeguard against the lack of Russian
+    // stemming in the 'simple' full-text index configuration: «Берлин» would not match «Берлине»
+    // via tsquery, but the base form is usually a prefix of the word form and is caught by substring.
     const lowered = entities.map((v) => v.toLowerCase());
     for (const c of candidates) {
       if (!entityIds.has(c.id) && lowered.some((v) => c.fact_text.toLowerCase().includes(v))) {
@@ -124,7 +124,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     }
   }
 
-  // Шаг 2. Семантическая релевантность через эмбеддинги (если сервис доступен).
+  // Step 2. Semantic relevance via embeddings (if the service is available).
   const queryVec = userQuery ? await embed(userQuery) : null;
   let vecScores = new Map();
   if (queryVec) {
@@ -140,7 +140,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     vecScores = new Map(rows.map((r) => [r.id, Number(r.relevance)]));
   }
 
-  // Шаг 3. Полнотекстовая релевантность как дополняющий сигнал и фолбэк без эмбеддингов.
+  // Step 3. Full-text relevance as a complementary signal and a fallback without embeddings.
   let textScores = new Map();
   if (userQuery) {
     const { rows } = await query(
@@ -152,9 +152,9 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     textScores = new Map(rows.map((r) => [r.id, Math.min(Number(r.rank) * 4, 1)]));
   }
 
-  // Шаг 4. Совокупный вес и разбиение по группам. Совпадение по сущности даёт гарантированный
-  // минимум релевантности (тот же приём, что CORE_TYPES в scoreFact): факт буквально о предмете,
-  // который пользователь только что упомянул.
+  // Step 4. Composite weight and split into groups. An entity match gives a guaranteed
+  // relevance minimum (the same trick as CORE_TYPES in scoreFact): the fact is literally about
+  // the thing the user just mentioned.
   const byGroup = { profile: [], dialog: [], domain: [] };
   for (const it of candidates) {
     const entityFloor = entityIds.has(it.id) ? ENTITY_RELEVANCE_FLOOR : 0;
@@ -170,16 +170,16 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
   }
   byGroup.profile.sort(byScore);
   byGroup.domain.sort(byScore);
-  // Незакрытые линии — по свежести, а не по релевантности: о недавнем «потом расскажу» уместно
-  // спросить независимо от темы текущей фразы.
+  // Open threads — by recency, not relevance: a recent "I'll tell you later" is appropriate
+  // to ask about regardless of the current phrase's topic.
   byGroup.dialog.sort((a, b) => new Date(b.last_confirmed_at) - new Date(a.last_confirmed_at));
 
-  // Шаг 5. Минимизация: жёсткие лимиты каждой группы.
+  // Step 5. Minimization: hard limits for each group.
   const profile = byGroup.profile.slice(0, LIMITS.profile);
   const dialog = byGroup.dialog.slice(0, LIMITS.dialog);
   const domain = byGroup.domain.slice(0, LIMITS.domain);
 
-  // Напоминания — только если запрошены (вопрос про сроки/задачи).
+  // Reminders — only if requested (a question about deadlines/tasks).
   let reminders = [];
   if (wantReminder) {
     const { rows } = await query(
@@ -192,11 +192,11 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     reminders = rows;
   }
 
-  // Безопасные резюме защищённых данных — только если запрошены и только как резюме.
+  // Safe summaries of protected data — only if requested and only as summaries.
   const secure = wantSecure ? await listSecureSummaries(userId, LIMITS.secure) : [];
 
-  // entityStats — наблюдаемость сущностного буста: какие ключи участвовали, сколько фактов добрано
-  // в пул мимо топ-100 (recallAdded) и сколько всего получили пол релевантности (matched).
+  // entityStats — observability of the entity boost: which keys took part, how many facts were
+  // pulled into the pool past the top-100 (recallAdded), and how many got the relevance floor (matched).
   return {
     profile,
     dialog,
@@ -207,8 +207,8 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
   };
 }
 
-// Сборка компактного MEMORY_CONTEXT. Блок памяти всегда представлен как справочные данные,
-// а не инструкции — это защита от вредоносных записей в памяти (prompt injection).
+// Assembly of the compact MEMORY_CONTEXT. The memory block is always presented as reference data,
+// not instructions — protection against malicious records in memory (prompt injection).
 export function buildMemoryContext(mem, domainKey) {
   const lines = (arr) => (arr.length ? arr.join('\n') : '- (нет релевантных фактов)');
   const profile = lines(mem.profile.map((i) => `- ${i.memory_text}`));

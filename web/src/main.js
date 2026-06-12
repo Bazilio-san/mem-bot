@@ -1,6 +1,6 @@
-// Точка входа фронтенда: создаёт корневой экземпляр приложения Vue, подключает библиотеку компонентов
-// PrimeVue v4 с темой Aura и монтирует приложение в элемент #app. Тема Aura подключается в «стилизованном»
-// режиме (styled mode) — компоненты приходят с готовым оформлением, поверх которого работают наши правки.
+// Frontend entry point: creates the root Vue application instance, plugs in the PrimeVue v4 component
+// library with the Aura theme and mounts the app into the #app element. The Aura theme is used in styled
+// mode — components come pre-styled, and our overrides are applied on top.
 import { createApp } from 'vue';
 import PrimeVue from 'primevue/config';
 import Aura from '@primeuix/themes/aura';
@@ -14,15 +14,15 @@ app.use(PrimeVue, {
   theme: {
     preset: Aura,
     options: {
-      // Тёмную тему не используем: darkModeSelector указывает на несуществующий класс, чтобы Aura всегда
-      // оставалась в светлом варианте независимо от системных настроек пользователя.
+      // Dark theme is not used: darkModeSelector points to a non-existent class so Aura always
+      // stays in the light variant regardless of the user's system settings.
       darkModeSelector: '.app-dark-never',
     },
   },
-  // Выпадающие списки (Select и прочие оверлеи) PrimeVue телепортирует в <body> с z-index ~1000+.
-  // Собственное модальное окно AnalyzeDialog лежит на z-index 1100, поэтому без этой настройки список
-  // пресетов раскрывался ПОЗАДИ диалога и был не виден. 1200 — выше маски диалога (1100), но ниже
-  // редактора текста запроса (3000).
+  // PrimeVue teleports dropdowns (Select and other overlays) into <body> with z-index ~1000+.
+  // Our own AnalyzeDialog modal sits at z-index 1100, so without this setting the preset list
+  // opened BEHIND the dialog and was invisible. 1200 is above the dialog mask (1100) but below
+  // the request text editor (3000).
   zIndex: {
     overlay: 1200,
   },

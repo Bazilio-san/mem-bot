@@ -58,7 +58,7 @@ function buildApp() {
         res
           .status(503)
           .type('text/plain; charset=utf-8')
-          .send('Страница Mini App ещё не собрана. Выполните «npm run web:build».');
+          .send('The Mini App page is not built yet. Run "npm run web:build".');
       }
     });
   });
@@ -76,8 +76,7 @@ function buildApp() {
           .status(503)
           .type('text/plain; charset=utf-8')
           .send(
-            'Фронтенд админки ещё не собран. Выполните «npm run web:build» для рабочей сборки ' +
-              'или запустите сервер разработки Vite командой «npm run web:dev».',
+            `The admin frontend is not built yet. Run "npm run web:build" for a production build or start the Vite dev server with "npm run web:dev".`,
           );
       }
     });

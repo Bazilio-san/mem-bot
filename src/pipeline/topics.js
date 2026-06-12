@@ -88,8 +88,8 @@ export function formatTopicContext(ctx) {
   return s.length ? s.join('\n') : 'Нет данных о темах.';
 }
 
-// Извлечение тем диалога для топик-трекинга (критерий 13). Возвращает массив тем с оценкой
-// вовлечённости пользователя. Используется только в режиме компаньона (COMPANION_MODE).
+// Dialogue topic extraction for topic tracking (criterion 13). Returns an array of topics with a
+// user engagement score. Used only in companion mode (COMPANION_MODE).
 const TOPICS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -102,8 +102,8 @@ const TOPICS_SCHEMA = {
         additionalProperties: false,
         required: ['topic_key', 'user_engagement'],
         properties: {
-          topic_key: { type: 'string' }, // короткий стабильный ключ: fitness, work_stress, travel
-          user_engagement: { type: 'number' }, // 0..1 — насколько живо пользователь отвечал по теме
+          topic_key: { type: 'string' }, // short stable key: fitness, work_stress, travel
+          user_engagement: { type: 'number' }, // 0..1 — how actively the user responded on the topic
         },
       },
     },

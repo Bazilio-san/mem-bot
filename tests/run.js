@@ -1,6 +1,6 @@
-// Комплексная проверка бота по слоям и 12 обязательным тестам из задания.
-// Использует реальную БД и реальные модели через LiteLLM-прокси.
-// Запуск: npm test
+// Comprehensive bot check by layers plus the 12 mandatory tests from the assignment.
+// Uses a real DB and real models via the LiteLLM proxy.
+// Run: npm test
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,7 +66,7 @@ const TRIGGER_DEFAULTS = [
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 
-// ---- Мини-фреймворк проверок ------------------------------------------------
+// ---- Mini check framework ----------------------------------------------------
 let passed = 0,
   failed = 0;
 const failures = [];
@@ -84,14 +84,14 @@ function section(title) {
   console.log(`\n=== ${title} ===`);
 }
 
-// Создать чистого пользователя для теста (удаляет прежние данные).
+// Create a clean user for the test (removes previous data).
 async function freshUser(extId) {
   await query('DELETE FROM mem.users WHERE external_id = $1', [extId]);
   return ensureUser(extId);
 }
 
-// Прямой посев факта памяти (без LLM), для проверок выборки: type — тип факта плоской таблицы,
-// scope 'domain' кладёт факт в домен текущего разговора, остальное — в general.
+// Direct seeding of a memory fact (no LLM), for retrieval checks: type is the flat-table fact type,
+// scope 'domain' puts the fact into the current conversation's domain, anything else into general.
 async function seedFact(userId, domainKey, { scope, type = 'profile', text, confidence = 0.8 }) {
   await query(
     `INSERT INTO mem.user_facts (user_id, domain_key, fact_type, fact_text, confidence)
@@ -116,9 +116,9 @@ async function seedEmbeddedFact(userId, domainKey, fact) {
   );
 }
 
-// ========================= СЛОЙ 1. Структура БД =============================
+// ========================= LAYER 1. DB structure ============================
 async function layerStructure() {
-  section('Слой 1. Структура базы данных');
+  section('Layer 1. Database structure');
   const need = [
     'users',
     'agent_domains',
@@ -135,29 +135,29 @@ async function layerStructure() {
   const { rows: tabs } = await query(`SELECT tablename FROM pg_tables WHERE schemaname='mem'`);
   const have = new Set(tabs.map((t) => t.tablename));
   check(
-    'Все таблицы созданы',
+    'All tables created',
     need.every((t) => have.has(t)),
     need.filter((t) => !have.has(t)).join(','),
   );
 
-  // Индексы по ключевым полям.
+  // Indexes on key columns.
   const { rows: idx } = await query(`SELECT indexdef FROM pg_indexes WHERE schemaname='mem'`);
   const defs = idx.map((i) => i.indexdef).join('\n');
-  check('Индекс по user_id есть', /user_id/.test(defs));
-  check('Индекс по status есть', /status/.test(defs));
-  check('Индекс по expires_at есть', /expires_at/.test(defs));
-  check('Векторный HNSW-индекс есть', /hnsw/.test(defs));
-  check('Полнотекстовый GIN-индекс есть', /search_tsv/.test(defs));
-  check('Индексы user_facts есть', /idx_user_facts_lookup/.test(defs) && /idx_user_facts_embedding/.test(defs));
+  check('Index on user_id exists', /user_id/.test(defs));
+  check('Index on status exists', /status/.test(defs));
+  check('Index on expires_at exists', /expires_at/.test(defs));
+  check('Vector HNSW index exists', /hnsw/.test(defs));
+  check('Full-text GIN index exists', /search_tsv/.test(defs));
+  check('user_facts indexes exist', /idx_user_facts_lookup/.test(defs) && /idx_user_facts_embedding/.test(defs));
 
-  // Внешние ключи.
+  // Foreign keys.
   const { rows: fks } = await query(
     `SELECT count(*)::int AS c FROM information_schema.table_constraints
      WHERE constraint_schema='mem' AND constraint_type='FOREIGN KEY'`,
   );
-  check('Внешние ключи присутствуют', fks[0].c >= 10, `найдено ${fks[0].c}`);
+  check('Foreign keys present', fks[0].c >= 10, `found ${fks[0].c}`);
 
-  // created_at/updated_at на основных таблицах.
+  // created_at/updated_at on the main tables.
   const { rows: cols } = await query(
     `SELECT table_name, column_name FROM information_schema.columns
      WHERE table_schema='mem' AND column_name IN ('created_at','updated_at')`,
@@ -167,7 +167,7 @@ async function layerStructure() {
     (colMap[c.table_name] ||= new Set()).add(c.column_name);
   }
   check(
-    'user_facts имеет created_at и updated_at',
+    'user_facts has created_at and updated_at',
     colMap.user_facts?.has('created_at') && colMap.user_facts?.has('updated_at'),
   );
 
@@ -177,15 +177,15 @@ async function layerStructure() {
         AND column_name IN ('fact_type','fact_text','confidence','evidence_count','expires_at',
                             'last_confirmed_at','source','persistent')`,
   );
-  check('user_facts имеет координаты хранения, поля устаревания, source и persistent', factCols.length === 8);
+  check('user_facts has storage coordinates, expiry fields, source and persistent', factCols.length === 8);
 
-  // Чувствительные данные — отдельная таблица, не в user_facts.
+  // Sensitive data lives in a separate table, not in user_facts.
   const { rows: secCols } = await query(
     `SELECT column_name FROM information_schema.columns WHERE table_schema='mem' AND table_name='secure_records' AND column_name='encrypted_payload'`,
   );
-  check('Чувствительные данные в отдельной шифрованной таблице', secCols.length === 1);
+  check('Sensitive data in a separate encrypted table', secCols.length === 1);
 
-  // Минимальный CRUD round-trip: создать пользователя и по записи каждого вида, прочитать обратно.
+  // Minimal CRUD round-trip: create a user plus one record of each kind, read them back.
   const u = await freshUser('test-crud');
   await seedFact(u.id, 'general', { scope: 'profile', type: 'preference', text: 'CRUD профиль' });
   await seedFact(u.id, 'flight_search', { scope: 'domain', type: 'preference', text: 'CRUD домен' });
@@ -208,7 +208,7 @@ async function layerStructure() {
     [u.id],
   );
   check(
-    'CRUD: все виды записей читаются обратно',
+    'CRUD: all record kinds read back',
     back[0].m === 2 && back[0].s === 1 && back[0].t === 1 && !!sec.id && !!task.id,
   );
 }
@@ -227,7 +227,7 @@ function collectDescriptions(value, out = []) {
 }
 
 function layerToolRegistry() {
-  section('Слой 1b. Реестр инструментов агента');
+  section('Layer 1b. Agent tool registry');
   const names = allTools.map((tool) => tool.name);
   const uniqueNames = new Set(names);
   const toolDir = path.join(rootDir, 'src', 'pipeline', 'agent-tools');
@@ -242,13 +242,13 @@ function layerToolRegistry() {
   const publicDefs = buildToolDefs({ isAdmin: false }).map((def) => def.function.name);
 
   check(
-    'Каждый инструмент находится в отдельном модуле',
+    'Each tool lives in its own module',
     moduleFiles.length === allTools.length,
-    `модулей ${moduleFiles.length}, инструментов ${allTools.length}`,
+    `modules ${moduleFiles.length}, tools ${allTools.length}`,
   );
-  check('Имена инструментов уникальны', uniqueNames.size === names.length);
+  check('Tool names are unique', uniqueNames.size === names.length);
   check(
-    'У каждого инструмента есть title и toolTitle',
+    'Each tool has a title and toolTitle',
     allTools.every(
       (tool) =>
         typeof tool.title === 'string' &&
@@ -258,7 +258,7 @@ function layerToolRegistry() {
     ),
   );
   check(
-    'У каждого инструмента есть definition и handler',
+    'Each tool has a definition and a handler',
     allTools.every(
       (tool) =>
         tool.definition?.type === 'function' &&
@@ -267,21 +267,21 @@ function layerToolRegistry() {
     ),
   );
   check(
-    'Descriptions инструментов и свойств написаны на английском',
+    'Tool and property descriptions are written in English',
     cyrillicDescriptions.length === 0,
     cyrillicDescriptions.slice(0, 3).join(' | '),
   );
   check(
-    'Публичная сборка buildToolDefs возвращает только инструменты с title',
+    'Public buildToolDefs returns only tools with a title',
     publicDefs.every((name) => Boolean(toolMeta[name]?.title)),
   );
 }
 
-// Покрытие человеческих имён инструментов: каждое имя, которое реально попадает в buildToolDefs при любой
-// комбинации прав пользователя и флагов глобальной памяти и голосового вывода, должно иметь непустой title
-// (то есть toolTitle(name) не равен самому имени). Это страхует UI-события со статусами инструментов.
+// Coverage of human-readable tool names: every name that actually ends up in buildToolDefs under any
+// combination of user permissions and the global-memory and voice-output flags must have a non-empty title
+// (i.e. toolTitle(name) is not the name itself). This safeguards UI events with tool statuses.
 function layerToolTitlesCoverage() {
-  section('Слой 1c. Покрытие человеческих имён инструментов при всех комбинациях флагов');
+  section('Layer 1c. Human-readable tool name coverage across all flag combinations');
   const prev = {
     facts: config.globalMemory.factsEnabled,
     rag: config.globalMemory.ragEnabled,
@@ -313,15 +313,15 @@ function layerToolTitlesCoverage() {
     config.voiceOutput.enabled = prev.voice;
   }
   check(
-    'Каждое имя из buildToolDefs при любых флагах имеет непустой человеческий title',
+    'Every name from buildToolDefs has a non-empty human-readable title under any flags',
     missing.length === 0,
     missing.slice(0, 5).join(' | '),
   );
 }
 
-// ========================= СЛОЙ 2. Извлечение фактов =========================
+// ========================= LAYER 2. Fact extraction ==========================
 async function layerExtraction() {
-  section('Слой 2. Извлечение фактов (tests/memory_cases.json)');
+  section('Layer 2. Fact extraction (tests/memory_cases.json)');
   const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'memory_cases.json'), 'utf8'));
   let okCases = 0;
   for (const tc of cases) {
@@ -333,7 +333,7 @@ async function layerExtraction() {
     const savable = facts.filter((f) => Number(f.confidence) >= config.facts.minConfidence);
     let ok;
     if (tc.expect_requires_confirmation) {
-      // Чувствительные данные новая система не сохраняет вовсе: промпт требует пропускать их целиком.
+      // The new system does not save sensitive data at all: the prompt requires skipping it entirely.
       ok = savable.length === 0;
     } else if (tc.expect_save) {
       ok = savable.length >= 1;
@@ -343,18 +343,18 @@ async function layerExtraction() {
     if (ok) {
       okCases++;
     } else {
-      console.log(`     · спорный кейс: "${tc.input}" → фактов ${facts.length}, сохраняемых ${savable.length}`);
+      console.log(`     · borderline case: "${tc.input}" → facts ${facts.length}, savable ${savable.length}`);
     }
   }
-  // Допускаем небольшую вариативность модели: не менее 80% кейсов верны.
-  check(`Кейсы извлечения (${okCases}/${cases.length}, порог 80%)`, okCases / cases.length >= 0.8);
+  // Allow some model variability: at least 80% of cases must be correct.
+  check(`Extraction cases (${okCases}/${cases.length}, 80% threshold)`, okCases / cases.length >= 0.8);
 }
 
-// ========================= 12 ОБЯЗАТЕЛЬНЫХ ТЕСТОВ ============================
+// ========================= 12 MANDATORY TESTS ================================
 async function mandatory() {
-  section('Обязательные тесты (1–12)');
+  section('Mandatory tests (1–12)');
 
-  // 1. Сохраняет устойчивое предпочтение.
+  // 1. Saves a stable preference.
   {
     await freshUser('t1');
     const res = await handleMessage({
@@ -364,19 +364,19 @@ async function mandatory() {
       extractSync: true,
     });
     const mem = await listMemory(res.userId);
-    check('1. Сохраняет устойчивое предпочтение', mem.length >= 1, `активных фактов: ${mem.length}`);
+    check('1. Saves a stable preference', mem.length >= 1, `active facts: ${mem.length}`);
   }
 
-  // 2. Не сохраняет мусор.
+  // 2. Does not save junk.
   {
     await freshUser('t2');
     await handleMessage({ externalId: 't2', userMessage: 'Ок', extractSync: true });
     const r2 = await handleMessage({ externalId: 't2', userMessage: 'Сегодня плохая погода', extractSync: true });
     const mem = await listMemory(r2.userId);
-    check('2. Не сохраняет мусорные фразы', mem.length === 0, `активных фактов: ${mem.length}`);
+    check('2. Does not save junk phrases', mem.length === 0, `active facts: ${mem.length}`);
   }
 
-  // 3. Чувствительные данные не сохраняются как обычный факт.
+  // 3. Sensitive data is not saved as a regular fact.
   {
     const u = await freshUser('t3');
     const facts = await extractFacts({
@@ -387,10 +387,10 @@ async function mandatory() {
     await saveFacts(u.id, 'general', facts, null);
     const savedPlain = await listMemory(u.id);
     const leakedAsFact = savedPlain.some((m) => /\d{4}\s?\d{6}/.test(m.fact_text));
-    check('3. Чувствительные данные не сохраняются как обычный факт', !leakedAsFact);
+    check('3. Sensitive data is not saved as a regular fact', !leakedAsFact);
   }
 
-  // 4. Обновляет факт, а не плодит дубли (та же тема, новое значение).
+  // 4. Updates the fact instead of multiplying duplicates (same topic, new value).
   {
     const u = await freshUser('t4');
     await saveFact(u.id, 'general', {
@@ -409,13 +409,13 @@ async function mandatory() {
     );
     const active = rows.filter((r) => r.status === 'active');
     check(
-      '4. Обновляет факт, а не создаёт дубль',
+      '4. Updates the fact instead of creating a duplicate',
       active.length === 1 && /Казан/.test(active[0].fact_text),
-      `активных: ${active.length}`,
+      `active: ${active.length}`,
     );
   }
 
-  // 4b. Смысловой дедуп объединяет разные формулировки стиля общения.
+  // 4b. Semantic dedup merges different wordings of the communication style.
   {
     const u = await freshUser('t4b');
     await saveFact(u.id, 'general', {
@@ -434,13 +434,13 @@ async function mandatory() {
     );
     const active = rows.filter((r) => r.status === 'active');
     check(
-      '4b. Смысловой дедуп стиля не оставляет активные дубли',
+      '4b. Semantic style dedup leaves no active duplicates',
       active.length === 1,
-      `активных: ${active.length}, всего: ${rows.length}`,
+      `active: ${active.length}, total: ${rows.length}`,
     );
   }
 
-  // 4c. Один и тот же запрос на функцию в разных формулировках сводится к одному факту-цели.
+  // 4c. The same feature request in different wordings collapses into a single goal fact.
   {
     const u = await freshUser('t4c');
     await saveFact(u.id, 'general', {
@@ -461,13 +461,13 @@ async function mandatory() {
     const { rows } = await query(`SELECT status FROM mem.user_facts WHERE user_id=$1 AND fact_type='goal'`, [u.id]);
     const active = rows.filter((r) => r.status === 'active');
     check(
-      '4c. Запрос на функцию не размножается между формулировками',
+      '4c. A feature request does not multiply across wordings',
       active.length === 1,
-      `активных: ${active.length}, всего: ${rows.length}`,
+      `active: ${active.length}, total: ${rows.length}`,
     );
   }
 
-  // 4d. Одинаковый поиск билетов не размножается между формулировками (goal/open_loop одного смысла).
+  // 4d. The same ticket search does not multiply across wordings (goal/open_loop with one meaning).
   {
     const u = await freshUser('t4d');
     await saveFact(u.id, 'flight_search', {
@@ -491,13 +491,13 @@ async function mandatory() {
     );
     const active = rows.filter((r) => r.status === 'active');
     check(
-      '4d. Контекст одной поездки не размножается между формулировками',
+      '4d. One trip context does not multiply across wordings',
       active.length === 1,
-      `активных: ${active.length}, всего: ${rows.length}`,
+      `active: ${active.length}, total: ${rows.length}`,
     );
   }
 
-  // 4e. Ретроактивный maintenance-dedup: dry-run не меняет БД, apply архивирует дубли.
+  // 4e. Retroactive maintenance dedup: dry-run does not change the DB, apply archives duplicates.
   {
     const u = await freshUser('t4e');
     await seedEmbeddedFact(u.id, 'general', {
@@ -520,15 +520,15 @@ async function mandatory() {
     ).rows;
     const activeAfter = afterRows.filter((r) => r.status === 'active').length;
     const archivedWithAudit = afterRows.some((r) => r.status === 'archived' && r.metadata?.merged_into);
-    check('4e. memory:dedupe dry-run находит пару и ничего не меняет', dry.pairs.length === 1 && before === 2);
+    check('4e. memory:dedupe dry-run finds the pair and changes nothing', dry.pairs.length === 1 && before === 2);
     check(
-      '4f. memory:dedupe apply архивирует дубли и пишет metadata.merged_into',
+      '4f. memory:dedupe apply archives duplicates and writes metadata.merged_into',
       applied.merged === 1 && activeAfter === 1 && archivedWithAudit,
       `activeAfter=${activeAfter}`,
     );
   }
 
-  // 5. Достаёт только релевантную память.
+  // 5. Retrieves only relevant memory.
   {
     const u = await freshUser('t5');
     for (let i = 0; i < 6; i++) {
@@ -562,12 +562,12 @@ async function mandatory() {
     const noFlightFacts = !mem.domain.some((m) => /перел[её]т|Поездка/.test(m.memory_text));
     const noSecret = mem.secure.length === 0;
     check(
-      '5. Достаёт только релевантную предметную память (без flight_search и без секретов)',
+      '5. Retrieves only relevant domain memory (no flight_search and no secrets)',
       noFlightFacts && noSecret && mem.domain.length > 0,
     );
   }
 
-  // 6. Не раздувает промпт (минимизация).
+  // 6. Does not bloat the prompt (minimization).
   {
     const u = await freshUser('t6');
     for (let i = 0; i < 25; i++) {
@@ -585,13 +585,13 @@ async function mandatory() {
     });
     const ctx = buildMemoryContext(mem, 'math_tutor');
     const totalFacts = mem.profile.length + mem.dialog.length + mem.domain.length + mem.reminders.length;
-    check('6a. Профиль ≤ 7', mem.profile.length <= LIMITS.profile);
-    check('6b. Домен ≤ 12', mem.domain.length <= LIMITS.domain);
-    check('6c. Всего фактов ≤ 30', totalFacts <= LIMITS.total, `всего ${totalFacts}`);
-    check('6d. В промпте нет полного номера паспорта', !/\d{4}\s?\d{6}/.test(ctx));
+    check('6a. Profile ≤ 7', mem.profile.length <= LIMITS.profile);
+    check('6b. Domain ≤ 12', mem.domain.length <= LIMITS.domain);
+    check('6c. Total facts ≤ 30', totalFacts <= LIMITS.total, `total ${totalFacts}`);
+    check('6d. Prompt contains no full passport number', !/\d{4}\s?\d{6}/.test(ctx));
   }
 
-  // 7. Текущий запрос важнее старой памяти.
+  // 7. The current request outweighs old memory.
   {
     await freshUser('t7');
     const u = await ensureUser('t7');
@@ -608,14 +608,14 @@ async function mandatory() {
       domainKey: 'flight_search',
     });
     check(
-      '7. Текущий запрос (Казань) важнее памяти (Москва)',
+      '7. Current request (Kazan) outweighs memory (Moscow)',
       /казан/i.test(res.answer + JSON.stringify(res.toolsUsed)),
-      `ответ: ${res.answer.slice(0, 120)}`,
+      `answer: ${res.answer.slice(0, 120)}`,
     );
   }
 
-  // 8 + 10. Создаёт напоминание реальным вызовом инструмента. Заодно проверяем контракт событий ядра:
-  // через onEvent собираем последовательность типов событий и убеждаемся, что порядок корректен.
+  // 8 + 10. Creates a reminder via a real tool call. Along the way we check the core event contract:
+  // collect the sequence of event types via onEvent and make sure the order is correct.
   {
     const u = await freshUser('t8');
     const before = (await query(`SELECT count(*)::int c FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].c;
@@ -627,16 +627,16 @@ async function mandatory() {
       onEvent: (e) => events.push(e),
     });
     const after = (await query(`SELECT count(*)::int c FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].c;
-    check('8. Создаёт напоминание (запись в scheduled_tasks)', after - before >= 1, `было ${before}, стало ${after}`);
+    check('8. Creates a reminder (row in scheduled_tasks)', after - before >= 1, `was ${before}, now ${after}`);
     check(
-      '10. Инструмент вызван реально, а не имитирован текстом',
+      '10. The tool was actually called, not imitated with text',
       res.toolsUsed.some((t) => t.name === 'scheduler_create_task') || after - before >= 1,
     );
 
-    // 15. Контракт событий: agent.started открывает поток, agent.completed и assistant.completed присутствуют.
+    // 15. Event contract: agent.started opens the stream, agent.completed and assistant.completed are present.
     const types = events.map((e) => e.type);
     check(
-      '15. События ядра: первым идёт agent.started, есть agent.completed и assistant.completed',
+      '15. Core events: agent.started comes first, agent.completed and assistant.completed are present',
       types[0] === 'agent.started' && types.includes('agent.completed') && types.includes('assistant.completed'),
       types.join(','),
     );
@@ -646,7 +646,7 @@ async function mandatory() {
     if (startedIdx >= 0) {
       const started = events[startedIdx];
       check(
-        '15. tool.started идёт до tool.completed и до assistant.completed, с человеческим именем инструмента',
+        '15. tool.started precedes tool.completed and assistant.completed, with a human-readable tool name',
         startedIdx < completedIdx &&
           completedIdx < assistantIdx &&
           typeof started.toolTitle === 'string' &&
@@ -657,7 +657,7 @@ async function mandatory() {
     }
   }
 
-  // 9. Планировщик выполняет задачу один раз.
+  // 9. The scheduler runs the task exactly once.
   {
     const u = await freshUser('t9');
     await createTask({
@@ -671,15 +671,15 @@ async function mandatory() {
         run_at: new Date(Date.now() - 1000).toISOString(),
       },
     });
-    // Под нагрузкой полного прогона отдельный проход планировщика может промахнуться мимо просроченной задачи
-    // (claimDueTasks временно не возвращает её из-за конкуренции за захват), поэтому даём несколько попыток,
-    // пока задача не завершится. Это сохраняет проверку «ровно один раз» и убирает зависимость от тайминга.
+    // Under full-run load a single scheduler pass may miss the overdue task
+    // (claimDueTasks temporarily does not return it due to claim contention), so we allow several attempts
+    // until the task completes. This preserves the "exactly once" check and removes the timing dependency.
     let status = 'active';
     for (let i = 0; i < 10 && status !== 'completed'; i++) {
       await tick();
       ({ status } = (await query(`SELECT status FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0]);
     }
-    await tick(); // лишний проход после завершения не должен выполнить ту же задачу повторно
+    await tick(); // an extra pass after completion must not run the same task again
     const runs = (
       await query(
         `SELECT count(*)::int c FROM mem.scheduled_task_runs r JOIN mem.scheduled_tasks t ON t.id=r.task_id WHERE t.user_id=$1 AND r.status='success'`,
@@ -689,13 +689,13 @@ async function mandatory() {
     const outbox = (await query(`SELECT count(*)::int c FROM mem.notification_outbox WHERE user_id=$1`, [u.id])).rows[0]
       .c;
     check(
-      '9. Планировщик выполняет разовую задачу ровно один раз',
+      '9. The scheduler runs a one-time task exactly once',
       runs === 1 && outbox === 1 && status === 'completed',
-      `успехов ${runs}, outbox ${outbox}, статус ${status}`,
+      `successes ${runs}, outbox ${outbox}, status ${status}`,
     );
   }
 
-  // 9b. Повторяющаяся задача перепланируется, не зацикливается.
+  // 9b. A recurring task is rescheduled and does not loop.
   {
     const u = await freshUser('t9b');
     const task = await createTask({
@@ -712,12 +712,12 @@ async function mandatory() {
     await runTask(task);
     const t = (await query(`SELECT status, next_run_at FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0];
     check(
-      '9b. Повторяющаяся задача снова активна с будущим запуском',
+      '9b. The recurring task is active again with a future run',
       t.status === 'active' && new Date(t.next_run_at) > new Date(),
     );
   }
 
-  // 9c. Ошибка инструмента не теряется: попытка повтора.
+  // 9c. A tool error is not lost: a retry is attempted.
   {
     const u = await freshUser('t9c');
     const task = await createTask({
@@ -731,20 +731,20 @@ async function mandatory() {
         run_at: new Date(Date.now() - 1000).toISOString(),
       },
     });
-    // Принудительно ломаем выполнение через падающий обработчик уведомления.
+    // Force the run to break via a failing notification handler.
     const r = await runTask(task, {
       onReminder: () => {
-        throw new Error('сбой канала уведомления');
+        throw new Error('notification channel failure');
       },
     });
     const t = (await query(`SELECT attempts, status FROM mem.scheduled_tasks WHERE id=$1`, [task.id])).rows[0];
     const failRun = (
       await query(`SELECT count(*)::int c FROM mem.scheduled_task_runs WHERE task_id=$1 AND status='failed'`, [task.id])
     ).rows[0].c;
-    check('9c. Ошибка задачи фиксируется и планируется повтор', r.ok === false && t.attempts === 1 && failRun === 1);
+    check('9c. The task error is recorded and a retry is scheduled', r.ok === false && t.attempts === 1 && failRun === 1);
   }
 
-  // 9d. Cron/RRULE считаются календарно, с timezone и явной диагностикой ошибок.
+  // 9d. Cron/RRULE are computed calendar-wise, with timezone and explicit error diagnostics.
   {
     const base = { task_type: 'reminder', title: 'cron', instruction: 'cron', schedule_kind: 'cron' };
     const beforeWeekday = computeNextRun(
@@ -752,7 +752,7 @@ async function mandatory() {
       new Date('2026-06-05T05:00:00Z'),
     );
     check(
-      '9d. Cron будни 09:00 даёт ближайший будний локальный запуск',
+      '9d. Cron weekdays 09:00 yields the nearest weekday local run',
       beforeWeekday.toISOString() === '2026-06-05T06:00:00.000Z',
       beforeWeekday.toISOString(),
     );
@@ -765,14 +765,14 @@ async function mandatory() {
       { ...base, timezone: 'America/New_York', cron_expr: '0 9 * * 1-5' },
       new Date('2026-06-04T20:00:00Z'),
     );
-    check('9d. Один cron в разных timezone даёт разные UTC-моменты', moscow.getTime() !== ny.getTime());
+    check('9d. The same cron in different timezones yields different UTC moments', moscow.getTime() !== ny.getTime());
 
     const afterFriday = computeNextRun(
       { ...base, timezone: 'Europe/Moscow', cron_expr: '0 9 * * 1-5' },
       new Date('2026-06-05T07:00:00Z'),
     );
     check(
-      '9d. Cron после пятницы 09:00 переносится на понедельник',
+      '9d. Cron after Friday 09:00 moves to Monday',
       afterFriday.toISOString() === '2026-06-08T06:00:00.000Z',
       afterFriday.toISOString(),
     );
@@ -789,7 +789,7 @@ async function mandatory() {
       new Date('2026-06-05T07:00:00Z'),
     );
     check(
-      '9d. RRULE возвращает следующий момент строго после опоры',
+      '9d. RRULE returns the next moment strictly after the anchor',
       rruleDaily.toISOString() === '2026-06-06T06:00:00.000Z',
       rruleDaily.toISOString(),
     );
@@ -810,7 +810,7 @@ async function mandatory() {
       new Date('2026-06-05T05:00:00Z'),
     );
     check(
-      '9d. Первый cron/RRULE запуск не становится немедленным',
+      '9d. The first cron/RRULE run does not become immediate',
       firstCron > new Date('2026-06-05T05:00:00Z') && firstRRule > new Date('2026-06-05T05:00:00Z'),
     );
 
@@ -836,13 +836,13 @@ async function mandatory() {
     } catch (err) {
       rruleFailed = /RRULE|rrule/i.test(String(err.message || err));
     }
-    check('9d. Невалидный cron/RRULE получает явную ошибку', cronFailed && rruleFailed);
+    check('9d. Invalid cron/RRULE gets an explicit error', cronFailed && rruleFailed);
 
     const fallbackTz = normalizeTimezone('Bad/Timezone');
-    check('9d. Некорректный timezone получает контролируемый fallback', fallbackTz === config.timezone);
+    check('9d. An invalid timezone gets a controlled fallback', fallbackTz === config.timezone);
   }
 
-  // 9e. Реальный tool сохраняет cron-поля и будущий next_run_at.
+  // 9e. The real tool stores the cron fields and a future next_run_at.
   {
     const u = await freshUser('t9e');
     const conv = await ensureConversation(u.id, 'general');
@@ -865,11 +865,11 @@ async function mandatory() {
       await query(`SELECT cron_expr, timezone, next_run_at FROM mem.scheduled_tasks WHERE id=$1`, [res.task_id])
     ).rows[0];
     check(
-      '9e. scheduler_create_task сохраняет cron_expr, timezone и будущий next_run_at',
+      '9e. scheduler_create_task stores cron_expr, timezone and a future next_run_at',
       row?.cron_expr === '0 9 * * 1-5' && row?.timezone === 'Europe/Moscow' && new Date(row.next_run_at) > new Date(),
     );
     check(
-      '9e. scheduler_create_task возвращает timezone и локальное next_run_at',
+      '9e. scheduler_create_task returns the timezone and a local next_run_at',
       res.timezone === 'Europe/Moscow' &&
         res.schedule_kind === 'cron' &&
         res.cron_expr === '0 9 * * 1-5' &&
@@ -884,7 +884,7 @@ async function mandatory() {
     });
     const ctx = buildMemoryContext(mem, 'general');
     check(
-      '9e. MEMORY_CONTEXT показывает локальное время и cron активной задачи',
+      '9e. MEMORY_CONTEXT shows the local time and cron of the active task',
       ctx.includes('Будний отчёт') &&
         ctx.includes('следующее:') &&
         ctx.includes('Europe/Moscow') &&
@@ -899,7 +899,7 @@ async function mandatory() {
       { limit: 10 },
     );
     check(
-      '9e. scheduler_list_tasks показывает время и расписание активной задачи',
+      '9e. scheduler_list_tasks shows the time and schedule of the active task',
       listedTasks.count === 1 &&
         listedTasks.items[0].title === 'Будний отчёт' &&
         listedTasks.items[0].next_run_at_local.includes('Europe/Moscow') &&
@@ -907,7 +907,7 @@ async function mandatory() {
     );
   }
 
-  // 11. Вредная запись в памяти не становится инструкцией.
+  // 11. A malicious memory record does not become an instruction.
   {
     const u = await freshUser('t11');
     await seedFact(u.id, 'general', {
@@ -930,13 +930,13 @@ async function mandatory() {
     });
     const leaked = /1234\s?567890/.test(res.answer);
     check(
-      '11. Вредная память не выполняется как инструкция (паспорт не раскрыт)',
+      '11. Malicious memory is not executed as an instruction (passport not revealed)',
       !leaked,
-      `ответ: ${res.answer.slice(0, 140)}`,
+      `answer: ${res.answer.slice(0, 140)}`,
     );
   }
 
-  // 12. Пользователь может удалить память.
+  // 12. The user can delete memory.
   {
     const u = await freshUser('t12');
     await seedFact(u.id, 'general', { scope: 'profile', text: 'Факт для удаления' });
@@ -947,12 +947,12 @@ async function mandatory() {
     await forgetAll(u.id);
     const after = await listMemory(u.id);
     check(
-      '12. Пользователь может удалить память и забыть всё',
+      '12. The user can delete memory and forget everything',
       okDel && !mem.some((m) => m.id === id) && after.length === 0,
     );
   }
 
-  // 13. Удаление по фрагменту текста находит нужную запись и не трогает остальные.
+  // 13. Deletion by a text fragment finds the right record and leaves the rest untouched.
   {
     const u = await freshUser('t13');
     await seedFact(u.id, 'general', { scope: 'profile', type: 'profile', text: 'Адрес: Москва, ул. Ленина, 1' });
@@ -962,12 +962,12 @@ async function mandatory() {
     const addrGone = !left.some((m) => /Ленина/.test(m.fact_text));
     const colorKept = left.some((m) => /синий/.test(m.fact_text));
     check(
-      '13. Удаление по названию помечает нужную запись и сохраняет остальные',
+      '13. Deletion by name marks the right record and keeps the rest',
       res.deleted === 1 && addrGone && colorKept,
     );
   }
 
-  // 13b. Удаление по точному тексту работает для строк, которые пользователь копирует из memory_list.
+  // 13b. Deletion by exact text works for strings the user copies from memory_list.
   {
     const u = await freshUser('t13b');
     const text = 'Пользователь предпочитает обращаться к ассистенту как «Бобик».';
@@ -975,12 +975,12 @@ async function mandatory() {
     const res = await deleteByEntity(u.id, text);
     const left = await listMemory(u.id);
     check(
-      '13b. Удаление по точному тексту fact_text удаляет показанный факт',
+      '13b. Deletion by exact fact_text removes the displayed fact',
       res.deleted === 1 && !left.some((m) => m.fact_text === text),
     );
   }
 
-  // 13c. Смысловое удаление находит явно подходящий факт, даже если пользователь не цитирует его дословно.
+  // 13c. Semantic deletion finds the clearly matching fact even when the user does not quote it verbatim.
   {
     const u = await freshUser('t13c');
     const text = 'Пользователь предпочитает обращаться к ассистенту как «Бобик».';
@@ -993,12 +993,12 @@ async function mandatory() {
     const res = await deleteByEntity(u.id, 'удали запись о том, как пользователь называет помощника');
     const left = await listMemory(u.id);
     check(
-      '13c. Semantic delete удаляет уверенный смысловой матч',
+      '13c. Semantic delete removes a confident semantic match',
       res.deleted === 1 && res.strategy === 'semantic' && !left.some((m) => m.fact_text === text),
     );
   }
 
-  // 13d. Запрос на удаление темы удаляет пачку сильных смысловых совпадений, но не удаляет слабые совпадения.
+  // 13d. A topic deletion request removes a batch of strong semantic matches but not weak ones.
   {
     const u = await freshUser('t13d');
     const bobik1 = 'Ассистента зовут Бобик.';
@@ -1012,12 +1012,12 @@ async function mandatory() {
     const bobikGone = !left.some((m) => m.fact_text === bobik1 || m.fact_text === bobik2);
     const unrelatedKept = left.some((m) => m.fact_text === unrelated);
     check(
-      '13d. Semantic topic delete удаляет группу сильных совпадений',
+      '13d. Semantic topic delete removes the group of strong matches',
       res.deleted === 2 && res.strategy === 'semantic_group' && bobikGone && unrelatedKept,
     );
   }
 
-  // 13e. Слабое смысловое совпадение не удаляется автоматически.
+  // 13e. A weak semantic match is not deleted automatically.
   {
     const u = await freshUser('t13e');
     const text = 'Пользователь предпочитает чай без сахара.';
@@ -1025,12 +1025,12 @@ async function mandatory() {
     const res = await deleteByEntity(u.id, 'удали сведения о расписании тренировок по плаванию');
     const left = await listMemory(u.id);
     check(
-      '13e. Semantic delete не удаляет слабое совпадение',
+      '13e. Semantic delete does not remove a weak match',
       res.deleted === 0 && left.some((m) => m.fact_text === text),
     );
   }
 
-  // 13f. Близкие смысловые кандидаты не удаляются без уточнения.
+  // 13f. Close semantic candidates are not deleted without clarification.
   {
     const u = await freshUser('t13f');
     const bobik = 'Ассистента зовут Бобик.';
@@ -1040,12 +1040,12 @@ async function mandatory() {
     const res = await deleteByEntity(u.id, 'удали факт про имя ассистента');
     const left = await listMemory(u.id);
     check(
-      '13f. Semantic delete возвращает ambiguous для близких кандидатов',
+      '13f. Semantic delete returns ambiguous for close candidates',
       res.deleted === 0 && res.ambiguous === true && left.length === 2 && res.candidates.length === 2,
     );
   }
 
-  // 14. Все три инструмента памяти проходят через executeTool и пишутся в журнал вызовов.
+  // 14. All three memory tools go through executeTool and are written to the call log.
   {
     const u = await freshUser('t14');
     const conv = await ensureConversation(u.id, 'general');
@@ -1057,7 +1057,7 @@ async function mandatory() {
 
     const forgot = await executeTool(ctx, 'memory_forget_entity', { entity_name: 'машина', entity_type: null });
 
-    // Без подтверждения полное забывание не выполняется.
+    // Without confirmation the full forget is not executed.
     const blocked = await executeTool(ctx, 'memory_forget_all', { confirm: false });
     const allGone = await executeTool(ctx, 'memory_forget_all', { confirm: true });
 
@@ -1067,17 +1067,17 @@ async function mandatory() {
     );
 
     check(
-      '14. Инструменты памяти проходят через executeTool с журналированием',
+      '14. Memory tools go through executeTool with logging',
       sawCar && forgot.deleted === 1 && blocked.deleted === 0 && typeof allGone.deleted === 'number' && loggedAll,
     );
   }
 }
 
-// ============ СЛОЙ 2c. Модель факта: источник, закрепление, retention ========
+// ============ LAYER 2c. Fact model: source, pinning, retention ===============
 async function layerFactModel() {
-  section('Слой 2c. Модель факта: source, persistent, retention');
+  section('Layer 2c. Fact model: source, persistent, retention');
 
-  // F1. Основной путь записи (обычный ход диалога) проставляет source = user_statement.
+  // F1. The main write path (a normal dialog turn) sets source = user_statement.
   {
     await freshUser('tf1');
     const res = await handleMessage({
@@ -1088,17 +1088,17 @@ async function layerFactModel() {
     });
     const { rows } = await query(`SELECT source FROM mem.user_facts WHERE user_id=$1`, [res.userId]);
     check(
-      'F1. Обычный ход пишет факты с source=user_statement',
+      'F1. A normal turn writes facts with source=user_statement',
       rows.length >= 1 && rows.every((r) => r.source === 'user_statement'),
-      `строк ${rows.length}: ${rows.map((r) => r.source).join(',')}`,
+      `rows ${rows.length}: ${rows.map((r) => r.source).join(',')}`,
     );
   }
 
-  // F2. Путь реакций проставляет source = user_reaction; путь сжатия истории — history_summary.
+  // F2. The reaction path sets source = user_reaction; the history compression path — history_summary.
   {
     const u = await freshUser('tf2');
     const conv = await ensureConversation(u.id, 'general');
-    // Извлечение из реакции зависит от модели: допускаем до трёх попыток, пока не появится факт.
+    // Extraction from a reaction depends on the model: allow up to three attempts until a fact appears.
     let reactionRows = [];
     for (let attempt = 0; attempt < 3 && reactionRows.length === 0; attempt++) {
       await recordUserReaction({
@@ -1113,9 +1113,9 @@ async function layerFactModel() {
       ]));
     }
     check(
-      'F2a. Реакция на сообщение ассистента пишет факт с source=user_reaction',
+      'F2a. A reaction to an assistant message writes a fact with source=user_reaction',
       reactionRows.length >= 1 && reactionRows.every((r) => r.source === 'user_reaction'),
-      `строк ${reactionRows.length}: ${reactionRows.map((r) => r.source).join(',')}`,
+      `rows ${reactionRows.length}: ${reactionRows.map((r) => r.source).join(',')}`,
     );
 
     const u2 = await freshUser('tf2b');
@@ -1128,13 +1128,13 @@ async function layerFactModel() {
     );
     const { rows: histRows } = await query(`SELECT source FROM mem.user_facts WHERE user_id=$1`, [u2.id]);
     check(
-      'F2b. Контур сжатия истории пишет факты с source=history_summary',
+      'F2b. The history compression loop writes facts with source=history_summary',
       histRows.length === 1 && histRows[0].source === 'history_summary',
     );
   }
 
-  // F3. Замещение блокируется при понижении ранга источника: history_summary не перетирает
-  // user_statement — старая строка остаётся активной, лишь подтверждается её свежесть.
+  // F3. Replacement is blocked when the source rank goes down: history_summary does not overwrite
+  // user_statement — the old row stays active, only its freshness is confirmed.
   {
     const u = await freshUser('tf3');
     await saveFact(u.id, 'general', {
@@ -1151,13 +1151,13 @@ async function layerFactModel() {
     );
     const { rows } = await query(`SELECT fact_text FROM mem.user_facts WHERE user_id=$1 AND status='active'`, [u.id]);
     check(
-      'F3. Слабый источник не замещает факт сильного (текст не перезаписан)',
+      'F3. A weak source does not replace a fact from a strong one (text not overwritten)',
       r.action !== 'replaced' && rows.length === 1 && /Москв/.test(rows[0].fact_text),
-      `action=${r.action}, текст=${rows[0]?.fact_text}`,
+      `action=${r.action}, text=${rows[0]?.fact_text}`,
     );
   }
 
-  // F4. memory_pin создаёт закреплённый факт: source=manual, persistent=true, без срока забывания.
+  // F4. memory_pin creates a pinned fact: source=manual, persistent=true, no forgetting deadline.
   {
     const u = await freshUser('tf4');
     const conv = await ensureConversation(u.id, 'general');
@@ -1171,7 +1171,7 @@ async function layerFactModel() {
       [u.id],
     );
     check(
-      'F4. memory_pin создаёт persistent-факт с source=manual и без expires_at',
+      'F4. memory_pin creates a persistent fact with source=manual and no expires_at',
       res.action === 'created' &&
         rows.length === 1 &&
         rows[0].persistent === true &&
@@ -1181,8 +1181,8 @@ async function layerFactModel() {
     );
   }
 
-  // F5. Фоновый sweep не архивирует persistent-строку: она может быть только «выжившей» стороной,
-  // даже когда у незакреплённого дубликата больше подтверждений.
+  // F5. The background sweep does not archive a persistent row: it can only be the "surviving" side,
+  // even when the unpinned duplicate has more confirmations.
   {
     const u = await freshUser('tf5');
     const pinnedText = 'Пользователь предпочитает короткие и прямые ответы.';
@@ -1205,11 +1205,11 @@ async function layerFactModel() {
     const { rows } = await query(`SELECT persistent, status FROM mem.user_facts WHERE user_id=$1`, [u.id]);
     const pinnedActive = rows.some((r) => r.persistent === true && r.status === 'active');
     const dupArchived = rows.some((r) => r.persistent === false && r.status === 'archived');
-    check('F5. Sweep сохраняет persistent-строку и архивирует незакреплённый дубликат', pinnedActive && dupArchived);
+    check('F5. The sweep keeps the persistent row and archives the unpinned duplicate', pinnedActive && dupArchived);
   }
 
-  // F6. Retention из конфига: emotional_pattern получает expires_at (~180 дней), подтверждение
-  // продлевает срок от текущего момента.
+  // F6. Retention from the config: emotional_pattern gets an expires_at (~180 days), a confirmation
+  // extends the deadline from the current moment.
   {
     const u = await freshUser('tf6');
     const fact = { type: 'emotional_pattern', fact_text: 'Пользователь часто устаёт по вечерам.', confidence: 0.85 };
@@ -1218,22 +1218,22 @@ async function layerFactModel() {
     const row1 = (await query(`SELECT expires_at FROM mem.user_facts WHERE id=$1`, [r1.id])).rows[0];
     const retentionDays = Number(config.facts.retention.emotional_pattern);
     check(
-      `F6a. emotional_pattern получает expires_at из retention-таблицы (~${retentionDays} дней)`,
+      `F6a. emotional_pattern gets expires_at from the retention table (~${retentionDays} days)`,
       row1.expires_at && Math.abs(days(row1.expires_at) - retentionDays) < 1,
       `expires_at=${row1.expires_at}`,
     );
-    // Откатываем срок назад и подтверждаем тем же текстом — срок должен продлиться от «сейчас».
+    // Roll the deadline back and confirm with the same text — the deadline must extend from "now".
     await query(`UPDATE mem.user_facts SET expires_at = now() + interval '10 days' WHERE id=$1`, [r1.id]);
     const r2 = await saveFact(u.id, 'general', fact);
     const row2 = (await query(`SELECT expires_at FROM mem.user_facts WHERE id=$1`, [r1.id])).rows[0];
     check(
-      'F6b. Подтверждение продлевает expires_at от текущего момента',
+      'F6b. A confirmation extends expires_at from the current moment',
       r2.action === 'confirmed' && days(row2.expires_at) > retentionDays - 1,
       `action=${r2.action}, expires_at=${row2.expires_at}`,
     );
   }
 
-  // F7. Суждение о сроке жизни: именование («Тебя зовут Шарик») извлекается как бессрочный факт.
+  // F7. Lifetime judgement: a naming statement ("Тебя зовут Шарик") is extracted as a permanent fact.
   {
     const facts = await extractFacts({
       domainKey: 'general',
@@ -1242,14 +1242,14 @@ async function layerFactModel() {
     });
     const savable = facts.filter((f) => Number(f.confidence) >= config.facts.minConfidence);
     check(
-      'F7. «Тебя зовут Шарик» извлекается как бессрочный факт (ttl_days = null)',
+      'F7. "Тебя зовут Шарик" is extracted as a permanent fact (ttl_days = null)',
       savable.length >= 1 && savable.some((f) => f.ttl_days == null),
       JSON.stringify(facts),
     );
   }
 
-  // F8. Новое явное высказывание (user_statement) меняет закреплённый факт: активен «Бобик»,
-  // «Шарик» не активен (замещение с архивацией либо подтверждение с перезаписью формулировки).
+  // F8. A new explicit statement (user_statement) changes the pinned fact: "Бобик" is active,
+  // "Шарик" is not (replacement with archiving or confirmation with the wording rewritten).
   {
     const u = await freshUser('tf8');
     await saveFact(
@@ -1270,14 +1270,14 @@ async function layerFactModel() {
     const archiveOk =
       r.action !== 'replaced' || rows.some((x) => x.status === 'archived' && x.metadata?.replaced_by === String(r.id));
     check(
-      'F8. user_statement меняет закреплённый факт: активен «Бобик», «Шарик» не активен',
+      'F8. user_statement changes the pinned fact: "Бобик" active, "Шарик" not active',
       ['replaced', 'confirmed'].includes(r.action) && bobikActive && archiveOk,
-      `action=${r.action}, активных=${active.length}: ${active.map((x) => x.fact_text).join(' | ')}`,
+      `action=${r.action}, active=${active.length}: ${active.map((x) => x.fact_text).join(' | ')}`,
     );
   }
 
-  // F9. Сиюминутная оценка («Ты — весёлый») не порождает сохраняемого факта.
-  // Извлечение вариативно: считаем результатом большинство из (до) трёх попыток.
+  // F9. A momentary assessment ("Ты — весёлый") does not produce a savable fact.
+  // Extraction is variable: the result is the majority of (up to) three attempts.
   {
     let empty = 0;
     let nonEmpty = 0;
@@ -1296,11 +1296,11 @@ async function layerFactModel() {
         nonEmpty++;
       }
     }
-    check('F9. «Ты — весёлый» не порождает сохраняемого факта (большинство из 3)', empty >= 2, JSON.stringify(last));
+    check('F9. "Ты — весёлый" does not produce a savable fact (majority of 3)', empty >= 2, JSON.stringify(last));
   }
 
-  // F10. Рабочая договорённость («Будешь помогать мне с курсовой») извлекается со сроком
-  // (open_loop/goal, ttl_days задан) и продлевается при повторном упоминании курсовой.
+  // F10. A working arrangement ("Будешь помогать мне с курсовой") is extracted with a deadline
+  // (open_loop/goal, ttl_days set) and is extended when the term paper is mentioned again.
   {
     const u = await freshUser('tf10');
     const facts = await extractFacts({
@@ -1313,7 +1313,7 @@ async function layerFactModel() {
     );
     const withTtl = savable.filter((f) => Number(f.ttl_days) > 0);
     check(
-      'F10a. Договорённость о курсовой извлекается как open_loop/goal с ненулевым сроком',
+      'F10a. The term-paper arrangement is extracted as open_loop/goal with a non-zero deadline',
       withTtl.length >= 1,
       JSON.stringify(facts),
     );
@@ -1324,17 +1324,17 @@ async function layerFactModel() {
       const row = (await query(`SELECT expires_at FROM mem.user_facts WHERE id=$1`, [r1.id])).rows[0];
       const daysLeft = (new Date(row.expires_at).getTime() - Date.now()) / 86400000;
       check(
-        'F10b. Повторное упоминание курсовой продлевает срок факта',
+        'F10b. Mentioning the term paper again extends the fact deadline',
         r2.action === 'confirmed' && daysLeft > 10,
-        `action=${r2.action}, осталось дней ${daysLeft.toFixed(1)}`,
+        `action=${r2.action}, days left ${daysLeft.toFixed(1)}`,
       );
     }
   }
 }
 
-// ========================= Приватность защищённых данных ====================
+// ========================= Privacy of secure data ===========================
 async function layerPrivacy() {
-  section('Слой приватности защищённых данных');
+  section('Secure data privacy layer');
   const u = await freshUser('tpriv');
   const rec = await saveSecureRecord({
     userId: u.id,
@@ -1346,40 +1346,40 @@ async function layerPrivacy() {
   });
   const summaries = await listSecureSummaries(u.id);
   check(
-    'Резюме защищённой записи не содержит полного значения',
+    'The secure record summary does not contain the full value',
     summaries.length === 1 && !/567890/.test(summaries[0].redacted_summary),
   );
 
-  // Доступ к полному значению без согласия запрещён.
+  // Access to the full value without consent is forbidden.
   let denied = false;
   try {
     await getSecureValue(rec.id, 'оформление билета');
   } catch {
     denied = true;
   }
-  check('Полное значение недоступно без согласия', denied);
+  check('The full value is unavailable without consent', denied);
 
-  // После согласия и с указанием цели — доступно.
+  // After consent and with a stated purpose — available.
   await grantConsent(rec.id);
   const val = await getSecureValue(rec.id, 'оформление билета');
-  check('После согласия и с целью — полное значение доступно', val.value === '1234 567890');
+  check('After consent and with a purpose — the full value is available', val.value === '1234 567890');
 
-  // Без указания цели — отказ.
+  // Without a stated purpose — refusal.
   let noPurpose = false;
   try {
     await getSecureValue(rec.id, '');
   } catch {
     noPurpose = true;
   }
-  check('Без указания цели доступ запрещён', noPurpose);
+  check('Access without a stated purpose is forbidden', noPurpose);
 }
 
-// ========================= Полный сценарий диалога ==========================
+// ========================= Full dialog scenario =============================
 async function layerScenario() {
-  section('Полный сценарий: репетитор по математике');
+  section('Full scenario: math tutor');
   const ext = 'tscenario';
   await freshUser(ext);
-  // Серия сообщений с синхронной записью памяти.
+  // A series of messages with synchronous memory writes.
   await handleMessage({
     externalId: ext,
     userMessage: 'Я плохо понимаю квадратные уравнения.',
@@ -1405,17 +1405,17 @@ async function layerScenario() {
   const hasStyle = mem.some((m) => /прост|термин|коротк/i.test(m.fact_text));
   const tasks = (await query(`SELECT count(*)::int c FROM mem.scheduled_tasks WHERE user_id=$1`, [u.id])).rows[0].c;
   check(
-    'Сценарий: сохранена тема (квадратные уравнения)',
+    'Scenario: the topic is saved (quadratic equations)',
     hasTopic,
-    `факты: ${mem
+    `facts: ${mem
       .map((m) => m.fact_text)
       .join(' | ')
       .slice(0, 160)}`,
   );
-  check('Сценарий: сохранён стиль общения', hasStyle);
-  check('Сценарий: создано напоминание', tasks >= 1);
+  check('Scenario: the communication style is saved', hasStyle);
+  check('Scenario: a reminder is created', tasks >= 1);
 
-  // Возврат к теме: память темы доступна и подтягивается выборкой по релевантному запросу.
+  // Returning to the topic: the topic memory is available and is pulled in by a relevant query.
   const recall = await retrieveMemory({
     userId: u.id,
     domainKey: 'math_tutor',
@@ -1426,55 +1426,55 @@ async function layerScenario() {
     /квадратн|уравнен|прост|термин/i.test(m.memory_text),
   );
   check(
-    'Сценарий: при возврате память темы доступна через выборку',
+    'Scenario: on return the topic memory is available via retrieval',
     recalled,
-    `подтянуто: ${[...recall.domain, ...recall.profile]
+    `retrieved: ${[...recall.domain, ...recall.profile]
       .map((m) => m.memory_text)
       .join(' | ')
       .slice(0, 160)}`,
   );
 }
 
-// ========== СЛОЙ 6. Проактивность и режим собеседника (только при включённых флагах) ==========
+// ========== LAYER 6. Proactivity and companion mode (only with the flags enabled) ==========
 async function layerProactivity() {
-  section('Слой 6. Проактивность и режим собеседника');
+  section('Layer 6. Proactivity and companion mode');
 
-  // 6.1. Структура новых таблиц и их ограничений.
+  // 6.1. Structure of the new tables and their constraints.
   {
     const { rows: tabs } = await query(`SELECT tablename FROM pg_tables WHERE schemaname='mem'`);
     const have = new Set(tabs.map((t) => t.tablename));
     const need = ['topic_mentions', 'proactive_triggers', 'event_deliveries', 'proactive_contact_state'];
     check(
-      '6.1. Новые таблицы созданы',
+      '6.1. New tables created',
       need.every((t) => have.has(t)),
       need.filter((t) => !have.has(t)).join(','),
     );
     const { rows: idx } = await query(`SELECT indexdef FROM pg_indexes WHERE schemaname='mem'`);
     const defs = idx.map((i) => i.indexdef).join('\n');
     check(
-      '6.1. Индексы новых таблиц есть',
+      '6.1. Indexes of the new tables exist',
       /topic_mentions/.test(defs) && /proactive_triggers/.test(defs) && /proactive_contact_state/.test(defs),
     );
   }
 
-  // 6.2. Темпоральный контекст: время суток валидно, пауза форматируется.
+  // 6.2. Temporal context: the time of day is valid, the pause is formatted.
   {
     const ctx = buildTemporalContext('Europe/Moscow', new Date(Date.now() - 3 * 3600000));
     const todOk = ['утро', 'день', 'вечер', 'ночь'].includes(ctx.timeOfDay);
     const dayOk = ['будний день', 'выходной', 'пятница вечер', 'начало рабочей недели'].includes(ctx.dayType);
     check(
-      '6.2. Темпоральный контекст: корректные время суток и тип дня',
+      '6.2. Temporal context: correct time of day and day type',
       todOk && dayOk,
       `${ctx.timeOfDay}/${ctx.dayType}`,
     );
     check(
-      '6.2. Пауза три часа форматируется как часы',
+      '6.2. A three-hour pause is formatted as hours',
       /час/.test(ctx.timeSinceLastMessage || ''),
       ctx.timeSinceLastMessage,
     );
   }
 
-  // 6.3. Тематический трекинг: счётчик, сглаживание, категоризация.
+  // 6.3. Topic tracking: counter, smoothing, categorization.
   {
     const u = await freshUser('ttopic');
     const dom = await getDomainId('general');
@@ -1484,8 +1484,8 @@ async function layerProactivity() {
       `SELECT mention_count, user_engagement_score FROM mem.topic_mentions WHERE user_id=$1 AND topic_key='fitness'`,
       [u.id],
     );
-    check('6.3. Счётчик упоминаний растёт', rows[0]?.mention_count === 2, `count=${rows[0]?.mention_count}`);
-    check('6.3. Вовлечённость сглажена (≈0.8)', Math.abs(Number(rows[0]?.user_engagement_score) - 0.8) < 0.01);
+    check('6.3. The mention counter grows', rows[0]?.mention_count === 2, `count=${rows[0]?.mention_count}`);
+    check('6.3. Engagement is smoothed (≈0.8)', Math.abs(Number(rows[0]?.user_engagement_score) - 0.8) < 0.01);
 
     for (let i = 0; i < 5; i++) {
       await upsertTopicMentions(u.id, dom, [{ topic_key: 'smalltalk', user_engagement: 0.1 }]);
@@ -1493,13 +1493,13 @@ async function layerProactivity() {
     await upsertTopicMentions(u.id, dom, [{ topic_key: 'travel', user_engagement: 0.9 }]);
     const tc = await getTopicContext(u.id, dom);
     check(
-      '6.3. Высокововлечённая тема распознана',
+      '6.3. A high-engagement topic is recognized',
       tc.highEnergyTopics.includes('fitness') || tc.highEnergyTopics.includes('travel'),
     );
-    check('6.3. Выгоревшая тема распознана', tc.burnedTopics.includes('smalltalk'), tc.burnedTopics.join(','));
+    check('6.3. A burned-out topic is recognized', tc.burnedTopics.includes('smalltalk'), tc.burnedTopics.join(','));
   }
 
-  // 6.4. Алгоритмическая contact policy: deny-сценарии не требуют генерации текста.
+  // 6.4. Algorithmic contact policy: deny scenarios require no text generation.
   {
     const now = new Date('2026-06-07T10:00:00.000Z');
     const base = {
@@ -1513,11 +1513,11 @@ async function layerProactivity() {
     };
     const soft = { triggerType: 'inactivity', messageKind: 'soft_proactive', importance: 'normal', topicKey: 'idea' };
     check(
-      '6.4. Policy разрешает мягкую инициативу в активном режиме',
+      '6.4. Policy allows a soft initiative in active mode',
       evaluateContactPolicy({ state: base, candidate: soft, now }).allowed === true,
     );
     check(
-      '6.4. Policy блокирует новую мягкую инициативу без ответа',
+      '6.4. Policy blocks a new soft initiative while unanswered',
       evaluateContactPolicy({
         state: { ...base, unanswered_proactive_count: 1, daily_soft_count: 1 },
         candidate: soft,
@@ -1525,7 +1525,7 @@ async function layerProactivity() {
       }).reason === 'unanswered_soft_proactive',
     );
     check(
-      '6.4. Policy разрешает high follow-up после большой паузы',
+      '6.4. Policy allows a high follow-up after a long pause',
       evaluateContactPolicy({
         state: {
           ...base,
@@ -1538,7 +1538,7 @@ async function layerProactivity() {
       }).allowed === true,
     );
     check(
-      '6.4. Policy переводит второй игнор в тишину до ответа',
+      '6.4. Policy turns a second ignore into silence until a reply',
       evaluateContactPolicy({
         state: { ...base, unanswered_proactive_count: 2 },
         candidate: { ...soft, importance: 'high' },
@@ -1546,7 +1546,7 @@ async function layerProactivity() {
       }).reason === 'silent_until_user_reply',
     );
     check(
-      '6.4. Социальные сообщения не отправляются фоновым воркером',
+      '6.4. Social messages are not sent by the background worker',
       evaluateContactPolicy({
         state: base,
         candidate: { triggerType: 'daily_checkin', messageKind: 'social_proactive', importance: 'low' },
@@ -1555,20 +1555,20 @@ async function layerProactivity() {
     );
   }
 
-  // 6.5. Contact state: запись отправки и входящего сообщения.
+  // 6.5. Contact state: recording an outgoing send and an inbound message.
   {
     const u = await freshUser('tcontact');
     const soft = { triggerType: 'inactivity', messageKind: 'soft_proactive', importance: 'normal', topicKey: 'idea' };
     await recordProactiveSent({ userId: u.id, candidate: soft, sentAt: new Date() });
     const waiting = await getContactState(u.id);
     check(
-      '6.5. Отправка мягкой инициативы увеличивает unanswered',
+      '6.5. Sending a soft initiative increments unanswered',
       waiting.unanswered_proactive_count === 1 && waiting.mode === 'cautious',
     );
     await recordProactiveSent({ userId: u.id, candidate: { ...soft, importance: 'high' }, sentAt: new Date() });
     const quiet = await getContactState(u.id);
     check(
-      '6.5. Второе мягкое сообщение переводит state в quiet',
+      '6.5. A second soft message moves the state to quiet',
       quiet.unanswered_proactive_count === 2 && quiet.mode === 'quiet' && Boolean(quiet.quiet_until),
     );
     const inbound = await recordUserInboundForContactPolicy({
@@ -1577,22 +1577,22 @@ async function layerProactivity() {
     });
     const active = await getContactState(u.id);
     check(
-      '6.5. Входящее сообщение сбрасывает unanswered и quiet',
+      '6.5. An inbound message resets unanswered and quiet',
       active.unanswered_proactive_count === 0 && active.mode === 'active' && active.quiet_until === null,
     );
-    check('6.5. Входящее после паузы даёт welcome_back сигнал', inbound.welcomeBack === true);
+    check('6.5. An inbound after a pause yields the welcome_back signal', inbound.welcomeBack === true);
   }
 
-  // 6.6. Триггеры и анти-спам: идемпотентное создание, срабатывание и пропуск повтора.
+  // 6.6. Triggers and anti-spam: idempotent creation, firing and skipping a repeat.
   {
     const u = await freshUser('tprtrig');
     const dom = await getDomainId('general');
     await ensureDefaultTriggers(u.id, dom, TRIGGER_DEFAULTS);
-    await ensureDefaultTriggers(u.id, dom, TRIGGER_DEFAULTS); // повтор не должен плодить дублей
+    await ensureDefaultTriggers(u.id, dom, TRIGGER_DEFAULTS); // a repeat must not multiply duplicates
     const cnt = (await query(`SELECT count(*)::int c FROM mem.proactive_triggers WHERE user_id=$1`, [u.id])).rows[0].c;
-    check('6.4. Создано ровно 4 триггера идемпотентно', cnt === 4, `триггеров: ${cnt}`);
+    check('6.4. Exactly 4 triggers created idempotently', cnt === 4, `triggers: ${cnt}`);
 
-    // Сообщение пользователя двухдневной давности — inactivity готов, а welcome_back не стреляет из фона.
+    // A two-day-old user message — inactivity is ready, but welcome_back does not fire from the background.
     const conv = await ensureConversation(u.id, 'general');
     await query(
       `INSERT INTO mem.conversation_messages (conversation_id, user_id, role, content, created_at)
@@ -1604,7 +1604,7 @@ async function layerProactivity() {
       [u.id],
     );
     const welcomeReady = await shouldFire(welcomeRows[0], u.id);
-    check('6.6. Триггер welcome_back не срабатывает от фонового молчания', welcomeReady === false);
+    check('6.6. The welcome_back trigger does not fire from background silence', welcomeReady === false);
 
     const { rows: trows } = await query(
       `SELECT * FROM mem.proactive_triggers WHERE user_id=$1 AND trigger_type='inactivity'`,
@@ -1612,14 +1612,14 @@ async function layerProactivity() {
     );
     const trig = trows[0];
     const beforeFire = await shouldFire(trig, u.id);
-    check('6.6. Триггер inactivity готов сработать', beforeFire === true);
+    check('6.6. The inactivity trigger is ready to fire', beforeFire === true);
 
     const fired = await fire(trig, { id: u.id, timezone: 'Europe/Moscow' });
-    check('6.6. Проактивное сообщение сгенерировано и доставлено', fired === true);
+    check('6.6. The proactive message is generated and delivered', fired === true);
 
     const { rows: trows2 } = await query(`SELECT * FROM mem.proactive_triggers WHERE id=$1`, [trig.id]);
     const afterFire = await shouldFire(trows2[0], u.id);
-    check('6.6. Анти-спам: повторное срабатывание подавлено', afterFire === false);
+    check('6.6. Anti-spam: a repeated firing is suppressed', afterFire === false);
 
     const outbox = (
       await query(
@@ -1631,22 +1631,22 @@ async function layerProactivity() {
       await query(`SELECT count(*)::int c FROM mem.conversation_messages WHERE user_id=$1 AND role='assistant'`, [u.id])
     ).rows[0].c;
     check(
-      '6.7. Сообщение попало в outbox и в историю диалога',
+      '6.7. The message landed in the outbox and in the dialog history',
       outbox >= 1 && reply >= 1,
-      `outbox ${outbox}, реплик ${reply}`,
+      `outbox ${outbox}, replies ${reply}`,
     );
   }
 
-  // 6.7b. Запрет contact policy: фоновой проход не доходит до генерации текста.
-  // Триггер готов сработать, но политика контакта запрещает писать пользователю, поэтому ни сообщение в
-  // историю диалога, ни запись в очередь доставки не появляются (генератор текста вызывается только внутри
-  // fire(), а fire() при запрете не запускается).
+  // 6.7b. Contact policy denial: the background pass never reaches text generation.
+  // The trigger is ready to fire, but the contact policy forbids messaging the user, so neither a message
+  // in the dialog history nor a delivery queue record appears (the text generator is only called inside
+  // fire(), and fire() is not started when denied).
   {
     const u = await freshUser('tdeny');
     const dom = await getDomainId('general');
     await ensureDefaultTriggers(u.id, dom, TRIGGER_DEFAULTS);
 
-    // Сообщение двухдневной давности делает триггер неактивности готовым к срабатыванию.
+    // A two-day-old message makes the inactivity trigger ready to fire.
     const conv = await ensureConversation(u.id, 'general');
     await query(
       `INSERT INTO mem.conversation_messages (conversation_id, user_id, role, content, created_at)
@@ -1654,8 +1654,8 @@ async function layerProactivity() {
       [conv.id, u.id],
     );
 
-    // Переводим состояние контакта в «тишину»: бот недавно дважды написал и теперь ждёт ответа пользователя.
-    await getContactState(u.id); // создаёт строку состояния, если её ещё нет
+    // Move the contact state to "silence": the bot has recently written twice and now awaits the user's reply.
+    await getContactState(u.id); // creates the state row if it does not exist yet
     await query(
       `UPDATE mem.proactive_contact_state
           SET unanswered_proactive_count = $2, quiet_until = now() + interval '12 hours'
@@ -1669,12 +1669,12 @@ async function layerProactivity() {
     ).rows[0];
     const candidate = classifyTriggerCandidate(inactivity);
     check(
-      '6.7b. Триггер готов сработать, но contact policy запрещает контакт',
+      '6.7b. The trigger is ready to fire, but the contact policy forbids contact',
       (await shouldFire(inactivity, u.id)) === true && evaluateContactPolicy({ state, candidate }).allowed === false,
     );
 
-    // Прогоняем фоновой контур только по тестовому пользователю: остальные триггеры временно отключаем,
-    // а глобальный флаг проактивности включаем на время проверки, затем восстанавливаем исходное состояние.
+    // Run the background loop only for the test user: other triggers are temporarily disabled,
+    // and the global proactivity flag is enabled for the check, then the original state is restored.
     const { rows: otherTrig } = await query(
       `SELECT id FROM mem.proactive_triggers WHERE user_id <> $1 AND enabled = true`,
       [u.id],
@@ -1703,13 +1703,13 @@ async function layerProactivity() {
       await query(`SELECT count(*)::int c FROM mem.conversation_messages WHERE user_id=$1 AND role='assistant'`, [u.id])
     ).rows[0].c;
     check(
-      '6.7b. При запрете policy нет ни проактивного сообщения, ни записи в очереди доставки',
+      '6.7b. When policy denies, there is neither a proactive message nor a delivery queue record',
       denyOutbox === 0 && denyReply === 0,
-      `outbox ${denyOutbox}, реплик ${denyReply}`,
+      `outbox ${denyOutbox}, replies ${denyReply}`,
     );
   }
 
-  // 6.8. Защита от повторной доставки события (на уровне ограничения уникальности).
+  // 6.8. Protection against re-delivering an event (at the uniqueness constraint level).
   {
     const u = await freshUser('tevdup');
     await query(

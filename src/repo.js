@@ -127,7 +127,7 @@ export async function saveMessage(conversationId, userId, role, content, extra =
     try {
       await notify('chat_message', JSON.stringify({ userId: String(userId), messageId: rows[0].id, role }));
     } catch (err) {
-      console.warn(`Не удалось отправить уведомление chat_message: ${err.message}`);
+      console.warn(`Failed to send the chat_message notification: ${err.message}`);
     }
   }
   return rows[0];
@@ -266,8 +266,8 @@ export async function getRecentMessages(conversationId, limit = 10) {
   return rows.reverse();
 }
 
-// Дописать саммари ответа ассистента в metadata сообщения. Саммари считается асинхронно после
-// доставки ответа, поэтому это отдельный UPDATE, а не часть saveMessage.
+// Append the assistant answer summary to the message metadata. The summary is computed asynchronously
+// after the answer is delivered, so this is a separate UPDATE rather than part of saveMessage.
 export async function setMessageSummary(messageId, summary) {
   await query(
     `UPDATE mem.conversation_messages
