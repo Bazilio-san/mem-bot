@@ -105,6 +105,19 @@ function openBig(idx) {
   bigContent.value = messageContent(messages.value[idx]);
 }
 
+function isLong(m) {
+  return messageContent(m).length > INLINE_LIMIT;
+}
+
+// Отступ первой строки раскрытого содержимого под абсолютно позиционированный бэдж роли
+// (и кнопку «открыть в окне» у длинных сообщений). Ширина бэджа оценивается по длине имени роли:
+// шрифт 10px полужирный в верхнем регистре — примерно 6.5px на символ плюс горизонтальные паддинги.
+function indentFor(m) {
+  const badge = Math.round(m.role.length * 6.5) + 12;
+  const pop = isLong(m) ? 18 : 0;
+  return `${badge + pop + 8}px`;
+}
+
 function setAllMessages(open) {
   openedMessages.value = open ? new Set(messages.value.map((_, i) => i)) : new Set();
 }
@@ -230,22 +243,27 @@ onBeforeUnmount(() => {
         class="pv-msg"
         :class="[`msg-${m.role}`, { open: openedMessages.has(idx) }]"
       >
-        <div class="pv-msg-h" @click="clickMessage(idx)">
+        <div v-if="!openedMessages.has(idx)" class="pv-msg-h" @click="clickMessage(idx)">
           <span class="pv-role" :class="`role-${m.role}`">{{ m.role }}</span>
-          <button
-            v-if="messageContent(m).length > INLINE_LIMIT"
-            type="button"
-            class="pv-pop"
-            title="Открыть в окне"
-            @click.stop="openBig(idx)"
-          >
+          <button v-if="isLong(m)" type="button" class="pv-pop" title="Открыть в окне" @click.stop="openBig(idx)">
             ⤢
           </button>
           <span v-for="tn in toolCallTags(m)" :key="tn" class="pv-tcall">🛠 {{ tn }}</span>
           <span class="pv-prev">{{ preview(m) }}</span>
           <span class="pv-len">{{ messageContent(m).length.toLocaleString('ru-RU') }} симв.</span>
         </div>
-        <div v-if="openedMessages.has(idx)" class="pv-msg-b">
+        <!-- Раскрытое сообщение — единый блок с фоном роли, без повторения строки-превью. Бэдж и кнопка
+             позиционированы абсолютно относительно блока, поэтому при прокрутке содержимого остаются на
+             месте; первая строка текста начинается с отступа (CSS-переменная), чтобы бэдж поместился. -->
+        <div v-else class="pv-msg-o" :style="{ '--pv-indent': indentFor(m) }">
+          <span class="pv-float">
+            <span class="pv-role" :class="`role-${m.role}`" title="Свернуть" @click="clickMessage(idx)">
+              {{ m.role }}
+            </span>
+            <button v-if="isLong(m)" type="button" class="pv-pop" title="Открыть в окне" @click.stop="openBig(idx)">
+              ⤢
+            </button>
+          </span>
           <div v-if="m.tool_calls?.length" class="pv-tcalls">
             <div v-for="(tc, i) in m.tool_calls" :key="i">
               <b>{{ tc.function?.name }}</b>
@@ -427,40 +445,61 @@ onBeforeUnmount(() => {
   font-size: 10px;
   flex: none;
 }
-.pv-msg-b {
-  border-top: 1px dashed rgba(0, 0, 0, 0.1);
-  padding: 6px 8px;
+/* Раскрытое сообщение — один блок: единый фон роли на всём диве, без строки-превью. */
+.pv-msg-o {
+  position: relative;
+  border-radius: 6px;
 }
-/* Внутри раскрытого сообщения у просмотрщика содержимого убираются собственная рамка и белая
-   подложка, а цветной фон по роли получает только сам блок текста (.cv-out). */
-.pv-msg-b :deep(.cv) {
+/* Бэдж роли и кнопка диалога позиционированы абсолютно относительно блока (прокрутка идёт внутри
+   .cv-out, поэтому при скроллинге они остаются на месте). Клик по бэджу сворачивает сообщение. */
+.pv-float {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.pv-float .pv-role {
+  cursor: pointer;
+}
+/* У просмотрщика содержимого убираются собственная рамка и белая подложка — фон задаёт .pv-msg-o. */
+.pv-msg-o :deep(.cv) {
   border: none;
   background: transparent;
 }
-.pv-msg-b :deep(.cv-out) {
+/* Первая строка начинается с отступа под бэдж (ширина посчитана в indentFor, передана переменной). */
+.pv-msg-o :deep(.cv-out) {
   padding: 4px 20px 4px 8px;
-  border-radius: 4px;
-}
-.pv-msg.msg-system .pv-msg-b :deep(.cv-out) {
-  background: #f3efff;
+  border-radius: 6px;
+  text-indent: var(--pv-indent, 0);
 }
 /* Раскрытый сырой текст сообщения — обычный текст, как в строке-превью, а не код-блок: моноширинный
    шрифт ContentViewer заменяется шрифтом интерфейса. JSON-просмотр (.cv-json) остаётся моноширинным. */
-.pv-msg-b :deep(.cv-plain) {
+.pv-msg-o :deep(.cv-plain) {
   font:
     12px/1.4 system-ui,
     'Segoe UI',
     Roboto,
     sans-serif;
 }
-.pv-msg.msg-assistant .pv-msg-b :deep(.cv-out) {
+.pv-msg.msg-system .pv-msg-o {
+  background: #f3efff;
+}
+.pv-msg.msg-assistant .pv-msg-o {
   background: #edf7ed;
 }
-.pv-msg.msg-user .pv-msg-b :deep(.cv-out) {
+.pv-msg.msg-user .pv-msg-o {
   background: #fffad8;
 }
 .pv-tcalls {
   margin-bottom: 6px;
+}
+/* Блок вызовов инструментов в раскрытом сообщении тоже сдвигается правее бэджа. */
+.pv-msg-o .pv-tcalls {
+  margin: 4px 8px 6px;
+  padding-left: var(--pv-indent, 8px);
 }
 .pv-tool-name {
   font-weight: 600;
