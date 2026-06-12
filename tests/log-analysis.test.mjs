@@ -111,7 +111,7 @@ const fixture = (name) => new URL(`./fixtures/${name}`, import.meta.url).pathnam
     cliPresets: [{ name: 'boom', command: process.execPath, args: [fixture('cli-fail.cjs')], timeoutSec: 30 }],
     maxOutputChars: 10_000,
   };
-  await assert.rejects(runCli(cfg, 'boom', 'x', fakeRes()), /кодом 3.*причина-сбоя/s);
+  await assert.rejects(runCli(cfg, 'boom', 'x', fakeRes()), /code 3.*причина-сбоя/s);
 }
 
 // 7. Таймаут: зависшая команда останавливается с понятной ошибкой.
@@ -120,7 +120,7 @@ const fixture = (name) => new URL(`./fixtures/${name}`, import.meta.url).pathnam
     cliPresets: [{ name: 'hang', command: process.execPath, args: [fixture('cli-hang.cjs')], timeoutSec: 1 }],
     maxOutputChars: 10_000,
   };
-  await assert.rejects(runCli(cfg, 'hang', 'x', fakeRes()), /не уложился в 1 с/);
+  await assert.rejects(runCli(cfg, 'hang', 'x', fakeRes()), /exceeded the 1s timeout/);
 }
 
 // 8. Лимит вывода: болтливая команда обрезается с пометкой в потоке.
@@ -131,7 +131,7 @@ const fixture = (name) => new URL(`./fixtures/${name}`, import.meta.url).pathnam
   };
   const res = fakeRes();
   await runCli(cfg, 'chatty', 'x', res);
-  assert.ok(framesText(res.frames).includes('обрезан по лимиту'), 'превышение лимита помечено в потоке');
+  assert.ok(framesText(res.frames).includes('output truncated at maxOutputChars'), 'превышение лимита помечено в потоке');
 }
 
 config.admin.host = savedHost;

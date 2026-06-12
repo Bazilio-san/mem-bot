@@ -1,0 +1,83 @@
+[
+  {
+    "id": "c01",
+    "input": "Найди билеты из Москвы в Сочи на завтра",
+    "expect_skill": "flight-search",
+    "note": "прямой запрос поиска авиабилетов"
+  },
+  {
+    "id": "c02",
+    "input": "Помоги решить квадратное уравнение x^2 - 5x + 6 = 0",
+    "expect_skill": "math-tutor",
+    "note": "задача по математике"
+  },
+  {
+    "id": "c03",
+    "input": "Объясни логарифмы простыми словами",
+    "expect_skill": "math-tutor",
+    "note": "объяснение математической темы"
+  },
+  {
+    "id": "c04",
+    "input": "Сколько будет 17 умножить на 23?",
+    "expect_needs_memory": false,
+    "note": "самодостаточная арифметика: память не нужна; навык не проверяем — допустимы general и math-tutor"
+  },
+  {
+    "id": "c05",
+    "input": "Напомни мне завтра в 9 утра позвонить маме",
+    "expect_skill": "general",
+    "expect_scopes_include": ["reminder"],
+    "note": "создание напоминания — общий навык, область памяти reminder"
+  },
+  {
+    "id": "c06",
+    "input": "Какие у меня активные напоминания?",
+    "expect_skill": "general",
+    "expect_scopes_include": ["reminder"],
+    "note": "вопрос о напоминаниях"
+  },
+  {
+    "id": "c07",
+    "input": "Что ты обо мне помнишь?",
+    "expect_skill": "general",
+    "expect_scopes_include": ["profile"],
+    "note": "вопрос о памяти о пользователе"
+  },
+  {
+    "id": "c08",
+    "input": "Не люблю ночные рейсы",
+    "expect_skill": "flight-search",
+    "note": "утверждение-предпочтение в теме перелётов"
+  },
+  {
+    "id": "c09",
+    "input": "А на следующий день есть варианты?",
+    "recent": [
+      { "role": "user", "content": "Найди билеты из Москвы в Сочи на 20 июня" },
+      { "role": "assistant", "content": "Нашёл несколько вариантов на 20 июня: утренний рейс за 5 200 ₽ и вечерний за 4 800 ₽." }
+    ],
+    "current_domain": "flight_search",
+    "expect_skill": "flight-search",
+    "note": "короткий follow-up разрешается по контексту диалога"
+  },
+  {
+    "id": "c10",
+    "input": "Создай навык для подбора рецептов ужина",
+    "expect_skill": "skill-author",
+    "note": "просьба создать новый навык"
+  },
+  {
+    "id": "c11",
+    "input": "Привет! Как твои дела?",
+    "expect_skill": "general",
+    "note": "светская беседа — общий навык"
+  },
+  {
+    "id": "c12",
+    "input": "Переведи фразу good morning на русский",
+    "expect_skill": "general",
+    "expect_needs_memory": false,
+    "note": "самодостаточный перевод: память не нужна"
+  }
+]

@@ -216,13 +216,13 @@ try {
     assert.equal(fresh.length, 2, 'свежие записи цикла не пострадали');
   }
 
-  // --- 6. Идемпотентность скрипта переноса: повторный запуск не создаёт дубликатов ---------------------
+  // --- 6. Идемпотентность миграций БД логов: повторный прогон не создаёт строк и не падает -------------
   {
     const count = async () => Number((await queryLog(`SELECT COUNT(*) AS n FROM log.llm_request`)).rows[0].n);
     const before = await count();
-    execFileSync(process.execPath, ['scripts/migrate-llm-log-db.js'], { stdio: 'pipe' });
+    execFileSync(process.execPath, ['src/migrate.js'], { stdio: 'pipe' });
     const after = await count();
-    assert.equal(after, before, 'повторный перенос не добавляет строк (ON CONFLICT DO NOTHING)');
+    assert.equal(after, before, 'повторный прогон миграций не добавляет строк');
   }
 
   console.log('llm-log-integration.test.mjs: ok');

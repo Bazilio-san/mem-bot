@@ -203,6 +203,19 @@ export async function chatStream({
 // explicit call argument → config.llm.responseFormat → 'json_schema'.
 const RESPONSE_FORMATS = ['json_schema', 'json_object'];
 
+// Eval-mode temperature override for structured service calls (classifier, extraction, compression):
+// the eval runner (scripts/eval.js --deterministic) sets EVAL_TEMPERATURE=0 to reduce run-to-run noise.
+// Read per call (not cached) and applied ONLY when the variable is set — some providers/models reject
+// a non-default temperature, so this stays strictly opt-in and never affects production.
+function evalTemperature() {
+  const raw = process.env.EVAL_TEMPERATURE;
+  if (raw === undefined || raw === '') {
+    return null;
+  }
+  const t = Number(raw);
+  return Number.isFinite(t) ? t : null;
+}
+
 // Prepare an arbitrary JSON Schema for the provider's json_schema mode. Strict structured outputs require
 // `additionalProperties: false` and a complete `required` list on EVERY object node, so both are filled in
 // recursively (on a deep copy — the caller's schema is not mutated). Free-form objects
@@ -281,6 +294,7 @@ No markdown, no explanations, no text before or after the JSON. Only the object 
     format = { type: 'json_object' };
   }
 
+  const evalTemp = evalTemperature();
   const body = {
     model,
     messages: [
@@ -288,6 +302,7 @@ No markdown, no explanations, no text before or after the JSON. Only the object 
       { role: 'user', content: user },
     ],
     response_format: format,
+    ...(evalTemp != null ? { temperature: evalTemp } : {}),
   };
   debugLlm(`chatJSON -> ${model} ${schemaName} (${mode})`);
   const startedAt = Date.now();

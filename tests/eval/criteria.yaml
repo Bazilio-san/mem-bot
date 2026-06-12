@@ -1,0 +1,47 @@
+# Критерии качества цикла тюнинга — ЕДИНЫЙ источник истины для прогонщика оценок (scripts/eval.js),
+# LLM-судьи (scripts/eval/judge.js) и отчёта сравнения (scripts/eval-compare.js). Пороги, оси и веса
+# не дублируются ни в коде, ни в отчётах. Подробности: claudedocs/self-tuning-infrastructure.md §8.
+#
+# Правка этого файла — отдельное событие: отдельный коммит с обоснованием, НЕ в той же ветке, где
+# меняется промпт или код (правило §7.2 о «подгонке экзамена под ученика»). Изменения принимает человек.
+
+# Версия критериев; включается в summary.json каждого прогона.
+version: 1
+
+suites:
+  # Классификатор намерений: детерминированное сравнение полей ответа с ожиданиями кейса
+  # (tests/eval/classify_cases.json). Порог — минимальная доля пройденных кейсов.
+  classify:
+    type: deterministic
+    cases_file: tests/eval/classify_cases.json
+    pass_threshold: 0.9
+  # Извлечение фактов: кейсы «сохранять/не сохранять» (tests/memory_cases.json — канонический набор,
+  # его же использует npm test). Порог ниже classify: извлечение сильнее зависит от вариативности модели.
+  facts:
+    type: deterministic
+    cases_file: tests/memory_cases.json
+    pass_threshold: 0.8
+  # Диалоговые сценарии (tests/scenarios/*.json): детерминированные проверки упоминаний
+  # плюс LLM-судья по рубрике. Оси: шкала, минимально допустимый средний балл, вес в сводном балле.
+  dialog:
+    type: judge
+    scenarios_dir: tests/scenarios
+    axes:
+      relevance:         { scale: [1, 5], min_avg: 4.0, weight: 0.30 }
+      memory_usage:      { scale: [1, 5], min_avg: 4.0, weight: 0.25 }
+      persona:           { scale: [1, 5], min_avg: 3.5, weight: 0.15 }
+      format:            { scale: [1, 5], min_avg: 4.0, weight: 0.15 }
+      no_hallucinations: { scale: [1, 5], min_avg: 4.5, weight: 0.15 }
+
+# Пороги приёмки сравнения «было/стало» (scripts/eval-compare.js, §6).
+acceptance:
+  # Шумовой допуск среднего балла судьи: ухудшение в пределах допуска не считается регрессией.
+  quality_drop_tolerance: 0.2
+  # Допустимый рост средней цены цикла (в процентах), если цель изменения — не экономия.
+  cost_increase_max_pct: 10
+  # Допустимый рост p95 задержки (в процентах).
+  latency_p95_increase_max_pct: 15
+
+budget:
+  # Стоп-лимит стоимости одного eval-прогона в долларах (§7.2): прогонщик останавливается при превышении.
+  eval_run_max_usd: 2.0

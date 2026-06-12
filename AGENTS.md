@@ -58,3 +58,22 @@ When you need to drive the live bot in Telegram Web — verifying streaming draf
 any end-to-end behaviour by actually sending messages and watching the chat — use the `/test-telegram-bot` skill. It
 holds the full procedure: restart the bot to load new code, open the chat, the `contenteditable` input selector, how
 to observe a streaming draft, and the streaming gating rules.
+
+## Bot tuning loop (observability, scenarios, evals)
+
+Full methodology: `claudedocs/self-tuning-infrastructure.md`; the working procedure lives in the `/tune-bot` skill —
+invoke it for any "improve prompt X / reduce cost / investigate regression" task instead of improvising. Cheat sheet:
+
+- `node scripts/llm-log-export.js --last 20 --kind <request_kind>` — LLM log overview (metadata only); details
+  strictly by id: `--id <llm_request_id> --fields payload.messages,response`; content search: `--grep <str>`.
+- `node scripts/run-scenario.js tests/scenarios/<name>.json` — replay a scripted dialog through the full pipeline
+  (no Telegram); artifacts land in `claudedocs/experiments/`.
+- `node scripts/eval.js --suite all --label <label>` — run reference suites (classify, facts, dialog+judge);
+  thresholds and the cost stop-limit come from `tests/eval/criteria.yaml`.
+- `node scripts/eval-compare.js <baselineDir> <candidateDir>` — was/became report with acceptance verdict.
+- `node scripts/delete-user.js --test-users --yes` — cleanup after runs.
+
+Hard rules: runs only with `NODE_ENV=test` (scripts force it); one experiment = one change; never edit
+`tests/eval/criteria.yaml` or the reference cases in the same branch as a prompt/code change; merging an
+experiment branch is always a human decision. Context economy: read `summary.json` / `transcript.summary.md`
+first, open `cases/<id>.json` only for failures, delegate bulk log reading to a subagent.

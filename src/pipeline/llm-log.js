@@ -5,7 +5,9 @@
 // database, see src/db.js queryLog) with a single multi-row INSERT; a database trigger fills the narrow
 // log.llm_usage table itself. On a graceful shutdown flushLlmLog() drains the rest of the buffer.
 // The buffering machinery is shared with the agent event journal — see src/pipeline/log-writer.js.
+import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { getBotBuildInfo } from '../build-metadata.js';
 import { getLlmContext } from './llm-context.js';
 import { priceUsd } from './llm-pricing.js';
 import { createBatchWriter, truncateJson } from './log-writer.js';
@@ -34,6 +36,9 @@ export const REQUEST_KINDS = Object.freeze({
   TTS: 'tts',
   // AI analysis of a logged request from the admin log viewer (POST /api/llm-log/analyze).
   LOG_ANALYSIS: 'log_analysis',
+  // LLM judge of the eval harness (scripts/eval.js). A separate kind so judge calls never mix with
+  // production requests and their cost is visible on its own.
+  EVAL_JUDGE: 'eval_judge',
   // Fallback marker: the request kind wasn't passed. This signals a bug in the calling code — every
   // chat.completions call must specify kind. Records with this kind in the log expose "illegal" calls.
   UNTYPED: 'untyped',
@@ -54,6 +59,7 @@ export const REQUEST_KIND_DISPLAY = Object.freeze({
   answer_summary: 'JSON',
   voice_summary: 'JSON',
   image_prompt_translate: 'JSON',
+  eval_judge: 'JSON',
   // Service/binary metadata.
   embedding: 'JSON',
   tts: 'JSON',
@@ -106,6 +112,8 @@ export const COLUMNS = [
   'status',
   'error',
   'is_test',
+  'git_commit',
+  'prompt_hash',
 ];
 
 // Current logging settings (with sensible defaults if the llmLog section is absent).
@@ -134,6 +142,42 @@ export function __setDbQueryForTests(fn) {
 // Test-run flag: records are marked is_test so they can be cleaned up after the run.
 function isTestRun() {
   return process.env.NODE_ENV === 'test';
+}
+
+// Short git HEAD hash of the running process, computed once lazily. Ties every log record to the code
+// version that produced it (the tuning loop compares runs across commits). null outside a git checkout.
+let cachedGitCommit;
+function gitCommit() {
+  if (cachedGitCommit === undefined) {
+    try {
+      cachedGitCommit = getBotBuildInfo().shortCommit || null;
+    } catch {
+      cachedGitCommit = null;
+    }
+  }
+  return cachedGitCommit;
+}
+
+// SHA-256 (first 16 hex chars) of the concatenated system messages of a chat.completions payload.
+// Identifies the exact prompt text version that produced the record; null when there is no system prompt
+// (binary endpoints, embeddings). Computed centrally here so no call site needs changing.
+function promptHashOf(payload) {
+  try {
+    const messages = payload?.messages;
+    if (!Array.isArray(messages)) {
+      return null;
+    }
+    const system = messages
+      .filter((m) => m?.role === 'system' && typeof m.content === 'string')
+      .map((m) => m.content)
+      .join('\n');
+    if (!system) {
+      return null;
+    }
+    return crypto.createHash('sha256').update(system).digest('hex').slice(0, 16);
+  } catch {
+    return null;
+  }
 }
 
 // Infer the provider from the base URL: groq → 'groq', empty/api.openai.com → 'openai', otherwise 'proxy'.
@@ -220,6 +264,8 @@ export function buildRecord(input) {
       status: input.status || 'ok',
       error: input.error ? String(input.error).slice(0, 4000) : null,
       is_test: isTestRun(),
+      git_commit: gitCommit(),
+      prompt_hash: promptHashOf(input.payload),
     };
   } catch {
     return null;

@@ -85,6 +85,12 @@ server (see `src/mcp/client.js:134` and `src/pipeline/tools.js:19`), so its `des
 side and has no coordinate in the local tool-definition registry. The model sees it under a server-prefixed name
 (e.g. `yafly__search_flights`), while skills reference it by the logical name `search_flights` without a prefix.
 
+## Eval Harness Prompts
+
+| Block | Coordinate | How it is used |
+|-------|------------|----------------|
+| Dialog judge system prompt | `scripts/eval/judge.js:judgeDialog` | LLM judge of the eval harness (`request_kind: eval_judge`). Axis wordings are NOT inline: they are assembled from `tests/eval/rubrics/<axis>.md`; axes, scales and weights come from `tests/eval/criteria.yaml`. |
+
 ## Test Prompts
 
 | File | Coordinates |
