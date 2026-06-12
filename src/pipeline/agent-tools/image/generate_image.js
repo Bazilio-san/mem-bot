@@ -72,9 +72,11 @@ export const imageGenerateTool = {
       name: 'generate_image',
       description: `Generate an image from a text description and send it to the user. 
 Use when the user asks to draw, generate, or create a picture, illustration, photo, mem, or image. 
-Write a vivid, detailed prompt: describe the subject, style, lighting, composition, and quality. 
-The model behind the API works only with English prompts, so translate the user's request to English while preserving its meaning. 
-Put what should be EXCLUDED from the image into negative_prompt (for example "blurry, low quality, distorted, extra fingers").`,
+Write a vivid, detailed prompt: describe the subject, style, lighting, composition, and quality.
+The model behind the API works only with English prompts, so translate the user's request to English while preserving its meaning.
+Put what should be EXCLUDED from the image into negative_prompt (for example "blurry, low quality, distorted, extra fingers").
+The generated image is delivered to the user automatically as a photo by the system. Never include the image URL or any link in your reply and do not describe where to find the image.
+If the user asked only for the picture, reply with an empty string — the photo itself is the whole answer.`,
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -164,6 +166,9 @@ Put what should be EXCLUDED from the image into negative_prompt (for example "bl
       ok: true,
       model: data.model,
       seed: data.seed,
+      // Reminder for the model (it sees this result as the tool message): the photo is delivered by the
+      // system itself, so the assistant's text must not duplicate it with a link or a "here it is" notice.
+      message: `The image was generated and is already being delivered to the user as a photo by the system. Do not include any URL or link in your reply. If the user asked only for the picture, reply with an empty string.`,
       // Artifact for the delivery channel: the Telegram adapter reads structuredContent.image and sends the
       // picture as a photo (see sendGeneratedImages in src/telegram/bot.js).
       structuredContent: {

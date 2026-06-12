@@ -341,6 +341,11 @@ async function deliverVoice(chatId, result, state) {
 }
 
 async function deliverAgentResult(chatId, sourceMessageId, result) {
+  // The whole answer is a generated photo: skip both voice synthesis and the '(пустой ответ)' text stub —
+  // the picture is sent separately by sendGeneratedImages.
+  if (!result.answer?.trim() && hasGeneratedImages(result)) {
+    return;
+  }
   if (result.delivery?.kind === 'reaction') {
     try {
       await sendReaction(chatId, sourceMessageId, result.delivery.reactionKey);
@@ -429,6 +434,12 @@ async function sendPhotoAction(chatId) {
   } catch {
     /* the indicator is optional */
   }
+}
+
+// Whether this turn produced generated images (generate_image tool). When it did, an empty text answer is
+// legitimate: the photo itself is the whole answer, so no '(пустой ответ)' stub must be sent.
+function hasGeneratedImages(result) {
+  return (result.toolsUsed || []).some((t) => t.result?.structuredContent?.image);
 }
 
 // Deliver images produced by the generate_image tool. Mirrors sendWidgetButtons: it scans the tool results in
@@ -714,7 +725,10 @@ async function handleUpdate(message) {
           onEvent: progress.onEvent,
         });
         chatDomains.set(chatId, res.domainKey); // the agent may have switched domain by the request's meaning
-        const sent = await progress.complete(res.answer || '(пустой ответ)');
+        // An empty answer with a generated photo is fine — complete('') just cleans up the tool status
+        // without sending a text message; the photo follows from sendGeneratedImages.
+        const finalText = res.answer?.trim() ? res.answer : hasGeneratedImages(res) ? '' : '(пустой ответ)';
+        const sent = await progress.complete(finalText);
         await saveSentRefs(chatId, sent, res.assistantMessageId, 'text');
         await sendWidgetButtons(chatId, res);
         await sendGeneratedImages(chatId, res);

@@ -1,8 +1,8 @@
 <script setup>
 // Тело LLM-запроса с многослойным прогрессивным раскрытием. Три зоны:
 // 1) чипы скалярных параметров (model, temperature, …) — всегда видны;
-// 2) messages — по строке на сообщение (роль + превью), клик раскрывает: короткое содержимое инлайном,
-//    крупное — в модальном окне на весь экран;
+// 2) messages — по строке на сообщение (роль + превью), клик раскрывает содержимое инлайном; у длинных
+//    сообщений после бэджа роли есть кнопка, открывающая то же содержимое в модальном окне на весь экран;
 // 3) tools — по строке на инструмент (имя + первые слова описания), первый клик раскрывает описание,
 //    отдельная кнопка показывает JSON Schema параметров.
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
@@ -13,7 +13,8 @@ const props = defineProps({
   binaryMeta: { type: Object, default: null },
 });
 
-// Порог инлайн-раскрытия содержимого сообщения; больше — открываем модальное окно.
+// Порог «длинного» сообщения: длиннее — в строке появляется кнопка открытия модального окна.
+// На само инлайн-раскрытие порог не влияет: одинарный клик всегда раскрывает содержимое в списке.
 const INLINE_LIMIT = 2000;
 
 const payloadObj = computed(() => {
@@ -96,12 +97,12 @@ function toggleSet(setRef, idx) {
 }
 
 function clickMessage(idx) {
-  const content = messageContent(messages.value[idx]);
-  if (content.length > INLINE_LIMIT) {
-    bigContent.value = content;
-    return;
-  }
   toggleSet(openedMessages, idx);
+}
+
+// Открыть содержимое сообщения в модальном окне (кнопка у длинных сообщений).
+function openBig(idx) {
+  bigContent.value = messageContent(messages.value[idx]);
 }
 
 function setAllMessages(open) {
@@ -231,6 +232,15 @@ onBeforeUnmount(() => {
       >
         <div class="pv-msg-h" @click="clickMessage(idx)">
           <span class="pv-role" :class="`role-${m.role}`">{{ m.role }}</span>
+          <button
+            v-if="messageContent(m).length > INLINE_LIMIT"
+            type="button"
+            class="pv-pop"
+            title="Открыть в окне"
+            @click.stop="openBig(idx)"
+          >
+            ⤢
+          </button>
           <span v-for="tn in toolCallTags(m)" :key="tn" class="pv-tcall">🛠 {{ tn }}</span>
           <span class="pv-prev">{{ preview(m) }}</span>
           <span class="pv-len">{{ messageContent(m).length.toLocaleString('ru-RU') }} симв.</span>
@@ -384,6 +394,20 @@ onBeforeUnmount(() => {
   background: #d9f2ec;
   color: #0e6e5c;
 }
+/* Кнопка «открыть в окне» у длинных сообщений — после бэджа роли. */
+.pv-pop {
+  flex: none;
+  border: none;
+  background: none;
+  color: #4567d8;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.pv-pop:hover {
+  color: #1d3fae;
+}
 .pv-tcall {
   font-size: 10px;
   background: #d2f5e8;
@@ -419,6 +443,15 @@ onBeforeUnmount(() => {
 }
 .pv-msg.msg-system .pv-msg-b :deep(.cv-out) {
   background: #f3efff;
+}
+/* Раскрытый сырой текст сообщения — обычный текст, как в строке-превью, а не код-блок: моноширинный
+   шрифт ContentViewer заменяется шрифтом интерфейса. JSON-просмотр (.cv-json) остаётся моноширинным. */
+.pv-msg-b :deep(.cv-plain) {
+  font:
+    12px/1.4 system-ui,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
 }
 .pv-msg.msg-assistant .pv-msg-b :deep(.cv-out) {
   background: #edf7ed;

@@ -224,6 +224,11 @@ export function createTelegramProgress({ chatId, tg, startTyping = null, options
     stopTyping();
     await clearToolStatus();
     const clean = finalPostProcess(String(finalText ?? ''));
+    // An empty final with no draft is legitimate (e.g. the whole answer is a generated photo delivered by the
+    // channel adapter) — there is simply nothing to send, and Telegram rejects empty message text anyway.
+    if (!clean.trim() && state.draftId === null) {
+      return state.sent;
+    }
     const parts = finalSplit(clean, maxLen);
     const head = parts.length ? parts[0] : '';
     const tail = parts.slice(1);

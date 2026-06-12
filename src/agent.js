@@ -697,7 +697,11 @@ ${activeSkill.skillPrompt}`,
             ...(ok ? {} : { error: String(result.error) }),
           });
           toolsUsed.push({ name: toolName, args, result });
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+          // The model gets the result WITHOUT structuredContent: that part is a delivery-channel artifact
+          // (image/widget descriptors with raw URLs), and a model that sees a URL tends to paste it into the
+          // user-facing answer. The full result stays in toolsUsed for the channel adapters.
+          const { structuredContent, ...resultForModel } = result || {};
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(resultForModel) });
         }
         continue; // let the model see the tool result
       }
