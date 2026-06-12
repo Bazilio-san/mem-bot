@@ -300,9 +300,11 @@ async function run() {
 </script>
 
 <template>
-  <!-- Собственное модальное окно (вместо PrimeVue Dialog): растягивается за все 4 стороны и 4 угла. -->
+  <!-- Собственное модальное окно (вместо PrimeVue Dialog): растягивается за все 4 стороны и 4 угла.
+       Клик по подложке намеренно НЕ закрывает окно: в нём долгий ввод и стримящийся результат,
+       случайный клик мимо не должен их терять. Закрытие — крестик, кнопка «Закрыть» или Escape. -->
   <Teleport to="body">
-    <div v-if="visible" class="ad-wovl" @click.self="close">
+    <div v-if="visible" class="ad-wovl">
       <div
         class="ad-w"
         :style="{
@@ -366,6 +368,9 @@ async function run() {
               <ContentViewer :content="output" />
             </div>
           </template>
+        </div>
+        <div class="ad-w-f">
+          <Button size="small" severity="secondary" @click="close">Закрыть</Button>
         </div>
         <span
           v-for="dir in RESIZE_DIRS"
@@ -445,6 +450,14 @@ async function run() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+/* Футер с кнопкой «Закрыть» — единственный способ закрытия мышью наряду с крестиком. */
+.ad-w-f {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid #e2e5e9;
+  flex: none;
 }
 
 /* Невидимые ручки изменения размера: 4 стороны и 4 угла (углы поверх сторон). */
