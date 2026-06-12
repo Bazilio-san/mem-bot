@@ -150,7 +150,7 @@ export async function classifyIntent({
     .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && m.content)
     .slice(-RECENT_MESSAGES_MAX)
     .map((m) => `${m.role}: ${truncateLine(m.content, RECENT_MESSAGE_CHARS)}`);
-  const recentBlock = recent.length ? `<recent-dialog>\n${recent.join('\n')}\n</recent-dialog>\n\n` : '';
+  const recentDialog = recent.length ? `\n<recent-dialog>\n${recent.join('\n')}\n</recent-dialog>\n` : '';
   const state = formatDialogState(dialogState);
   // A literal closing tag inside the message text would break the boundary the system prompt relies on.
   const safeMessage = String(userMessage).replaceAll('</last-user-message>', '');
@@ -160,8 +160,11 @@ export async function classifyIntent({
     schema: buildSchema(routeNames),
     schemaName: 'skill_classification',
     system: buildSystemPrompt(routes),
-    user: `${recentBlock}Current agent domain: ${currentDomainKey}
-Current thread: ${state || 'none'}
+    user: `
+<current-context>
+Current agent domain: ${currentDomainKey}
+${state ? `Current thread: ${state}\n` : ''}</current-context>
+${recentDialog}
 <last-user-message>
 ${safeMessage}
 </last-user-message>`,
