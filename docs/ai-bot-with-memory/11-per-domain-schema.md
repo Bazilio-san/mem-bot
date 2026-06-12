@@ -22,6 +22,7 @@ title: Flight Search
 description: Search for flights, airports, routes, departure dates, layovers, and price comparison.
 enabled: true
 classification:
+  hint: "Flights and air travel: ticket, flight, airport, departure, layover, baggage."
   when_to_use: >
     The user asks about plane tickets, flights, airports, travel dates, routes,
     layovers, flight prices, baggage, or ways to get somewhere by air.
@@ -54,7 +55,10 @@ Instructions that are added to the fact extraction prompt.
 
 Required fields: `name` (the skill key, matches the directory name), `domain_key` (the domain namespace for memory),
 `classification.when_to_use` (the semantic routing rule for the router), and the `# Skill Prompt` block. Everything
-else is optional: `positive_signals` and `negative_signals` are hints to the router, not a strict list;
+else is optional: `classification.hint` is the single line the classifier prompt shows for the skill — its essence
+plus a few trigger words in the language users actually type (for a skill without a `hint`, the registry composes
+the line from `description` and the first `positive_signals`); `positive_signals` and `negative_signals` document
+the routing boundary for skill authors and feed the composed fallback hint;
 `tools.allowed` restricts the domain-specific tools; `tools.base` enables the base system tools;
 `memory.scopes` hints at which memory sections are typically needed; `model.main` and `model.extract` override
 the models for this skill; `references` enables reading of the `references/**` directory.
@@ -109,10 +113,11 @@ Layer components:
 The `list` command shows active skills and their tools. After adding the skill directory, the router sees it on
 the next startup.
 
-**Classification selects the skill.** A cheap model receives a compact list of skills (`name`, `domain_key`, `title`,
-`description`, `when_to_use`, signals) and returns the `skill_name` of the most appropriate skill. The domain key
-for memory addressing is derived from the selected skill by code, not from the model's response. If no specialized
-skill fits, the fallback `general` skill is selected.
+**Classification selects the skill.** A cheap model receives a compact list of skills — one line per skill,
+`- <name> — <hint>`, where the hint is `classification.hint` or its composed fallback — and returns the
+`skill_name` of the most appropriate skill. The domain key for memory addressing is derived from the selected
+skill by code, not from the model's response. If no specialized skill fits, the fallback `general` skill is
+selected.
 
 **Tools and references.** Base system tools (memory, scheduler, global memory, response form) are always available
 if permitted by flags and permissions. A domain-specific tool is available only if it is listed in `tools.allowed`
@@ -142,7 +147,8 @@ Under the hood, the model generates skill parts as strict JSON (a full skill dra
 prompt blocks) inside `src/pipeline/skills/author.js`. Assembling `SKILL.md` from its parts, checking invariants,
 and performing an atomic write with hot-reload of the registry all live in `src/pipeline/skills/writer.js`.
 
-Any part of a skill is editable: front matter fields (name, description, classification signals, tool list, models),
+Any part of a skill is editable: front matter fields (name, description, classifier hint and signals, tool list,
+models),
 the `# Skill Prompt` block, the `## Fact Extraction Prompt` block, references, and also enabling, disabling, and
 deleting a skill. The workflow is fixed: read the current state of the skill, preview the proposed change with
 validator notes, get confirmation from the administrator, and only then write with a backup of the previous

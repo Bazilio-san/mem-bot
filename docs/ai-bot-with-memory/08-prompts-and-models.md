@@ -88,49 +88,46 @@ progressive display.
 ### [PROMPT-2] Request Classifier
 
 A cheap model selects the most suitable skill and simultaneously determines the intent, entities, and which memory
-types and tools are needed. It returns strict JSON rather than a reply to the user. The division of labour between
+types are needed. It returns strict JSON rather than a reply to the user. The division of labour between
 the prompt and the schema: the `skill_classification` schema is self-sufficient — every field carries a
 `description` that tells the model what to put into it (the single best-fitting skill and the `general` fallback,
-the domain key copied from the chosen skill, the entity rules, the meaning of each memory scope) — while the system
-prompt holds only what the schema cannot express: the skill list and how to read its signals. The list of skills is
+the entity rules, the meaning of each memory scope) — while the system prompt holds only what the schema cannot
+express: the compact skill list and the guardrail that only the last user message is classified. The skill list is
 not hard-coded into the prompt: the `buildSystemPrompt` function (`src/pipeline/classify.js`) fetches a compact
-list from the skill registry via `listSkillRoutes()` and renders, for each skill, a markdown block with its name,
-domain key, description, `when_to_use` rule, and signals. As a result, adding a new `skills/<name>/` directory is
-immediately reflected in the classifier. Prompt assembly:
+list from the skill registry via `listSkillRoutes()` and renders each skill as a single line `- <name> — <hint>`.
+The hint is the one-line `classification.hint` from SKILL.md front matter — the essence of the skill plus a few
+trigger words; for a skill without a `hint`, the registry composes the line from `description` and the first
+`positive_signals`. As a result, adding a new `skills/<name>/` directory is immediately reflected in the
+classifier. The prompt deliberately stays minimal — a small classification model works better with a short,
+non-redundant instruction than with prose skill descriptions that repeat what the schema already says.
+Prompt assembly:
 
 ```js
 function buildSystemPrompt(routes) {
-  const list = routes.map((r) => {
-    const pos = r.positive_signals?.length ? `\n**Positive signals**: ${r.positive_signals.join('; ')}` : '';
-    const neg = r.negative_signals?.length ? `\n**Negative signals**: ${r.negative_signals.join('; ')}` : '';
-    return `### ${r.name}
+  const list = routes.map((r) => `- ${r.name} — ${r.hint}`).join('\n');
+  return `You are an incoming-message classifier.
+Classify ONLY the text inside <last-user-message>. Use <recent-dialog> and the dialog state line only to
+resolve pronouns, ellipsis and short follow-ups and to stay in the thread the conversation is already in;
+never classify an earlier message instead of the last one.
 
-**domain**: ${r.domain_key}
-**Purpose**: ${r.description}
-**When to use**: ${r.when_to_use}${pos}${neg}`;
-  }).join('\n\n');
-  return `You are the incoming-message classifier for an agent application with memory.
-Fill in every response field according to its description in the JSON schema.
-Positive and negative signals are hints, not a strict list: choose the skill by meaning.
-
-## Available skills:
-
+Skills (pick one; 'general' is the default fallback):
 ${list}
 
-Do not reply to the user. Return only JSON conforming to the schema.`;
+Return only JSON matching the schema.`;
 }
 ```
 
-Prompt, field descriptions, and the user-message template (`Current agent domain / Last dialog state / User
-message`) are written in English; signal values come from SKILL.md front matter and stay in the language users
-actually type them in. The field descriptions reach the model in both response-format modes: in `json_schema` the
-provider passes the schema to the decoder, in `json_object` the schema is serialized into the prompt text.
+Prompt, field descriptions, and the user-message template (`Current agent domain / Last dialog state /
+<last-user-message>`, preceded by an optional `<recent-dialog>` block) are written in English; the trigger words
+inside the hints come from SKILL.md front matter and stay in the language users actually type them in. The field
+descriptions reach the model in both response-format modes: in `json_schema` the provider passes the schema to
+the decoder, in `json_object` the schema is serialized into the prompt text.
 
 The source of truth is `skill_name`: the domain key used for memory addressing is derived from the chosen skill by
 code, not from the model's response. If the model returns an inconsistent pair, the code trusts the skill registry.
 The `skill_classification` schema has required fields: `intent`, `skill_name` (constrained to the list of available
-skills), `domain_key`, `confidence`, `entities`, `needs_memory`, `needed_memory_scopes`, `needs_tools`,
-`candidate_tools`; the memory scope is one of `dialog | profile | domain | secure | reminder`. The `entities`
+skills), `confidence`, `entities`, `needs_memory`, `needed_memory_scopes`; the memory scope is one of
+`dialog | profile | domain | secure | reminder`. The `entities`
 field is a strict array of up to 8 `{type, value}` pairs (`additionalProperties: false`, both fields required):
 the value in its base form feeds the entity boost in memory retrieval (see MEM-2 in 06-memory.md). Its
 description instructs the model to keep the value in the language of the original message and in its base form —
@@ -391,7 +388,7 @@ statement replaces it; below the replace threshold a new fact row is inserted.
 
 The skill-editing toolset relies on dedicated generators with strict JSON output in
 `src/pipeline/skills/author.js`. `generateSkillDraft` assembles a full skill draft from a description (name,
-domain key, classification signals, prompt blocks); `refineBlock` rewrites the `# Skill Prompt` or
+domain key, classifier hint, classification signals, prompt blocks); `refineBlock` rewrites the `# Skill Prompt` or
 `## Fact Extraction Prompt` block according to an instruction. Generated drafts pass the skill validator before
 being written, and any findings are returned for preview. The model receives grounding for choosing the right
 tool from the `# Skill Prompt` block of the `skill-author` editor skill (see
