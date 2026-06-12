@@ -161,6 +161,20 @@ function toolInfo(t) {
   return { name: fn?.name || '?', description: fn?.description || '', parameters: fn?.parameters || null };
 }
 
+// JSON инструмента для просмотра: свойства идут в фиксированном порядке name → description → parameters
+// (в payload порядок произвольный), остальные ключи — следом без изменений.
+function toolJson(t) {
+  const wrapped = t?.function && typeof t.function === 'object';
+  const { name, description, parameters, ...rest } = (wrapped ? t.function : t) || {};
+  const fn = {
+    ...(name !== undefined && { name }),
+    ...(description !== undefined && { description }),
+    ...(parameters !== undefined && { parameters }),
+    ...rest,
+  };
+  return JSON.stringify(wrapped ? { ...t, function: fn } : fn);
+}
+
 function messageContent(m) {
   if (typeof m?.content === 'string') {
     return m.content;
@@ -229,7 +243,7 @@ function openBig(idx) {
 function openToolBig(idx) {
   const t = tools.value[idx];
   bigContent.value = {
-    text: JSON.stringify(t),
+    text: toolJson(t),
     format: 'JSON',
     title: `Схема инструмента: ${toolInfo(t).name}`,
   };
@@ -487,7 +501,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="openedTools.has(idx)" class="pv-tool-b">
           <div class="pv-tool-full">{{ toolInfo(t).description }}</div>
-          <ContentViewer :content="JSON.stringify(t)" compact default-format="JSON" />
+          <ContentViewer :content="toolJson(t)" compact default-format="JSON" />
         </div>
       </div>
     </div>
