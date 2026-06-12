@@ -84,11 +84,11 @@ check('loadSkills читает все три skill', () => {
   assert.equal(byDomain.get('flight_search').name, 'flight-search');
 });
 
-check('listSkillRoutes отдаёт when_to_use для роутера', () => {
+check('listSkillRoutes отдаёт hint для роутера', () => {
   routes = listSkillRoutes();
   assert.ok(routes.length >= 3, `ожидалось не меньше 3 навыков, получено ${routes.length}`);
   for (const r of routes) {
-    assert.ok(r.when_to_use && r.when_to_use.length > 0, `пустой when_to_use у ${r.name}`);
+    assert.ok(r.hint && r.hint.length > 0, `пустой hint у ${r.name}`);
     assert.ok(r.domain_key, `нет domain_key у ${r.name}`);
   }
 });

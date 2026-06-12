@@ -8,7 +8,7 @@ import { listSkillRoutes } from './skills/registry.js';
 
 // Schema of the classification result. The source of truth is skill_name, restricted to the available skills.
 // The schema is self-sufficient: every field carries a description for the model, so the system prompt holds
-// only what the schema cannot express (the skill list and how to read its signals).
+// only what the schema cannot express (the compact skill list and the last-message guardrail).
 // Exported for unit tests (strictness of the schema in json_schema mode).
 export function buildSchema(routeNames, withReason = false) {
   return {
@@ -17,9 +17,9 @@ export function buildSchema(routeNames, withReason = false) {
     properties: {
       intent: {
         type: 'string',
-        description: `A concise first-person phrase capturing the user's latest intent:
-what I want to know, find, remember, change, or do.
-Use the user's language and keep only the core meaning`,
+        description: `A concise semantic phrase capturing the core meaning of the user's latest message, from the user's perspective. 
+It may be a request, preference, complaint, question, or statement. 
+Do not rewrite statements as desires; use the user's language and keep only searchable key meaning.`,
       },
       skill_name: {
         type: 'string',
@@ -70,20 +70,13 @@ When unsure, set true.`,
       },
       needed_memory_scopes: {
         type: 'array',
-        description: `Memory scopes to load for the reply. Pick every scope that could improve the answer;
-when unsure about a scope, include it — missing memory hurts the reply more than extra context.
-- profile: who the user is and how to talk to them (name, communication style, habits, preferences).
-Include in any personal conversation; omit only when the user's identity cannot change the answer
-(pure utility command).
-- dialog: unfinished threads from earlier conversations. Include in free-form chat, when the user refers to
-something discussed before («как я говорил», «та самая поездка») or resumes contact after a pause.
-Omit for narrow one-shot requests.
-- domain: subject-matter facts of the current skill domain (the "Current agent domain" line in the input).
-Include when the message is about that subject area or continues work in it; omit for unrelated small talk.
-- secure: protected personal data (documents, card numbers, credentials). Include ONLY when the user
-explicitly asks for their protected data.
-- reminder: reminders and scheduled tasks. Include when the user asks about plans, deadlines or tasks,
-or wants to create, change or cancel a reminder («напомни…», «что у меня запланировано?»).`,
+        description: `Memory scopes to load. Include all that may help; if unsure, include it.
+
+- profile: user identity/preferences/style. Personal/chatty messages; not pure utility.
+- dialog: unfinished earlier threads or follow-ups to previous talk.
+- domain: facts for the current skill/domain topic.
+- secure: protected private data; ONLY if explicitly requested.
+- reminder: reminders, plans, deadlines, scheduled tasks.`,
         items: {
           type: 'string',
           enum: ['dialog', 'profile', 'domain', 'secure', 'reminder'],
@@ -99,59 +92,91 @@ or wants to create, change or cancel a reminder («напомни…», «что
       //   items: { type: 'string' },
       // },
     },
-    required: [
-      'intent',
-      'skill_name',
-      'confidence',
-      'entities',
-      'needs_memory',
-      'needed_memory_scopes',
-    ],
+    required: ['intent', 'skill_name', 'confidence', 'entities', 'needs_memory', 'needed_memory_scopes'],
   };
 }
 
-// System prompt: a markdown list of skills with a usage rule for each one. Signal values come from
-// SKILL.md frontmatter and stay in the language users actually type them in (mostly Russian).
+// System prompt: one compact line per skill (classification.hint from SKILL.md frontmatter, trigger words stay
+// in the language users actually type them in) plus only the guardrails the JSON schema cannot express:
+// classify the last message only, use context just to resolve references, fall back to 'general'.
+// Per-field rules live in the schema descriptions and are deliberately not repeated here.
 function buildSystemPrompt(routes) {
-  const list = routes
-    .map((r) => {
-      const arr = [
-        ['domain', r.domain_key],
-        ['Purpose', r.description],
-        ['When to use', r.when_to_use],
-      ];
-      if (r.positive_signals?.length) {
-        arr.push(['Positive signals', r.positive_signals.join('; ')]);
-      }
-      if (r.negative_signals?.length) {
-        arr.push(['Negative signals', r.negative_signals.join('; ')]);
-      }
-      const s = arr.map(([k, v]) => `**${k}**: ${v}`).join('  \n');
-      return `### ${r.name}\n\n${s}`;
-    })
-    .join('\n\n');
-  return `You are the incoming-message classifier.
-Fill in every response field according to its description in the JSON schema.
-Positive and negative signals are hints, not a strict list: choose the skill by meaning.
+  const list = routes.map((r) => `- ${r.name} — ${r.hint}`).join('\n');
+  return `You are an incoming-message classifier.
+Classify ONLY the text inside <last-user-message>. Use <recent-dialog> and the dialog state line only to
+resolve pronouns, ellipsis and short follow-ups and to stay in the thread the conversation is already in;
+never classify an earlier message instead of the last one.
 
-## Available skills:
-
+Skills (pick one; 'general' is the default fallback):
 ${list}
 
-Do not reply to the user.`;
+Return only JSON matching the schema.`;
 }
 
-export async function classifyIntent(userMessage, currentDomainKey = 'general', shortState = '') {
+// Caps for the classifier context: enough to resolve a reference to an earlier turn, cheap on tokens.
+const RECENT_MESSAGES_MAX = 6;
+const RECENT_MESSAGE_CHARS = 300;
+
+function truncateLine(text, limit) {
+  const s = String(text).replace(/\s+/g, ' ').trim();
+  return s.length > limit ? `${s.slice(0, limit)}…` : s;
+}
+
+// Compact one-line digest of the summarizer's state_json (see SUMMARY_SCHEMA in history-compress.js)
+// for the classifier prompt. Only the fields that help interpret a short follow-up phrase; the lists
+// are capped so the line stays cheap. Exported for unit tests.
+export function formatDialogState(stateJson) {
+  if (!stateJson || typeof stateJson !== 'object') {
+    return '';
+  }
+  const take = (arr, n = 3) => (Array.isArray(arr) ? arr.filter(Boolean).slice(0, n) : []);
+  const parts = [];
+  if (stateJson.current_goal) {
+    parts.push(`goal: ${stateJson.current_goal}`);
+  }
+  if (stateJson.current_task) {
+    parts.push(`task: ${stateJson.current_task}`);
+  }
+  const open = take(stateJson.open_questions);
+  if (open.length) {
+    parts.push(`open questions: ${open.join('; ')}`);
+  }
+  const next = take(stateJson.next_steps);
+  if (next.length) {
+    parts.push(`next steps: ${next.join('; ')}`);
+  }
+  return parts.join(' | ');
+}
+
+// recentMessages — previous dialog turns ({role, content}, oldest first) WITHOUT the current message
+// (it is saved to the DB only after the answer, so getRecentMessages rows are clean).
+// dialogState — state_json of the active conversation summary; '' / null when there is no summary yet.
+export async function classifyIntent({
+  userMessage,
+  currentDomainKey = 'general',
+  recentMessages = [],
+  dialogState = null,
+}) {
   const routes = listSkillRoutes();
   const routeNames = routes.map((r) => r.name);
+  const recent = (Array.isArray(recentMessages) ? recentMessages : [])
+    .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && m.content)
+    .slice(-RECENT_MESSAGES_MAX)
+    .map((m) => `${m.role}: ${truncateLine(m.content, RECENT_MESSAGE_CHARS)}`);
+  const recentBlock = recent.length ? `<recent-dialog>\n${recent.join('\n')}\n</recent-dialog>\n\n` : '';
+  const state = formatDialogState(dialogState);
+  // A literal closing tag inside the message text would break the boundary the system prompt relies on.
+  const safeMessage = String(userMessage).replaceAll('</last-user-message>', '');
   return chatJSON({
     model: config.llm.auxModel,
     kind: 'intent_classify',
     schema: buildSchema(routeNames),
     schemaName: 'skill_classification',
     system: buildSystemPrompt(routes),
-    user: `Current agent domain: ${currentDomainKey}
-Last dialog state: ${shortState || 'none'}
-User message: ${userMessage}`,
+    user: `${recentBlock}Current agent domain: ${currentDomainKey}
+Last dialog state: ${state || 'none'}
+<last-user-message>
+${safeMessage}
+</last-user-message>`,
   });
 }

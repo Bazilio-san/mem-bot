@@ -5,6 +5,7 @@ const FIELDS = [
   'title',
   'description',
   'enabled',
+  'hint',
   'when_to_use',
   'positive_signals',
   'negative_signals',
@@ -25,6 +26,9 @@ function setField(skill, field, value) {
       break;
     case 'enabled':
       skill.enabled = value === true || value === 'true';
+      break;
+    case 'hint':
+      skill.classification.hint = String(value);
       break;
     case 'when_to_use':
       skill.classification.when_to_use = String(value);
@@ -75,7 +79,8 @@ export const skillAuthorSetFieldTool = {
     function: {
       name: 'skill_author_set_field',
       description: `Set a frontmatter field of a skill to a direct value. Use for non-text settings and lists:
-title, description, enabled, when_to_use, positive_signals, negative_signals, tools_allowed,
+title, description, enabled, hint (one-line classifier hint: essence + trigger words), when_to_use,
+positive_signals, negative_signals, tools_allowed,
 tools_base, model_main, model_extract, references_allowed. For prompt wording use
 skill_author_write_prompt; for the memory schema use the schema tools. Returns a preview unless apply=true.`,
       parameters: {

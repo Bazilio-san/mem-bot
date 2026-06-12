@@ -44,6 +44,7 @@ export function composeSkillFile(skill) {
   fm.push(`description: ${quote(skill.description || '')}`);
   fm.push(`enabled: ${skill.enabled === false ? 'false' : 'true'}`);
   fm.push('classification:');
+  fm.push(`  hint: ${quote(skill.classification?.hint || '')}`);
   fm.push(`  when_to_use: ${quote(skill.classification?.when_to_use || '')}`);
   fm.push(`  positive_signals: ${flowList(skill.classification?.positive_signals)}`);
   fm.push(`  negative_signals: ${flowList(skill.classification?.negative_signals)}`);

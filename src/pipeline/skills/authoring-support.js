@@ -30,6 +30,7 @@ export function buildSkillFromDraft(draft) {
     description: draft.description,
     enabled: true,
     classification: {
+      hint: draft.hint || '',
       when_to_use: draft.when_to_use,
       positive_signals: draft.positive_signals || [],
       negative_signals: draft.negative_signals || [],

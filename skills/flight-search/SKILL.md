@@ -5,6 +5,7 @@ title: Flight search
 description: Search for flights, airports, routes, departure dates, layovers and price comparison.
 enabled: true
 classification:
+  hint: "Flights and air travel: билет, рейс, аэропорт, вылет, пересадка, багаж."
   when_to_use: >
     The user asks about flights, air travel, airports, trip dates, routes, layovers,
     flight prices, baggage or options for getting there by plane.

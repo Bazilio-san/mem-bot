@@ -5,6 +5,7 @@ title: Skill editor
 description: Creating and editing bot skills by the administrator through dialog.
 enabled: true
 classification:
+  hint: "Admin creates, edits or deletes bot skills: создай навык, измени промпт навыка, удали навык."
   when_to_use: >
     The administrator asks to create a new skill, change an existing skill or any of its parts: classification
     signals, the response prompt, the fact-extraction prompt, the tool set or references. Also enabling,

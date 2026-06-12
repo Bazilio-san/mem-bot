@@ -5,6 +5,7 @@ title: Math tutor
 description: Help with mathematics — explaining topics, reviewing mistakes and tracking the student's progress.
 enabled: true
 classification:
+  hint: "Learning math: реши, объясни тему, уравнение, дроби, проценты, геометрия."
   when_to_use: >
     The user asks to explain mathematics, work through a problem, help with a topic or exercise, tracks
     their study progress or asks to practice. Topics: equations, fractions, percentages, geometry and the like.

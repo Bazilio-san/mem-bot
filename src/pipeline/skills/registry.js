@@ -51,6 +51,7 @@ function loadOneSkill(dir, name) {
     description: fm.description || '',
     enabled: fm.enabled !== false, // enabled by default
     classification: {
+      hint: typeof fm.classification?.hint === 'string' ? fm.classification.hint : '',
       when_to_use: whenToUse,
       positive_signals: Array.isArray(fm.classification?.positive_signals) ? fm.classification.positive_signals : [],
       negative_signals: Array.isArray(fm.classification?.negative_signals) ? fm.classification.negative_signals : [],
@@ -131,7 +132,15 @@ export function getAllSkills() {
   return [...loadSkills().byName.values()];
 }
 
-// Compact list for the router: only the fields the classifier needs.
+// Fallback one-line hint for skills whose frontmatter has no classification.hint yet:
+// the description plus a few trigger words from positive_signals.
+function composeHint(s) {
+  const sig = s.classification.positive_signals.slice(0, 6).join(', ');
+  return [s.description, sig ? `Triggers: ${sig}.` : ''].filter(Boolean).join(' ').trim();
+}
+
+// Compact list for the router: only the fields the classifier prompt and the CLI need.
+// hint is a single classifier line per skill (classification.hint or the composed fallback).
 export function listSkillRoutes() {
   const { byName } = loadSkills();
   return [...byName.values()]
@@ -140,10 +149,7 @@ export function listSkillRoutes() {
       name: s.name,
       domain_key: s.domain_key,
       title: s.title,
-      description: s.description,
-      when_to_use: s.classification.when_to_use,
-      positive_signals: s.classification.positive_signals,
-      negative_signals: s.classification.negative_signals,
+      hint: s.classification.hint || composeHint(s),
     }));
 }
 

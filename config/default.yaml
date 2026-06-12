@@ -224,7 +224,7 @@ llm:
   mainModel: 'gpt-5.4-mini'
   #> Формат структурированных ответов (chatJSON) по умолчанию: 'json_schema' — строгий structured outputs
   #> провайдера (схема валидируется API); 'json_object' — только валидный JSON, схема передаётся текстом в промпте.
-  responseFormat: 'json_object'
+  responseFormat: 'json_schema'
 
 #> Логирование обращений к LLM и смежным сервисам в БД (журнал запросов + узкий журнал затрат).
 llmLog:

@@ -5,6 +5,7 @@ title: General assistant
 description: Base domain without a narrow specialization. General questions, conversation, everyday requests.
 enabled: true
 classification:
+  hint: "Anything else: general conversation, everyday questions, notes; the default fallback."
   when_to_use: >
     Any request that does not belong to a specialized skill: general conversation, everyday questions,
     notes about people and events, help without a narrow subject area. This is the default fallback skill.

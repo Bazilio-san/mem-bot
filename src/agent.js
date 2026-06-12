@@ -9,6 +9,7 @@ import {
   saveMessage,
   setMessageSummary,
   getRecentMessages,
+  getActiveConversationSummary,
   getDomainId,
   getLastUserMessageTime,
   effectiveVoicePreference,
@@ -475,9 +476,21 @@ export async function handleMessage({
       title: 'Стадия: классификация интента',
       data: { stage: 'classify' },
     });
+    // Context for the classifier: the previous turns (the current message is saved only after the answer,
+    // so the rows are clean of it) and the operational state from the active summary of past turns.
+    // The same hot-window rows are reused verbatim for the model request at stage 3.
+    const [history, activeSummary] = await Promise.all([
+      getRecentMessages(conversation.id, config.historyCompression.hotWindow),
+      getActiveConversationSummary(conversation.id).catch(() => null),
+    ]);
     let intent;
     try {
-      intent = await classifyIntent(userMessage, domainKey);
+      intent = await classifyIntent({
+        userMessage,
+        currentDomainKey: domainKey,
+        recentMessages: history,
+        dialogState: activeSummary?.state_json || null,
+      });
     } catch {
       intent = { needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: [] };
     }
@@ -626,8 +639,8 @@ ${topicsBlock}
     });
 
     // Stage 3: model response with the tool loop.
-    // Hot window: the last N messages are passed verbatim (8 by default — as before).
-    const history = await getRecentMessages(conversation.id, config.historyCompression.hotWindow);
+    // Hot window: the last N messages are passed verbatim (8 by default — as before). The rows were
+    // fetched once before classification (`history`); nothing is saved to the conversation in between.
     // The tool set depends on global-memory flags and the user's rights (writing tools — admin only).
     const tools = buildToolDefs(ctx);
     const capabilitiesContext = await buildCapabilitiesContext({ ...ctx, userMessage }, tools);
