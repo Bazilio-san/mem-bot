@@ -88,35 +88,43 @@ progressive display.
 ### [PROMPT-2] Request Classifier
 
 A cheap model selects the most suitable skill and simultaneously determines the intent, entities, and which memory
-types and tools are needed. It returns strict JSON rather than a reply to the user. The list of skills is not
-hard-coded into the system prompt: the `buildSystemPrompt` function (`src/pipeline/classify.js`) fetches a compact
-list from the skill registry via `listSkillRoutes()` and injects, for each skill, its name, domain key, description,
-`when_to_use` rule, and signals. As a result, adding a new `skills/<name>/` directory is immediately reflected in
-the classifier. Prompt assembly:
+types and tools are needed. It returns strict JSON rather than a reply to the user. The division of labour between
+the prompt and the schema: the `skill_classification` schema is self-sufficient — every field carries a
+`description` that tells the model what to put into it (the single best-fitting skill and the `general` fallback,
+the domain key copied from the chosen skill, the entity rules, the meaning of each memory scope) — while the system
+prompt holds only what the schema cannot express: the skill list and how to read its signals. The list of skills is
+not hard-coded into the prompt: the `buildSystemPrompt` function (`src/pipeline/classify.js`) fetches a compact
+list from the skill registry via `listSkillRoutes()` and renders, for each skill, a markdown block with its name,
+domain key, description, `when_to_use` rule, and signals. As a result, adding a new `skills/<name>/` directory is
+immediately reflected in the classifier. Prompt assembly:
 
 ```js
 function buildSystemPrompt(routes) {
   const list = routes.map((r) => {
-    const pos = r.positive_signals?.length ? `\n    Положительные сигналы: ${r.positive_signals.join('; ')}` : '';
-    const neg = r.negative_signals?.length ? `\n    Отрицательные сигналы: ${r.negative_signals.join('; ')}` : '';
-    return `  - ${r.name} / domain ${r.domain_key}\n    Назначение: ${r.description}\n    Когда использовать: ${r.when_to_use}${pos}${neg}`;
-  }).join('\n');
-  return `Ты классификатор входящего сообщения для агентского приложения с памятью.
-Определи намерение, важные сущности, какие виды памяти нужны и нужны ли инструменты.
-Сущности возвращай массивом пар type/value (type: person, place, vehicle, topic, product и т. п.).
-Value — в начальной форме (именительный падеж), без лишних слов. Не более 8 сущностей.
-Не включай местоимения и общие слова.
-Выбери ОДИН наиболее подходящий skill по смыслу запроса и верни его имя в поле skill_name точно как в списке.
-В поле domain_key продублируй доменный ключ выбранного skill.
-Положительные и отрицательные сигналы — подсказки, а не строгий список: выбирай по смыслу.
-Если ни один специализированный skill не подходит, выбери general.
+    const pos = r.positive_signals?.length ? `\n**Positive signals**: ${r.positive_signals.join('; ')}` : '';
+    const neg = r.negative_signals?.length ? `\n**Negative signals**: ${r.negative_signals.join('; ')}` : '';
+    return `### ${r.name}
 
-Доступные skills:
+**domain**: ${r.domain_key}
+**Purpose**: ${r.description}
+**When to use**: ${r.when_to_use}${pos}${neg}`;
+  }).join('\n\n');
+  return `You are the incoming-message classifier for an agent application with memory.
+Fill in every response field according to its description in the JSON schema.
+Positive and negative signals are hints, not a strict list: choose the skill by meaning.
+
+## Available skills:
+
 ${list}
 
-Не отвечай пользователю. Верни только JSON по схеме.`;
+Do not reply to the user. Return only JSON conforming to the schema.`;
 }
 ```
+
+Prompt, field descriptions, and the user-message template (`Current agent domain / Last dialog state / User
+message`) are written in English; signal values come from SKILL.md front matter and stay in the language users
+actually type them in. The field descriptions reach the model in both response-format modes: in `json_schema` the
+provider passes the schema to the decoder, in `json_object` the schema is serialized into the prompt text.
 
 The source of truth is `skill_name`: the domain key used for memory addressing is derived from the chosen skill by
 code, not from the model's response. If the model returns an inconsistent pair, the code trusts the skill registry.
@@ -124,10 +132,12 @@ The `skill_classification` schema has required fields: `intent`, `skill_name` (c
 skills), `domain_key`, `confidence`, `entities`, `needs_memory`, `needed_memory_scopes`, `needs_tools`,
 `candidate_tools`; the memory scope is one of `dialog | profile | domain | secure | reminder`. The `entities`
 field is a strict array of up to 8 `{type, value}` pairs (`additionalProperties: false`, both fields required):
-the value in its base form feeds the entity boost in memory retrieval (see MEM-2 in 06-memory.md), and the base
-form matters because the full-text index uses the `'simple'` configuration without Russian stemming. With no
-free-form fields anywhere in the schema, `prepareJsonSchema` keeps it `strict: true`, and the provider
-guarantees that the classifier's response conforms to the schema at the decoder level.
+the value in its base form feeds the entity boost in memory retrieval (see MEM-2 in 06-memory.md). Its
+description instructs the model to keep the value in the language of the original message and in its base form —
+both matter because the full-text index uses the `'simple'` configuration without Russian stemming, and entity
+values are matched against fact texts stored in the user's language. With no free-form fields anywhere in the
+schema, `prepareJsonSchema` keeps it `strict: true`, and the provider guarantees that the classifier's response
+conforms to the schema at the decoder level.
 
 ### [PROMPT-2a] Delivery Intent Selection
 

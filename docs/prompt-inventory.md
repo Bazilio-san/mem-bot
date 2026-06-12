@@ -15,7 +15,7 @@ repository service directories are intentional here.
 | `WELCOME_BACK_CONTEXT` | `src/agent.js:462` | Context for when a user returns after a pause. |
 | `CONVERSATION_CONTEXT` | `src/agent.js:481` | Conversation-mode context: timing, topics, and conversational style. |
 | `chatJSON` JSON instruction | `src/llm.js:203` | General wrapper for strict JSON output via `response_format: json_object`. |
-| Intent classifier | `src/pipeline/classify.js:52` | Dynamic system prompt containing the domain list and a user-message template. |
+| Intent classifier | `src/pipeline/classify.js:101` | Dynamic system prompt with the markdown skill list and a user-message template; field-level rules live in the schema descriptions (`buildSchema`). |
 | Fact extraction `EXTRACT_SYSTEM` | `src/pipeline/facts.js:163` | The single extraction pass for long-term user facts (with fact-lifetime judgement). |
 | Answer summary `SUMMARY_SYSTEM` | `src/pipeline/facts.js:104` | Compressing the assistant reply into a short summary for the extraction context. |
 | Topic extraction `TOPICS_SYSTEM` | `src/pipeline/topics.js:113` | Identifying conversation topics and scoring user engagement. |

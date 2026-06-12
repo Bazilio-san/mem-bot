@@ -148,9 +148,14 @@ export async function queryLog(text, params) {
 // Send an asynchronous PostgreSQL notification over a channel (the NOTIFY command). Used to instantly
 // wake the waiting scheduler worker when a new task appears. The channel name is a fixed
 // identifier from the code, not user input, so it is safe to substitute directly into the query text
-// (NOTIFY does not accept placeholder parameters).
-export async function notify(channel) {
-  await query(`NOTIFY ${channel}`);
+// (NOTIFY does not accept placeholder parameters). An optional payload string (e.g. JSON) is delivered
+// to listeners via pg_notify, which does accept parameters.
+export async function notify(channel, payload) {
+  if (payload === undefined) {
+    await query(`NOTIFY ${channel}`);
+    return;
+  }
+  await query('SELECT pg_notify($1, $2)', [channel, String(payload)]);
 }
 
 // Create a dedicated connection subscribed to a PostgreSQL async notification channel (the LISTEN command).
@@ -168,7 +173,9 @@ export function createListener(channel, onNotification) {
     reconnecting = false;
     const params = getDbConfigPg(CONNECTION_ID, false, true);
     client = new pg.Client(params);
-    client.on('notification', () => onNotification());
+    // The notification object is passed through: msg.payload carries the pg_notify payload string.
+    // Listeners that only need a wake-up signal simply ignore the argument.
+    client.on('notification', (msg) => onNotification(msg));
     client.on('error', scheduleReconnect);
     client.on('end', scheduleReconnect);
     await client.connect();

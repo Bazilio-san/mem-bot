@@ -96,20 +96,26 @@ export function buildSchema(routeNames) {
   };
 }
 
-// System prompt: a list of skills with a usage rule for each one.
+// System prompt: a markdown list of skills with a usage rule for each one. Signal values come from
+// SKILL.md frontmatter and stay in the language users actually type them in (mostly Russian).
 function buildSystemPrompt(routes) {
   const list = routes
     .map((r) => {
-      const pos = r.positive_signals?.length ? `\n    Positive signals: ${r.positive_signals.join('; ')}` : '';
-      const neg = r.negative_signals?.length ? `\n    Negative signals: ${r.negative_signals.join('; ')}` : '';
-      return `  - ${r.name} / domain ${r.domain_key}\n    Purpose: ${r.description}\n    When to use: ${r.when_to_use}${pos}${neg}`;
+      const pos = r.positive_signals?.length ? `\n**Positive signals**: ${r.positive_signals.join('; ')}` : '';
+      const neg = r.negative_signals?.length ? `\n**Negative signals**: ${r.negative_signals.join('; ')}` : '';
+      return `### ${r.name}
+
+**domain**: ${r.domain_key}
+**Purpose**: ${r.description}
+**When to use**: ${r.when_to_use}${pos}${neg}`;
     })
-    .join('\n');
+    .join('\n\n');
   return `You are the incoming-message classifier for an agent application with memory.
 Fill in every response field according to its description in the JSON schema.
 Positive and negative signals are hints, not a strict list: choose the skill by meaning.
 
-Available skills:
+## Available skills:
+
 ${list}
 
 Do not reply to the user. Return only JSON conforming to the schema.`;

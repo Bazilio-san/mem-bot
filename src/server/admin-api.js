@@ -6,6 +6,7 @@ import express from 'express';
 import { listUsers, getUserMemory, getProactivity, deleteItem, deleteUser } from './admin-data.js';
 import { searchUsers, getTimeline, getCycle, getSingleRequest, getUserById } from './llm-log-data.js';
 import { analysisConfigPublic, runAnalysis } from './log-analysis.js';
+import { chatEventsHandler } from './chat-events.js';
 import { handleMessage } from '../agent.js';
 import { listDomains } from '../repo.js';
 import {
@@ -164,6 +165,10 @@ export function createAdminApi() {
       res.json(await getTimeline({ userId: req.params.id, before: req.query.before, limit: req.query.limit }));
     }),
   );
+
+  // SSE stream of realtime chat events for a user: fires whenever a new dialog message is stored by ANY
+  // process (telegram bot, proactivity, admin chat). The chat pane subscribes and refreshes its tail.
+  router.get('/users/:id/chat-events', chatEventsHandler);
 
   // Journal of one dialog cycle (header with totals + display rows) by its correlation request_id.
   router.get(

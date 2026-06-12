@@ -208,7 +208,13 @@ Place the full response-loop assembly with companion branches in the `src/agent.
 3. **Response with tools.** A loop of up to five steps: the model either calls tools (their results
    are returned to it) or produces the final answer. Tools are described in
    [10-operations.md](10-operations.md).
-4. **Saving messages.** The user and assistant turns are written to `conversation_messages`.
+4. **Saving messages.** The user and assistant turns are written to `conversation_messages`. Alongside the
+   write, the saving function emits a PostgreSQL asynchronous notification on the `chat_message` channel
+   (`pg_notify` with a JSON payload of `userId`, `messageId`, and `role`) for every stored `user` or
+   `assistant` turn. This lets external observers — for example, an operator interface watching a user's
+   conversation — receive new messages in real time regardless of which process stored them (a channel
+   adapter, the proactivity worker, or the observer's own process), without polling the table. A
+   notification failure never breaks message delivery: the error is logged and swallowed.
 5. **Writing facts after the response.** Candidate extraction and merging with existing memory
    happen asynchronously. The write loop is described in [06-memory.md](06-memory.md).
 

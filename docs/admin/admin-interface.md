@@ -73,7 +73,8 @@ and the failure is logged on the server.
 | `GET /api/llm-log/cycle/:requestId` | journal of one dialog cycle: header with totals plus display rows | `getCycle()` |
 | `GET /api/llm-log/request/:llmRequestId` | journal of a single service record (a badge without `request_id`) | `getSingleRequest()` |
 | `POST /api/users/:id/chat-message` | send a message on behalf of the user through the full agent pipeline | `handleMessage()` |
-| `GET /api/llm-log/analysis-config` | allowed analysis models and CLI preset names (commands are not exposed) | `analysisConfigPublic()` |
+| `GET /api/users/:id/chat-events` | endless SSE stream: an event per new dialog message of the user, whatever process stored it | `chatEventsHandler()` |
+| `GET /api/llm-log/analysis-config` | allowed analysis models and CLI presets (name and display title — the executable name; commands and arguments are not exposed) | `analysisConfigPublic()` |
 | `POST /api/llm-log/analyze` | AI analysis of a logged request, streamed as Server-Sent Events | `runAnalysis()` |
 | `GET /api/domains` | agent domains (key and title) — options for the domain select of the knowledge form | `listDomains()` |
 | `GET /api/knowledge` | knowledge-base records with `hasEmbedding` (`?status=` comma list, `deleted`, or `all`; default active+archived) | `listGlobalKnowledge()` |
@@ -138,7 +139,7 @@ Components (`web/src/components/llm-log/`):
 |-----------|------|
 | `LlmLogPage.vue` | page frame: search on top, splitter with the two panes, the analysis dialog |
 | `UserSearch.vue` | autocomplete over `GET /api/users/search` (by name, external id, or exact internal UUID) |
-| `ChatPane.vue` | chat timeline with lazy upward loading and the send box |
+| `ChatPane.vue` | chat timeline with lazy upward loading, live updates over SSE, and the send box |
 | `LogPane.vue` | journal header (totals, expand/collapse all, "Ask AI") and the row list |
 | `LogRow.vue` | one journal row: pastel colour by kind, icon with indent hierarchy, metrics, expansion |
 | `PayloadView.vue` | progressive disclosure of a request body: parameter chips, `messages`, `tools` |
@@ -151,10 +152,25 @@ memory database (bubbles with timestamps, user on the right, assistant on the le
 referenced by any user message (history compression, proactivity, detached embeddings, and historical cycles
 recorded before message metadata carried a `request_id`). Scrolling up lazily loads older pages (keyset
 pagination by `?before`). Every user message whose metadata carries a `request_id` has a journal button; clicking
-it — or a badge — loads the corresponding journal into the right pane. The input box at the bottom sends a
-message on behalf of the user through the full agent pipeline (`POST /api/users/:id/chat-message`, channel
-`admin`, plain-text replies); after the reply arrives, the timeline reloads and the fresh cycle's journal opens
-automatically.
+it — or a badge — loads the corresponding journal into the right pane. The input box at the bottom is a
+three-row textarea that grows with its content up to 250 pixels and then scrolls internally; Enter sends the
+message, Shift+Enter inserts a line break. Sending runs the full agent pipeline
+(`POST /api/users/:id/chat-message`, channel `admin`, plain-text replies); after the reply arrives, the timeline
+reloads and the fresh cycle's journal opens automatically.
+
+**Live updates.** The chat pane follows the user's conversation in real time, whatever channel a message arrives
+through (the Telegram adapter, the proactivity worker, or another admin tab). The transport chain: storing a
+dialog message emits a PostgreSQL notification on the `chat_message` channel (a bot-core behaviour, specified in
+`docs/ai-bot-with-memory/04-architecture.md`, section [ARCH-3]); the admin server holds one `LISTEN` connection
+per process (created lazily by `src/server/chat-events.js` on the first subscriber) and relays the events to
+subscribed browsers as Server-Sent Events on `GET /api/users/:id/chat-events`, filtered by user, with a
+keep-alive comment frame every 25 seconds. The pane subscribes with `EventSource` when a user is selected; on
+each event it refreshes the timeline tail **without resetting the scroll position** — already-loaded history
+stays in place, genuinely new items are appended (existing service badges are updated in place as their call
+groups grow), and the view auto-scrolls only when it was already at the bottom. After a dropped connection
+`EventSource` reconnects on its own, and the refresh on every successful (re)connection catches up on whatever
+was missed. SSE is used instead of WebSocket deliberately: the stream is strictly one-way, needs no extra
+dependencies, and rides the same HTTP stack as the analysis stream.
 
 **Journal pane.** The header shows the cycle title, total tokens and cost, the models used, the overall
 duration, an error marker, expand-all/collapse-all buttons, and the "Ask AI" button. The rows are assembled on
@@ -184,7 +200,8 @@ call is itself journaled under its own `request_id` with the kind `log_analysis`
 cycle being analysed. The *CLI tool* engine spawns a preset command from `config.admin.logAnalysis.cli.presets`
 (for example, `claude -p`) in the project root, feeding the prompt through stdin — this gives the analyser
 visibility of the project code. The command comes exclusively from the configuration; the client only names a
-preset. Because this engine executes a command on the server, it is accepted **only when
+preset, and the dialog's preset select labels each preset with the bare executable name (`claude`, `codex`) —
+command arguments never leave the server. Because this engine executes a command on the server, it is accepted **only when
 `config.admin.host` is `localhost`** — otherwise the server answers 403 and the front-end shows the engine as
 unavailable. In both engines the result streams into the dialog as Server-Sent Events and renders as Markdown.
 

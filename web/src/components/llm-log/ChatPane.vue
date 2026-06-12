@@ -3,9 +3,9 @@
 // между ними — компактные бэйджи сервисных LLM-запросов (сжатие истории, проактивность и т. п.).
 // Скролл вверх лениво подгружает более раннюю историю (keyset-пагинация ?before=). У пользовательских
 // сообщений — кнопка журнала цикла; клик по бэйджу открывает журнал сервисной группы.
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, onBeforeUnmount } from 'vue';
 import DOMPurify from 'dompurify';
-import { fetchTimeline, sendChatMessage } from '../../api.js';
+import { fetchTimeline, sendChatMessage, openChatEvents } from '../../api.js';
 import NotesWidget from '../notes/NotesWidget.vue';
 
 const props = defineProps({
@@ -15,6 +15,22 @@ const emit = defineEmits(['select-log', 'error']);
 
 const draft = ref('');
 const sending = ref(false);
+const draftEl = ref(null);
+
+// Авторост поля ввода: высота подстраивается под текст, но не превышает 250px — дальше внутренний скролл.
+const DRAFT_MAX_HEIGHT = 250;
+
+function autosizeDraft() {
+  const el = draftEl.value;
+  if (!el) {
+    return;
+  }
+  el.style.height = 'auto';
+  el.style.height = `${Math.min(el.scrollHeight, DRAFT_MAX_HEIGHT)}px`;
+  el.style.overflowY = el.scrollHeight > DRAFT_MAX_HEIGHT ? 'auto' : 'hidden';
+}
+
+watch(draft, () => nextTick(autosizeDraft));
 
 // Отправка сообщения от имени пользователя: полный проход агентского конвейера на сервере, затем
 // перезагрузка ленты и автоматическое открытие журнала свежего цикла.
@@ -148,7 +164,86 @@ function pickLog(item) {
   }
 }
 
-watch(() => props.userId, loadInitial, { immediate: true });
+// --- Живое обновление ленты (SSE) ---------------------------------------------
+// Сервер присылает событие на каждое новое сообщение диалога этого пользователя, в каком бы канале оно
+// ни появилось (Telegram, проактивность, админ-чат в другой вкладке). По событию дозагружается хвост
+// ленты без сброса позиции скролла: загруженная ранее история остаётся на месте.
+let eventSource = null;
+let refreshing = false;
+let refreshQueued = false;
+
+// Дозагрузка хвоста: свежая первая страница сливается с текущей лентой — совпадающие по ключу элементы
+// обновляются на месте (сервисные группы пополняются вызовами), новые добавляются в конец.
+async function refreshTail() {
+  if (!props.userId) {
+    return;
+  }
+  if (refreshing) {
+    refreshQueued = true; // события могут приходить чаще, чем грузится страница — дожмём один раз в конце
+    return;
+  }
+  refreshing = true;
+  try {
+    const page = await fetchTimeline(props.userId, { limit: 50 });
+    const known = new Map(items.value.map((item) => [keyOf(item), item]));
+    const fresh = [];
+    for (const item of page.items) {
+      const key = keyOf(item);
+      if (known.has(key)) {
+        Object.assign(known.get(key), item);
+      } else {
+        fresh.push(item);
+      }
+    }
+    if (fresh.length) {
+      const host = scrollHost.value;
+      const wasAtBottom = host ? host.scrollHeight - host.scrollTop - host.clientHeight < 80 : true;
+      items.value = [...items.value, ...fresh];
+      await nextTick();
+      if (host && wasAtBottom) {
+        host.scrollTop = host.scrollHeight;
+      }
+    }
+  } catch (err) {
+    emit('error', err.message);
+  } finally {
+    refreshing = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      refreshTail();
+    }
+  }
+}
+
+function subscribeToChatEvents() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+  if (!props.userId) {
+    return;
+  }
+  eventSource = openChatEvents(props.userId);
+  eventSource.addEventListener('message', () => refreshTail());
+  // При обрыве EventSource переподключается сам, а open срабатывает на каждом успешном
+  // (пере)подключении — дозагрузка хвоста добирает сообщения, пропущенные за время обрыва.
+  eventSource.addEventListener('open', () => refreshTail());
+}
+
+watch(
+  () => props.userId,
+  () => {
+    loadInitial();
+    subscribeToChatEvents();
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (eventSource) {
+    eventSource.close();
+  }
+});
 
 defineExpose({ reload: loadInitial });
 </script>
@@ -226,7 +321,15 @@ defineExpose({ reload: loadInitial });
       </template>
     </div>
     <div v-if="userId" class="cp-input">
-      <input v-model="draft" :disabled="sending" placeholder="Сообщение от имени пользователя…" @keydown.enter="send" />
+      <!-- Enter отправляет, Shift+Enter — перенос строки. Высота растёт с текстом до 250px. -->
+      <textarea
+        ref="draftEl"
+        v-model="draft"
+        rows="3"
+        :disabled="sending"
+        placeholder="Сообщение от имени пользователя…"
+        @keydown.enter.exact.prevent="send"
+      />
       <button type="button" :disabled="sending || !draft.trim()" title="Отправить" @click="send">
         {{ sending ? '…' : '➤' }}
       </button>
@@ -361,52 +464,29 @@ defineExpose({ reload: loadInitial });
 }
 .cp-input {
   display: flex;
+  align-items: flex-end;
   gap: 6px;
   padding: 8px;
   background: #fff;
   border-top: 1px solid #e2e5e9;
   flex: none;
 }
-.cp-input input {
+.cp-input textarea {
   flex: 1;
   padding: 7px 10px;
   border: 1px solid #d6d9de;
   border-radius: 6px;
   font: inherit;
+  resize: none;
+  overflow-y: hidden; /* до достижения max-height скролл прячется; дальше его включает autosizeDraft */
+  max-height: 250px;
 }
 .cp-input button {
   border: none;
   background: #e8a33d;
   color: #fff;
   border-radius: 6px;
-  padding: 0 14px;
-  cursor: pointer;
-}
-.cp-input button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.cp-input {
-  display: flex;
-  gap: 6px;
-  padding: 8px;
-  background: #fff;
-  border-top: 1px solid #e2e5e9;
-  flex: none;
-}
-.cp-input input {
-  flex: 1;
-  padding: 7px 10px;
-  border: 1px solid #d6d9de;
-  border-radius: 6px;
-  font: inherit;
-}
-.cp-input button {
-  border: none;
-  background: #e8a33d;
-  color: #fff;
-  border-radius: 6px;
-  padding: 0 14px;
+  padding: 8px 14px;
   cursor: pointer;
 }
 .cp-input button:disabled {

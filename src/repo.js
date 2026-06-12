@@ -1,5 +1,5 @@
 // Data access layer: users, domains, conversations, messages.
-import { query } from './db.js';
+import { query, notify } from './db.js';
 import { config } from './config.js';
 import { estimateTokens } from './pipeline/token-counter.js';
 import { normalizeVoiceId } from './voice/voices.js';
@@ -119,6 +119,17 @@ export async function saveMessage(conversationId, userId, role, content, extra =
     ],
   );
   await query('UPDATE mem.conversations SET updated_at = now() WHERE id = $1', [conversationId]);
+  // Realtime push for the admin chat pane: any process that stores a dialog message (telegram bot,
+  // proactivity worker, admin chat itself) notifies the 'chat_message' channel, and the admin server
+  // relays the event to subscribed browsers over SSE. Only user/assistant roles appear in the timeline.
+  // A notification failure must never break message delivery, so errors are logged and swallowed.
+  if (role === 'user' || role === 'assistant') {
+    try {
+      await notify('chat_message', JSON.stringify({ userId: String(userId), messageId: rows[0].id, role }));
+    } catch (err) {
+      console.warn(`Не удалось отправить уведомление chat_message: ${err.message}`);
+    }
+  }
   return rows[0];
 }
 

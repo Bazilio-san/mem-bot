@@ -166,6 +166,13 @@ export function sendChatMessage(userId, text) {
   });
 }
 
+// Подписка на события чата пользователя в реальном времени (SSE). Сервер присылает событие на каждое
+// новое сообщение диалога, в каком бы канале оно ни появилось (Telegram, проактивность, сам админ-чат).
+// Возвращает EventSource; вызывающий обязан закрыть его методом close() при смене пользователя.
+export function openChatEvents(userId) {
+  return new EventSource(`/api/users/${encodeURIComponent(userId)}/chat-events`);
+}
+
 // Настройки AI-анализа (список моделей и CLI-пресетов) для выпадающих списков диалога.
 export function fetchLogAnalysisConfig() {
   return request('/llm-log/analysis-config');
