@@ -7,6 +7,8 @@ import { config } from '../config.js';
 import { listSkillRoutes } from './skills/registry.js';
 
 // Schema of the classification result. The source of truth is skill_name, restricted to the available skills.
+// The schema is self-sufficient: every field carries a description for the model, so the system prompt holds
+// only what the schema cannot express (the skill list and how to read its signals).
 // Exported for unit tests (strictness of the schema in json_schema mode).
 export function buildSchema(routeNames) {
   return {
@@ -15,38 +17,56 @@ export function buildSchema(routeNames) {
     properties: {
       intent: {
         type: 'string',
+        description: "The user's intent in one short phrase: what they want to get or do with this message.",
       },
       skill_name: {
         type: 'string',
         enum: routeNames,
+        description: `Name of the SINGLE best-fitting skill by meaning — exactly as in the list of available skills. If no specialized skill fits, pick general.`,
       },
-      domain_key: { type: 'string' },
+      domain_key: {
+        type: 'string',
+        description: 'Domain key of the chosen skill — copy it from the list of available skills.',
+      },
       confidence: {
         type: 'number',
         minimum: 0,
         maximum: 1,
+        description: 'Confidence in the skill choice: from 0 (a guess) to 1 (unambiguous).',
       },
-      reason: { type: 'string' },
+      reason: {
+        type: 'string',
+        description: 'Brief justification of the skill choice, one phrase.',
+      },
       // Strict array of type/value pairs (instead of a free-form object): keeps the whole schema
       // expressible in strict json_schema mode and feeds the entity boost in retrieveMemory.
       entities: {
         type: 'array',
         maxItems: 8,
+        description: `Important entities explicitly mentioned in the message (at most 8). Do not include pronouns or generic words.`,
         items: {
           type: 'object',
           additionalProperties: false,
           required: ['type', 'value'],
           properties: {
-            type: { type: 'string' },
-            value: { type: 'string' },
+            type: {
+              type: 'string',
+              description: 'Entity type: person, place, vehicle, topic, product, etc.',
+            },
+            value: {
+              type: 'string',
+              description: `Entity value in its base form (nominative case), without extra words. Keep the language of the original message: for a Russian message return «Берлин», «мама», not "Berlin", "mom".`,
+            },
           },
         },
       },
       needs_memory: {
         type: 'boolean',
+        description: 'Whether long-term memory about the user is needed for the reply.',
       },
       needed_memory_scopes: {
         type: 'array',
+        description: `Which memory scopes are needed for the reply: dialog — open conversation threads; profile — user profile and communication style; domain — subject-matter memory of the current domain; secure — protected data (only on the user's explicit request); reminder — reminders and scheduled tasks.`,
         items: {
           type: 'string',
           enum: ['dialog', 'profile', 'domain', 'secure', 'reminder'],
@@ -54,9 +74,11 @@ export function buildSchema(routeNames) {
       },
       needs_tools: {
         type: 'boolean',
+        description: 'Whether tools (external actions: search, scheduler, etc.) are needed to fulfil the request.',
       },
       candidate_tools: {
         type: 'array',
+        description: 'Probable names of the needed tools; an empty array if no tools are needed.',
         items: { type: 'string' },
       },
     },
@@ -78,25 +100,19 @@ export function buildSchema(routeNames) {
 function buildSystemPrompt(routes) {
   const list = routes
     .map((r) => {
-      const pos = r.positive_signals?.length ? `\n    Положительные сигналы: ${r.positive_signals.join('; ')}` : '';
-      const neg = r.negative_signals?.length ? `\n    Отрицательные сигналы: ${r.negative_signals.join('; ')}` : '';
-      return `  - ${r.name} / domain ${r.domain_key}\n    Назначение: ${r.description}\n    Когда использовать: ${r.when_to_use}${pos}${neg}`;
+      const pos = r.positive_signals?.length ? `\n    Positive signals: ${r.positive_signals.join('; ')}` : '';
+      const neg = r.negative_signals?.length ? `\n    Negative signals: ${r.negative_signals.join('; ')}` : '';
+      return `  - ${r.name} / domain ${r.domain_key}\n    Purpose: ${r.description}\n    When to use: ${r.when_to_use}${pos}${neg}`;
     })
     .join('\n');
-  return `Ты классификатор входящего сообщения для агентского приложения с памятью.
-Определи намерение, важные сущности, какие виды памяти нужны и нужны ли инструменты.
-Сущности возвращай массивом пар type/value (type: person, place, vehicle, topic, product и т. п.).
-Value — в начальной форме (именительный падеж), без лишних слов. Не более 8 сущностей.
-Не включай местоимения и общие слова.
-Выбери ОДИН наиболее подходящий skill по смыслу запроса и верни его имя в поле skill_name точно как в списке.
-В поле domain_key продублируй доменный ключ выбранного skill.
-Положительные и отрицательные сигналы — подсказки, а не строгий список: выбирай по смыслу.
-Если ни один специализированный skill не подходит, выбери general.
+  return `You are the incoming-message classifier for an agent application with memory.
+Fill in every response field according to its description in the JSON schema.
+Positive and negative signals are hints, not a strict list: choose the skill by meaning.
 
-Доступные skills:
+Available skills:
 ${list}
 
-Не отвечай пользователю. Верни только JSON по схеме.`;
+Do not reply to the user. Return only JSON conforming to the schema.`;
 }
 
 export async function classifyIntent(userMessage, currentDomainKey = 'general', shortState = '') {
@@ -108,8 +124,8 @@ export async function classifyIntent(userMessage, currentDomainKey = 'general', 
     schema: buildSchema(routeNames),
     schemaName: 'skill_classification',
     system: buildSystemPrompt(routes),
-    user: `Текущий домен агента: ${currentDomainKey}
-Последнее состояние диалога: ${shortState || 'нет'}
-Сообщение пользователя: ${userMessage}`,
+    user: `Current agent domain: ${currentDomainKey}
+Last dialog state: ${shortState || 'none'}
+User message: ${userMessage}`,
   });
 }

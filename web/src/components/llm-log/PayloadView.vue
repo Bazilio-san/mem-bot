@@ -95,9 +95,31 @@ function embedMode(idx) {
   return embedModes.value[idx] || 'JSON';
 }
 
+// Сообщение-носитель схемы в режиме json_schema: схема приходит отдельным полем запроса, но показываем
+// её внутри раскрытого system-сообщения (после текста промпта) — первого system в списке.
+const schemaMsgIdx = computed(() => (rfSchema.value ? messages.value.findIndex((m) => m.role === 'system') : -1));
+
 // Встроенный JSON ищем только в текстовых ролях (system/user): содержимое tool и так JSON целиком.
-function embedOf(m) {
-  return roleFormat(m.role) === 'RAW' ? embeddedJson(messageContent(m)) : null;
+// Два источника: тег <json-schema> в тексте промпта (json_object) либо response_format.json_schema,
+// прикреплённый к system-сообщению (json_schema). cap — подсказка для селекта формата.
+function embedOf(m, idx) {
+  if (roleFormat(m.role) !== 'RAW') {
+    return null;
+  }
+  const fromText = embeddedJson(messageContent(m));
+  if (fromText) {
+    return { ...fromText, cap: 'Формат схемы' };
+  }
+  if (idx === schemaMsgIdx.value) {
+    const { name, strict } = rfSchema.value;
+    return {
+      before: messageContent(m).trimEnd(),
+      raw: rfSchema.value.json,
+      after: '',
+      cap: `${name} — ${strict ? 'strict: формат ответа гарантируется API' : 'strict выключен: схема рекомендательная'}`,
+    };
+  }
+  return null;
 }
 
 // Имя и описание инструмента: поддерживаем оба формата — «плоский» и обёртку {type:'function', function:{…}}.
@@ -156,9 +178,12 @@ function clickMessage(idx) {
   toggleSet(openedMessages, idx);
 }
 
-// Открыть содержимое сообщения в модальном окне (кнопка у длинных сообщений).
+// Открыть содержимое сообщения в модальном окне (кнопка у длинных сообщений). Вместе с текстом
+// передаётся embedOf: сообщение со схемой ответа и в окне показывается тем же блоком
+// «текст + селект формата + JSON» (режим селекта общий с инлайн-видом — по индексу сообщения).
 function openBig(idx) {
-  bigContent.value = messageContent(messages.value[idx]);
+  const m = messages.value[idx];
+  bigContent.value = { text: messageContent(m), embed: embedOf(m, idx), idx };
 }
 
 function isLong(m) {
@@ -327,21 +352,26 @@ onBeforeUnmount(() => {
               <ContentViewer :content="tc.function?.arguments || '{}'" compact default-format="JSON" />
             </div>
           </div>
-          <!-- json_object: схема вписана текстом в промпт. Текст до JSON — как обычно, затем
-               переключатель JSON/RAW (JSON по умолчанию — pretty-печать схемы) и текст после. -->
-          <div v-if="messageContent(m) && embedOf(m)" class="pv-embed">
-            <pre class="pv-embed-txt">{{ embedOf(m).before }}</pre>
-            <div class="pv-embed-bar">
-              <select :value="embedMode(idx)" title="Формат схемы" @change="embedModes[idx] = $event.target.value">
+          <!-- Сообщение со схемой ответа (json_object — тег в тексте, json_schema — поле запроса):
+               текст промпта, затем сама схема в том же контейнере. Селект JSON/RAW (JSON по умолчанию —
+               pretty-печать) стоит инлайном сразу после последней строки текста перед схемой. -->
+          <div v-if="messageContent(m) && embedOf(m, idx)" class="pv-embed">
+            <div class="pv-embed-txt">
+              <span class="pv-embed-pre">{{ embedOf(m, idx).before }}</span>
+              <select
+                class="pv-embed-select"
+                :value="embedMode(idx)"
+                :title="embedOf(m, idx).cap"
+                @change="embedModes[idx] = $event.target.value"
+              >
                 <option value="JSON">JSON</option>
                 <option value="RAW">RAW</option>
               </select>
-              <span class="pv-embed-cap">JSON Schema, встроенная в текст промпта</span>
             </div>
             <pre class="pv-embed-json">{{
-              embedMode(idx) === 'JSON' ? prettyJson(embedOf(m).raw) : embedOf(m).raw
+              embedMode(idx) === 'JSON' ? prettyJson(embedOf(m, idx).raw) : embedOf(m, idx).raw
             }}</pre>
-            <pre v-if="embedOf(m).after" class="pv-embed-txt">{{ embedOf(m).after }}</pre>
+            <pre v-if="embedOf(m, idx).after" class="pv-embed-txt">{{ embedOf(m, idx).after }}</pre>
           </div>
           <ContentViewer
             v-else-if="messageContent(m)"
@@ -353,9 +383,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- json_schema: схема ответа — отдельный блок запроса (response_format.json_schema).
-         Секция в стиле tools: заголовок с именем схемы и режимом strict, по клику — pretty JSON. -->
-    <div v-if="rfSchema" class="pv-sect">
+    <!-- json_schema: обычно схема показывается внутри system-сообщения (embedOf). Отдельная секция —
+         только запасной путь, когда system-сообщения в запросе нет и встроить схему некуда. -->
+    <div v-if="rfSchema && schemaMsgIdx === -1" class="pv-sect">
       <div class="pv-sect-h">response_format — JSON Schema</div>
       <div class="pv-tool" :class="{ open: rfOpen }">
         <div class="pv-tool-h" @click="rfOpen = !rfOpen">
@@ -397,7 +427,7 @@ onBeforeUnmount(() => {
     </div>
 
     <Teleport to="body">
-      <div v-if="bigContent !== null" class="pv-ovl" @click.self="bigContent = null">
+      <div v-if="bigContent !== null" class="pv-ovl">
         <div
           class="pv-dlg"
           :style="{ width: `${dlg.w}px`, height: `${dlg.h}px`, left: `${dlg.x}px`, top: `${dlg.y}px` }"
@@ -407,7 +437,30 @@ onBeforeUnmount(() => {
             <button type="button" class="pv-dlg-x" title="Закрыть" @click="bigContent = null">✕</button>
           </div>
           <div class="pv-dlg-b">
-            <ContentViewer :content="bigContent" />
+            <!-- Сообщение со схемой ответа: в окне тот же блок, что и в инлайн-виде, — текст промпта,
+                 инлайн-селект JSON/RAW после последней строки и сама схема под ним. -->
+            <div v-if="bigContent.embed" class="pv-embed pv-embed-dlg">
+              <div class="pv-embed-txt">
+                <span class="pv-embed-pre">{{ bigContent.embed.before }}</span>
+                <select
+                  class="pv-embed-select"
+                  :value="embedMode(bigContent.idx)"
+                  :title="bigContent.embed.cap"
+                  @change="embedModes[bigContent.idx] = $event.target.value"
+                >
+                  <option value="JSON">JSON</option>
+                  <option value="RAW">RAW</option>
+                </select>
+              </div>
+              <pre class="pv-embed-json">{{
+                embedMode(bigContent.idx) === 'JSON' ? prettyJson(bigContent.embed.raw) : bigContent.embed.raw
+              }}</pre>
+              <pre v-if="bigContent.embed.after" class="pv-embed-txt">{{ bigContent.embed.after }}</pre>
+            </div>
+            <ContentViewer v-else :content="bigContent.text" />
+            <div class="pv-dlg-f">
+              <button type="button" class="pv-mini" @click="bigContent = null">Закрыть</button>
+            </div>
           </div>
           <span
             v-for="dir in RESIZE_DIRS"
@@ -594,10 +647,10 @@ onBeforeUnmount(() => {
 .pv-tcalls {
   margin-bottom: 6px;
 }
-/* Блок «текст промпта + встроенная JSON Schema» (режим json_object): текст — шрифтом интерфейса,
-   как обычное раскрытое сообщение; сам JSON — моноширинный на лёгкой подложке. */
+/* Блок «текст промпта + встроенная JSON Schema» (json_object и json_schema): текст — шрифтом
+   интерфейса, как обычное раскрытое сообщение; сам JSON — моноширинный на лёгкой подложке. */
 .pv-embed {
-  padding: 4px 20px 4px 8px;
+  padding: 4px 24px 4px 8px;
   max-height: 260px;
   overflow: auto;
 }
@@ -616,23 +669,32 @@ onBeforeUnmount(() => {
 .pv-embed-txt:first-child {
   text-indent: var(--pv-indent, 0);
 }
-.pv-embed-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 6px 0 2px;
+/* Текст до схемы — инлайн-спан с сохранением переносов: следом за его последней строкой
+   в потоке стоит селект формата схемы. */
+.pv-embed-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-.pv-embed-bar select {
+/* Тот же блок в модальном окне: занимает всю высоту диалога (лимит 260px снят), рамка и подложка —
+   как у ContentViewer, чтобы не отличаться от обычного просмотра сообщений. */
+.pv-embed-dlg {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  background: #fcfcfc;
+  padding: 8px 10px;
+}
+/* Оформление селекта — точно как у селекта формата в ContentViewer (.cv-bar select). */
+.pv-embed-select {
+  margin-left: 8px;
   font-size: 11px;
   border: 1px solid #ddd;
   border-radius: 4px;
   background: #fff;
   color: #666;
   cursor: pointer;
-}
-.pv-embed-cap {
-  font-size: 11px;
-  color: #8a909a;
 }
 .pv-embed-json {
   font:
@@ -714,6 +776,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+.pv-dlg-f {
+  margin-top: 10px;
+  flex: none;
 }
 /* ContentViewer внутри окна занимает всю высоту, собственный лимит 480px снимается. */
 .pv-dlg-b :deep(.cv) {

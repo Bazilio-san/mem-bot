@@ -50,7 +50,19 @@ async function loadAnalysisConfig() {
     const cfg = await fetchLogAnalysisConfig();
     models.value = cfg.models || [];
     model.value = cfg.defaultModel || models.value[0] || null;
-    presets.value = cfg.cliPresets || [];
+    presets.value = Array.isArray(cfg.cliPresets)
+      ? cfg.cliPresets
+          .map((p) => ({
+            name: p?.name || null,
+            title:
+              typeof p?.title === 'string' && p.title.trim()
+                ? p.title
+                : typeof p?.name === 'string' && p.name.trim()
+                  ? p.name
+                  : 'Пресет CLI',
+          }))
+          .filter((p) => p.name)
+      : [];
     if (!presets.value.some((item) => item?.name === preset.value)) {
       preset.value = presets.value[0]?.name || null;
     }
@@ -314,7 +326,7 @@ async function run() {
             <div
               class="ad-cli-inline"
               :class="{ disabled: !cliAvailable }"
-              :title="!cliAvailable ? 'CLI доступны только при локальной разарботке' : undefined"
+              :title="!cliAvailable ? 'CLI доступны только при локальной разработке' : undefined"
             >
               <label class="ad-radio" :class="{ disabled: !cliAvailable }">
                 <RadioButton v-model="engine" input-id="eng-cli" value="cli" :disabled="!cliAvailable" />

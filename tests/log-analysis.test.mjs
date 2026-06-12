@@ -48,8 +48,9 @@ function framesText(frames) {
   config.admin.host = 'localhost';
   assert.equal(analysisConfig().cliAvailable, true);
   const pub = analysisConfigPublic();
-  assert.deepEqual(pub.cliPresets, [{ name: 'p1', title: 'secret-tool --x' }]);
+  assert.deepEqual(pub.cliPresets, [{ name: 'p1', title: 'secret-tool' }], 'подпись пресета — команда без аргументов');
   assert.ok(!JSON.stringify(pub).includes('"command"'), 'команды не уходят на фронтенд отдельным полем');
+  assert.ok(!JSON.stringify(pub).includes('--x'), 'аргументы команды не уходят на фронтенд');
 
   config.admin.host = '0.0.0.0';
   assert.equal(analysisConfig().cliAvailable, false, 'на нелокальном хосте CLI недоступен');

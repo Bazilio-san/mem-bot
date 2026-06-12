@@ -20,6 +20,10 @@ export function analysisConfig() {
   const a = config.admin?.logAnalysis || {};
   const llm = a.llm || {};
   const cli = a.cli || {};
+  const adminHost = String(config.admin?.host || '')
+    .trim()
+    .toLowerCase();
+  const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(adminHost);
   const models = Array.isArray(llm.models) && llm.models.length ? llm.models : [config.llm.mainModel];
   return {
     models,
@@ -32,17 +36,18 @@ export function analysisConfig() {
     })),
     maxOutputChars: Number(cli.maxOutputChars) > 0 ? Number(cli.maxOutputChars) : 200000,
     // The CLI engine executes a command on the server — allowed only for a local-only admin panel.
-    cliAvailable: config.admin.host === 'localhost',
+    cliAvailable: isLocalHost,
   };
 }
 
-// The public part of the settings for the frontend dialog (no commands — only preset names and titles).
+// The public part of the settings for the frontend dialog: preset names and display titles. The title is
+// just the executable name; command arguments never leave the server.
 export function analysisConfigPublic() {
   const cfg = analysisConfig();
   return {
     models: cfg.models,
     defaultModel: cfg.defaultModel,
-    cliPresets: cfg.cliPresets.map((p) => ({ name: p.name, title: `${p.command} ${p.args.join(' ')}`.trim() })),
+    cliPresets: cfg.cliPresets.map((p) => ({ name: p.name, title: p.command })),
     cliAvailable: cfg.cliAvailable,
   };
 }
