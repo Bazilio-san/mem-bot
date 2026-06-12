@@ -48,15 +48,15 @@ function parseKnowledgeStatuses(raw) {
 function parseKnowledgeBody(body) {
   const content = String(body?.content || '').trim();
   if (!content) {
-    return { error: 'Поле «содержимое» обязательно.' };
+    return { error: 'The "content" field is required.' };
   }
   const importance = body?.importance == null || body.importance === '' ? 0.5 : Number(body.importance);
   if (!Number.isFinite(importance) || importance < 0 || importance > 1) {
-    return { error: 'Важность должна быть числом от 0 до 1.' };
+    return { error: 'Importance must be a number between 0 and 1.' };
   }
   const status = body?.status || 'active';
   if (!KNOWLEDGE_WRITE_STATUSES.includes(status)) {
-    return { error: `Недопустимый статус: ${status}.` };
+    return { error: `Invalid status: ${status}.` };
   }
   const tags = Array.isArray(body?.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean) : [];
   return {
@@ -80,7 +80,7 @@ function wrap(handler) {
       await handler(req, res);
     } catch (err) {
       console.error(`Admin API error ${req.method} ${req.originalUrl}:`, err.message);
-      res.status(500).json({ error: err.message || 'Внутренняя ошибка сервера.' });
+      res.status(500).json({ error: err.message || 'Internal server error.' });
     }
   };
 }
@@ -123,7 +123,7 @@ export function createAdminApi() {
         category: req.params.category,
         id: req.params.itemId,
       });
-      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Запись не найдена.' });
+      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Record not found.' });
     }),
   );
 
@@ -134,7 +134,7 @@ export function createAdminApi() {
     '/users/:id',
     wrap(async (req, res) => {
       const ok = await deleteUser(req.params.id);
-      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Пользователь не найден.' });
+      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'User not found.' });
     }),
   );
 
@@ -176,7 +176,7 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const cycle = await getCycle(req.params.requestId);
       if (!cycle) {
-        return res.status(404).json({ error: 'Записей журнала с таким request_id не найдено.' });
+        return res.status(404).json({ error: 'No log entries found for this request_id.' });
       }
       res.json(cycle);
     }),
@@ -188,7 +188,7 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const result = await getSingleRequest(req.params.llmRequestId);
       if (!result) {
-        return res.status(404).json({ error: 'Запись журнала не найдена.' });
+        return res.status(404).json({ error: 'Log entry not found.' });
       }
       res.json(result);
     }),
@@ -206,11 +206,11 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const text = String(req.body?.text || '').trim();
       if (!text) {
-        return res.status(400).json({ error: 'Пустое сообщение.' });
+        return res.status(400).json({ error: 'Message cannot be empty.' });
       }
       const user = await getUserById(req.params.id);
       if (!user) {
-        return res.status(404).json({ error: 'Пользователь не найден.' });
+        return res.status(404).json({ error: 'User not found.' });
       }
       res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -261,7 +261,7 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const statuses = parseKnowledgeStatuses(req.query.status);
       if (!statuses) {
-        return res.status(400).json({ error: 'Недопустимое значение параметра status.' });
+        return res.status(400).json({ error: 'Invalid status parameter value.' });
       }
       res.json(await listGlobalKnowledge({ statuses }));
     }),
@@ -274,11 +274,11 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const q = String(req.query.q || '').trim();
       if (!q) {
-        return res.status(400).json({ error: 'Пустой поисковый запрос.' });
+        return res.status(400).json({ error: 'Search query cannot be empty.' });
       }
       const statuses = parseKnowledgeStatuses(req.query.status);
       if (!statuses) {
-        return res.status(400).json({ error: 'Недопустимое значение параметра status.' });
+        return res.status(400).json({ error: 'Invalid status parameter value.' });
       }
       res.json(await searchGlobalKnowledgeText({ q, statuses }));
     }),
@@ -309,7 +309,7 @@ export function createAdminApi() {
       }
       const updated = await updateGlobalKnowledge(req.params.id, parsed.value);
       if (!updated) {
-        return res.status(404).json({ error: 'Запись не найдена.' });
+        return res.status(404).json({ error: 'Record not found.' });
       }
       res.json(updated);
     }),
@@ -320,7 +320,7 @@ export function createAdminApi() {
     '/knowledge/:id',
     wrap(async (req, res) => {
       const ok = await deleteGlobalKnowledge(req.params.id);
-      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Запись не найдена.' });
+      res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Record not found.' });
     }),
   );
 
@@ -331,11 +331,11 @@ export function createAdminApi() {
     wrap(async (req, res) => {
       const record = await getGlobalKnowledgeById(req.params.id);
       if (!record) {
-        return res.status(404).json({ error: 'Запись не найдена.' });
+        return res.status(404).json({ error: 'Record not found.' });
       }
       const ok = await reembedGlobalKnowledge(req.params.id, { force: true });
       if (!ok) {
-        return res.status(503).json({ error: 'Сервис эмбеддингов недоступен, попробуйте позже.' });
+        return res.status(503).json({ error: 'Embedding service is unavailable, please try again later.' });
       }
       res.json(await getGlobalKnowledgeById(req.params.id));
     }),

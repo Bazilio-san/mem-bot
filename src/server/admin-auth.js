@@ -135,7 +135,7 @@ export function requireAdminSession(req, res, next) {
   }
   const session = sessionFromRequest(req);
   if (!session) {
-    return res.status(401).json({ error: 'Требуется вход в админку через Telegram.' });
+    return res.status(401).json({ error: 'Admin login via Telegram is required.' });
   }
   req.adminSession = session;
   next();
@@ -195,18 +195,18 @@ export function createAuthApi() {
     try {
       const addr = req.headers['x-real-ip'] || req.socket?.remoteAddress || 'unknown';
       if (rateLimited(String(addr))) {
-        return res.status(429).json({ error: 'Слишком много попыток входа. Подождите несколько минут.' });
+        return res.status(429).json({ error: 'Too many login attempts. Please wait a few minutes.' });
       }
       const login = validateTelegramLoginData(req.body, config.telegram.apiKey);
       if (!login) {
-        return res.status(401).json({ error: 'Подпись Telegram не подтверждена или данные устарели.' });
+        return res.status(401).json({ error: 'Telegram signature is invalid or the data has expired.' });
       }
       const { rows } = await query('SELECT id, display_name, is_admin FROM mem.users WHERE external_id = $1', [
         String(login.id),
       ]);
       const user = rows[0];
       if (!user || user.is_admin !== true) {
-        return res.status(403).json({ error: 'Доступ в админку разрешён только администраторам бота.' });
+        return res.status(403).json({ error: 'Access is restricted to bot administrators only.' });
       }
       const displayName = user.display_name || login.firstName || String(login.id);
       setSessionCookie(req, res, issueAdminSession({ userId: user.id, displayName }));

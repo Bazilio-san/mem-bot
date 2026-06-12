@@ -112,12 +112,12 @@ export async function runAnalysis({ llmRequestId, question, engine, model, prese
   const direct = String(rawPrompt || '').trim();
   const q = String(question || '').trim();
   if (!direct && (!llmRequestId || !q)) {
-    res.status(400).json({ error: 'Нужен либо готовый prompt, либо пара llmRequestId и question.' });
+    res.status(400).json({ error: 'Provide either a ready-made prompt or both llmRequestId and question.' });
     return;
   }
   if (engine === 'cli' && !cfg.cliAvailable) {
     res.status(403).json({
-      error: 'CLI-движок доступен только когда админка слушает на localhost (config.admin.host).',
+      error: 'The CLI engine is only available when the admin server listens on localhost (config.admin.host).',
     });
     return;
   }
@@ -125,7 +125,7 @@ export async function runAnalysis({ llmRequestId, question, engine, model, prese
   if (!prompt) {
     const { rows } = await queryLog(`SELECT * FROM log.llm_request WHERE llm_request_id = $1`, [Number(llmRequestId)]);
     if (!rows.length) {
-      res.status(404).json({ error: 'Запись журнала не найдена.' });
+      res.status(404).json({ error: 'Log entry not found.' });
       return;
     }
     prompt = buildPrompt(rows[0], q);
@@ -180,7 +180,7 @@ async function runLlm(cfg, model, prompt, res) {
 export function runCli(cfg, presetName, prompt, res) {
   const preset = cfg.cliPresets.find((p) => p.name === presetName) || cfg.cliPresets[0];
   if (!preset) {
-    throw new Error('В конфигурации admin.logAnalysis.cli.presets нет ни одного пресета.');
+    throw new Error('No CLI presets configured in admin.logAnalysis.cli.presets.');
   }
   return new Promise((resolve, reject) => {
     // On Windows the shell is needed to resolve .cmd shims (claude.cmd), but cmd.exe breaks on unquoted
@@ -196,7 +196,7 @@ export function runCli(cfg, presetName, prompt, res) {
     let stderrTail = '';
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error(`CLI-инструмент не уложился в ${preset.timeoutSec} с и был остановлен.`));
+      reject(new Error(`CLI tool exceeded the ${preset.timeoutSec}s timeout and was terminated.`));
     }, preset.timeoutSec * 1000);
 
     child.stdout.on('data', (buf) => {
@@ -205,7 +205,7 @@ export function runCli(cfg, presetName, prompt, res) {
       if (sent > cfg.maxOutputChars) {
         clearTimeout(timeout);
         child.kill();
-        sseSend(res, { text: '\n\n…вывод обрезан по лимиту maxOutputChars.' });
+        sseSend(res, { text: '\n\n…output truncated at maxOutputChars limit.' });
         resolve();
         return;
       }
@@ -216,14 +216,14 @@ export function runCli(cfg, presetName, prompt, res) {
     });
     child.on('error', (err) => {
       clearTimeout(timeout);
-      reject(new Error(`Не удалось запустить CLI «${preset.command}»: ${err.message}`));
+      reject(new Error(`Failed to start CLI "${preset.command}": ${err.message}`));
     });
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (code === 0 || sent > 0) {
         resolve();
       } else {
-        reject(new Error(`CLI завершился с кодом ${code}${stderrTail ? `: ${stderrTail}` : ''}`));
+        reject(new Error(`CLI exited with code ${code}${stderrTail ? `: ${stderrTail}` : ''}`));
       }
     });
 

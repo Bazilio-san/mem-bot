@@ -90,15 +90,15 @@ export async function listSecureSummaries(userId, limit = 3) {
 // and with consent present. Every access is logged.
 export async function getSecureValue(secureRecordId, purpose) {
   if (!purpose || purpose.trim().length < 3) {
-    throw new Error('Для доступа к защищённым данным требуется указать цель (purpose).');
+    throw new Error('A purpose must be provided to access protected data.');
   }
   const { rows } = await query('SELECT * FROM mem.secure_records WHERE id = $1', [secureRecordId]);
   const rec = rows[0];
   if (!rec) {
-    throw new Error('Защищённая запись не найдена.');
+    throw new Error('Secure record not found.');
   }
   if (rec.consent_status !== 'granted') {
-    throw new Error('Нет согласия пользователя на использование этих данных.');
+    throw new Error('User has not consented to the use of this data.');
   }
   await query('UPDATE mem.secure_records SET last_used_at = now() WHERE id = $1', [secureRecordId]);
   return { value: decrypt(rec.encrypted_payload), record_type: rec.record_type, purpose };

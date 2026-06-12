@@ -8,11 +8,12 @@ describes the required `scripts/fcp.js` temp-copy protocol.
 
 ## Language in code
 
-All code comments, `console.*` / logger calls, and `throw new Error(...)` messages must be written in **English**.
+All code comments, `console.*` / logger calls, `throw new Error(...)` messages, and HTTP API error responses
+(`res.status(...).json({ error: '...' })`) must be written in **English**.
 
-Keep Russian for strings that are user-facing at runtime: Telegram bot replies, admin web UI error responses, LLM system/user
-prompts, tool descriptions and result strings passed to the model, tool `title` fields shown as Telegram progress statuses,
-and test fixtures (seed data, sample user messages, expected values).
+Keep Russian for strings that are user-facing at runtime: Telegram bot replies, LLM system/user prompts, tool descriptions
+and result strings passed to the model, tool `title` fields shown as Telegram progress statuses, and test fixtures
+(seed data, sample user messages, expected values).
 
 ## Formatting
 

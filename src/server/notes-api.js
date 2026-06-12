@@ -63,11 +63,11 @@ export function createNotesApi() {
   router.use(async (req, res, next) => {
     try {
       if (!config.notes.enabled) {
-        return res.status(503).json({ error: 'Инструментарий заметок выключен в конфигурации.' });
+        return res.status(503).json({ error: 'Notes feature is disabled in configuration.' });
       }
       const auth = await authenticate(req);
       if (!auth) {
-        return res.status(401).json({ error: 'Нет доступа: нужен действующий widget-токен или initData Telegram.' });
+        return res.status(401).json({ error: 'Access denied: a valid widget token or Telegram initData is required.' });
       }
       req.notesAuth = auth;
       next();
@@ -92,7 +92,7 @@ export function createNotesApi() {
       const id = parseId(req);
       const note = id ? await getNote({ userId: req.notesAuth.userId, id }) : null;
       if (!note) {
-        return res.status(404).json({ error: 'Заметка не найдена.' });
+        return res.status(404).json({ error: 'Note not found.' });
       }
       res.json({ note });
     }),
@@ -117,7 +117,7 @@ export function createNotesApi() {
       const { title, body, tags, pinned } = req.body || {};
       const result = id ? await updateNote({ userId, id, title, body, tags, pinned }) : null;
       if (!result) {
-        return res.status(404).json({ error: 'Заметка не найдена.' });
+        return res.status(404).json({ error: 'Note not found.' });
       }
       if (result.changed.length > 0) {
         await recordNoteEvent({ userId, conversationId, action: 'update', note: result.note, changed: result.changed });
@@ -133,7 +133,7 @@ export function createNotesApi() {
       const id = parseId(req);
       const note = id ? await deleteNote({ userId, id }) : null;
       if (!note) {
-        return res.status(404).json({ error: 'Заметка не найдена.' });
+        return res.status(404).json({ error: 'Note not found.' });
       }
       await recordNoteEvent({ userId, conversationId, action: 'delete', note });
       res.json({ note });
@@ -148,7 +148,7 @@ export function createNotesApi() {
       const id = parseId(req);
       const note = id ? await restoreNote({ userId, id }) : null;
       if (!note) {
-        return res.status(404).json({ error: 'Удалённая заметка не найдена.' });
+        return res.status(404).json({ error: 'Deleted note not found.' });
       }
       await recordNoteEvent({ userId, conversationId, action: 'restore', note });
       res.json({ note });

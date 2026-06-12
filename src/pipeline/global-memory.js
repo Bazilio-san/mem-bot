@@ -245,7 +245,7 @@ export async function updateGlobalKnowledge(
 ) {
   const domainId = domainKey ? await getDomainId(domainKey) : null;
   if (domainKey && !domainId) {
-    throw new Error(`Неизвестный домен: ${domainKey}`);
+    throw new Error(`Unknown domain: ${domainKey}`);
   }
   const { rowCount } = await query(
     `UPDATE mem.global_knowledge
