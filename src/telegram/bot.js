@@ -39,6 +39,7 @@ import { initTools } from '../pipeline/tools.js';
 import { registerChannelProfile } from '../pipeline/channels.js';
 import { telegramPostProcess, telegramSplit } from './format.js';
 import { startupInfo } from '../bootstrap/startup-info.js';
+import { getBotBuildInfo } from '../build-metadata.js';
 
 requireConfig(['telegram.apiKey']); // the bot token is required specifically for the Telegram channel
 const TOKEN = config.telegram.apiKey;
@@ -165,6 +166,7 @@ function enqueueReactionUpdate(reactionUpdate) {
 const BOT_COMMANDS = [
   { command: 'start', description: 'Запустить бота и показать справку' },
   { command: 'help', description: 'Показать справку и список команд' },
+  { command: 'version', description: 'Показать версию бота и последний commit' },
 ];
 
 // Russian labels for the proactivity triggers in the submenu. The technical trigger keys stay in the database
@@ -196,6 +198,30 @@ function proactivityKeyboard(triggers) {
   ]);
   rows.push([{ text: '🚫 Выключить проактивность', callback_data: 'pa:off' }]);
   return { inline_keyboard: rows };
+}
+
+function formatBotVersionMessage() {
+  const info = getBotBuildInfo();
+  const lines = [`Текущая версия: ${info.version}`];
+  if (info.shortCommit) {
+    lines.push(`Commit: ${info.shortCommit}`);
+  }
+  if (info.commit && info.commit !== info.shortCommit) {
+    lines.push(`Полный commit: ${info.commit}`);
+  }
+  if (info.commitTime) {
+    lines.push(`Последний commit: ${info.commitTime}`);
+  } else {
+    lines.push('Последний commit: не определён');
+  }
+  if (info.commitTime && info.commit) {
+    return lines.join('\n');
+  }
+  const sourceCommit = info.source.commit || 'не определён';
+  const sourceTime = info.source.commitTime || 'не определён';
+  lines.push(`Источник commit-данных: ${sourceCommit}`);
+  lines.push(`Источник времени commit: ${sourceTime}`);
+  return lines.join('\n');
 }
 
 // Re-register the menu commands for a specific chat. The command set is the same for every chat, but chats may
@@ -507,7 +533,14 @@ async function handleCommand(chatId, externalId, text) {
 Проактивность (бот сам пишет первым по уместному поводу):
 /proactivity — включить проактивность и выбрать поводы; там же есть кнопка полного выключения.`;
     }
+    help += `
+
+/version — текущая версия, commit и время последней фиксации в репозитории.`;
     await sendMessage(chatId, help);
+    return true;
+  }
+  if (text === '/version') {
+    await sendMessage(chatId, formatBotVersionMessage());
     return true;
   }
   // The single proactivity entry point: enables the user's master flag (idempotently provisioning the default

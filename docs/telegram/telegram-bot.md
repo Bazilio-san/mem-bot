@@ -244,6 +244,7 @@ shows the action indicator `upload_photo` ("uploading a photo…"). After a succ
 | Command | Purpose | AI bot programmatic API function |
 |---------|---------|----------------------------------|
 | `/start`, `/help` | greeting and help; the proactivity command is mentioned only when `config.proactive.enabled` is on | — |
+| `/version` | show the running bot version and git commit metadata | `bot_build_info` |
 | `/proactivity` | enable proactivity for the user and open the trigger-selection submenu (disabling is a button inside the submenu) | `setUserProactivity(externalId, true)`, `getProactivityState(externalId)`, `setTrigger(...)` |
 
 The global memory commands (`/fact-add`, `/fact-list`, `/fact-del`, `/kb-add`, `/kb-find`, `/kb-del`) are not
@@ -325,6 +326,7 @@ the user's state:
 
 - proactivity is disabled globally — only the base commands (`/start`, `/help`);
 - proactivity is enabled globally — the base commands plus `/proactivity`.
+- `/version` is always visible as a base command as part of the bot menu.
 
 At startup the bot registers this set globally via `setMyCommands`. In addition, after every ordinary message
 and after any toggle in the submenu, the same set is re-registered with the chat scope

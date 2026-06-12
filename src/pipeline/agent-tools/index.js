@@ -1,4 +1,5 @@
 import { memorySearchTool } from './memory/memory-search.js';
+import { botBuildInfoTool } from './bot-build-info.js';
 import { schedulerCreateTaskTool } from './scheduler/scheduler_create_task.js';
 import { schedulerListTasksTool } from './scheduler/scheduler_list_tasks.js';
 import { secureRecordGetTool } from './secure-record-get.js';
@@ -32,6 +33,7 @@ import { skillAuthorDeleteTool } from './skill-authoring/skill-author-delete.js'
 import { skillAuthorReloadTool } from './skill-authoring/skill-author-reload.js';
 
 export const allTools = [
+  botBuildInfoTool,
   memorySearchTool,
   schedulerCreateTaskTool,
   schedulerListTasksTool,
