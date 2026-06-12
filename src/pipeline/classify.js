@@ -17,9 +17,8 @@ export function buildSchema(routeNames, withReason = false) {
     properties: {
       intent: {
         type: 'string',
-        description: `A concise semantic phrase capturing the core meaning of the user's latest message, from the user's perspective. 
-It may be a request, preference, complaint, question, or statement. 
-Do not rewrite statements as desires; use the user's language and keep only searchable key meaning.`,
+        description: `Short searchable phrase for the user's current intent. 
+Use recent context for follow-ups; keep statements as statements. Return in the user's language.`,
       },
       skill_name: {
         type: 'string',
@@ -103,7 +102,7 @@ When unsure, set true.`,
 function buildSystemPrompt(routes) {
   const list = routes.map((r) => `- ${r.name} — ${r.hint}`).join('\n');
   return `You are an incoming-message classifier.
-Classify ONLY the text inside <last-user-message>. Use <recent-dialog> and the dialog state line only to
+Classify ONLY the text inside <last-user-message>. Use <recent-dialog> and the "Current thread" line only to
 resolve pronouns, ellipsis and short follow-ups and to stay in the thread the conversation is already in;
 never classify an earlier message instead of the last one.
 
@@ -122,30 +121,16 @@ function truncateLine(text, limit) {
   return s.length > limit ? `${s.slice(0, limit)}…` : s;
 }
 
-// Compact one-line digest of the summarizer's state_json (see SUMMARY_SCHEMA in history-compress.js)
-// for the classifier prompt. Only the fields that help interpret a short follow-up phrase; the lists
-// are capped so the line stays cheap. Exported for unit tests.
+// One-line "current thread" digest of the summarizer's state_json (see SUMMARY_SCHEMA in
+// history-compress.js) for the classifier prompt. Deliberately minimal: only what names the thread the
+// conversation is in (current_task, else current_goal). Open questions, next steps and the other state
+// fields are omitted — they pull a small model toward the conversation topic instead of the meaning of
+// the last message, and they cost tokens. Exported for unit tests.
 export function formatDialogState(stateJson) {
   if (!stateJson || typeof stateJson !== 'object') {
     return '';
   }
-  const take = (arr, n = 3) => (Array.isArray(arr) ? arr.filter(Boolean).slice(0, n) : []);
-  const parts = [];
-  if (stateJson.current_goal) {
-    parts.push(`goal: ${stateJson.current_goal}`);
-  }
-  if (stateJson.current_task) {
-    parts.push(`task: ${stateJson.current_task}`);
-  }
-  const open = take(stateJson.open_questions);
-  if (open.length) {
-    parts.push(`open questions: ${open.join('; ')}`);
-  }
-  const next = take(stateJson.next_steps);
-  if (next.length) {
-    parts.push(`next steps: ${next.join('; ')}`);
-  }
-  return parts.join(' | ');
+  return String(stateJson.current_task || stateJson.current_goal || '').trim();
 }
 
 // recentMessages — previous dialog turns ({role, content}, oldest first) WITHOUT the current message
@@ -175,7 +160,7 @@ export async function classifyIntent({
     schemaName: 'skill_classification',
     system: buildSystemPrompt(routes),
     user: `${recentBlock}Current agent domain: ${currentDomainKey}
-Last dialog state: ${state || 'none'}
+Current thread: ${state || 'none'}
 <last-user-message>
 ${safeMessage}
 </last-user-message>`,
