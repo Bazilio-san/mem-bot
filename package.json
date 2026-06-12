@@ -1,7 +1,7 @@
 {
   "name": "mem-bot",
   "productName": "MEM BOT",
-  "version": "1.0.81",
+  "version": "1.0.82",
   "description": "Agentic Chatbot is a friend, with multi-level memory, reminders, voice support, MCP skills and tools. Communication channel - Telegram",
   "main": "index.js",
   "type": "module",
@@ -47,6 +47,7 @@
     "test:skill-authoring": "cross-env NODE_ENV=test node tests/skill-authoring.test.mjs",
     "test:llm-pricing": "cross-env NODE_ENV=test node tests/llm-pricing.test.mjs",
     "test:llm-json-schema": "cross-env NODE_ENV=test node tests/llm-json-schema.test.mjs",
+    "test:history-compress-schema": "cross-env NODE_ENV=test node tests/history-compress-schema.test.mjs",
     "test:retrieve-entities": "cross-env NODE_ENV=test node tests/retrieve-entities.test.mjs",
     "test:llm-log": "cross-env NODE_ENV=test node tests/llm-log-buffer.test.mjs && cross-env NODE_ENV=test node tests/llm-log-stream-usage.test.mjs && cross-env NODE_ENV=test node tests/agent-event-log.test.mjs && cross-env NODE_ENV=test node tests/llm-log-cycle.test.mjs && cross-env NODE_ENV=test node tests/log-writer.test.mjs && cross-env NODE_ENV=test node tests/log-retention.test.mjs && cross-env NODE_ENV=test node tests/log-analysis.test.mjs && cross-env NODE_ENV=test node tests/llm-log-sse-client.test.mjs",
     "check:llm": "node tests/check-llm.js",

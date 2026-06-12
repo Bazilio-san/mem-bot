@@ -274,11 +274,19 @@ saved: the `saveMessage` function (`src/repo.js`) computes `token_count` alongsi
 The summariser compresses only the cold zone (the most recent messages are not passed to it — they will be
 added separately), does not duplicate facts from `active_memory`, describes near context in more detail than
 far context, moves durable facts into `facts_to_memory`, does not store secrets in plain text, and does not
-invent anything that did not occur. It returns strict JSON according to a schema (using the same `json_object`
-plus schema text in the system message as described in [08-prompts-and-models.md](08-prompts-and-models.md)).
+invent anything that did not occur. It returns strict JSON according to a schema, through `chatJSON` (see
+[08-prompts-and-models.md](08-prompts-and-models.md)): the schema is fully strict — there are no free-form
+objects anywhere in it, so in the `json_schema` mode the provider guarantees the response structure at the
+decoder level. The `historyCompression.responseFormat` setting can switch the summariser to the legacy
+`json_object` mode for providers without `json_schema` support; in that mode the code-side safeguards (the
+`state_json` type check, the defaults in `factsToCandidates`) compensate for the missing provider guarantee.
 
 The response schema contains only semantic fields; token counts are **intentionally excluded** — they are
-computed by the code:
+computed by the code. "No value" is expressed with `null` and empty arrays. The `notes` field of `state_json`
+is a strict catch-all for important things that do not fit the seven state fields; the prompt instructs the
+model to use it rarely. The `facts_to_memory` items reuse `FACT_ITEM_SCHEMA` — the shared strict fact shape
+exported by `src/pipeline/facts.js` (the same one fact extraction uses), with the `type` enum, required
+`fact_text`, `confidence`, and `ttl_days`:
 
 ```json
 {
@@ -287,25 +295,33 @@ computed by the code:
                "dropped_because_in_memory", "sensitive_mentions_redacted"],
   "properties": {
     "summary_text": { "type": "string" },
-    "state_json": { "type": "object", "additionalProperties": true, "properties": {
+    "state_json": { "type": "object", "additionalProperties": false,
+      "required": ["current_goal", "current_task", "decisions", "rejected_options",
+                   "open_questions", "constraints", "next_steps", "notes"],
+      "properties": {
       "current_goal": { "type": ["string","null"] }, "current_task": { "type": ["string","null"] },
       "decisions": { "type": "array", "items": { "type": "string" } },
       "rejected_options": { "type": "array", "items": { "type": "string" } },
       "open_questions": { "type": "array", "items": { "type": "string" } },
       "constraints": { "type": "array", "items": { "type": "string" } },
-      "next_steps": { "type": "array", "items": { "type": "string" } } } },
-    "facts_to_memory": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+      "next_steps": { "type": "array", "items": { "type": "string" } },
+      "notes": { "type": "array", "items": { "type": "string" } } } },
+    "facts_to_memory": { "type": "array", "items": FACT_ITEM_SCHEMA },
     "dropped_because_in_memory": { "type": "array", "items": { "type": "string" } },
     "sensitive_mentions_redacted": { "type": "array", "items": { "type": "string" } }
   }
 }
 ```
 
+Rows of `conversation_summaries` whose `state_json` contains keys outside this list remain readable: the
+consumer prints the whole jsonb object into the prompt without inspecting individual keys.
+
 ### Candidates for long-term memory
 
 The `facts_to_memory` field contains durable facts that are better stored in long-term memory rather than in
-the history, in the same flat `{type, fact_text, confidence}` form that fact extraction produces. They cannot
-be written directly: they go through the same `saveFacts` flow as ordinary fact extraction (see
+the history, in the same flat `{type, fact_text, confidence, ttl_days}` form that fact extraction produces
+(both schemas share the exported `FACT_ITEM_SCHEMA`). They cannot be written directly: they go through the
+same `saveFacts` flow as ordinary fact extraction (see
 [06-memory.md](06-memory.md)) with `source = 'history_summary'` — the lowest-ranked source, so a
 summarizer fact never overwrites a fact stated directly by the user. This preserves the unified logic of
 "confidence threshold → write-time semantic deduplication → confirm or replace instead of duplicating" and

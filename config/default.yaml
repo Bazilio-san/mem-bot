@@ -160,7 +160,8 @@ historyCompression:
   #> Модель суммаризатора истории. Совпадает с дефолтом llm.auxModel; при смене auxModel задать явно.
   model: 'gpt-5.4-nano'
   #> Формат структурированных ответов суммаризатора ('json_schema' | 'json_object').
-  #> null — наследуется от llm.responseFormat.
+  #> null — наследуется от llm.responseFormat. Схема history_summary полностью строгая, послаблений
+  #> не требует; 'json_object' нужен только для совместимости с провайдерами без поддержки json_schema.
   responseFormat: null
   #> Целевой размер дайджеста (в токенах). Должен быть строго меньше maxTokens (проверяется в коде).
   shrinkTokens: 800

@@ -161,8 +161,10 @@ user-replicas-only rule still applies.
 
 The `user_facts` response schema is an array of flat objects with fields `type` (one of the ten fact types
 from [06-memory.md](06-memory.md)), `fact_text` (one short third-person sentence without HTML),
-`confidence` (0..1), and `ttl_days` (an integer or `null`). The storage domain is assigned by the pipeline,
-not by the model.
+`confidence` (0..1), and `ttl_days` (an integer or `null`). The item shape is the exported `FACT_ITEM_SCHEMA`
+(`src/pipeline/facts.js`) — the single source of truth for the strict fact form, reused by every schema where
+a model returns fact candidates (here and in the history summariser's `facts_to_memory`, see [PROMPT-6]).
+The storage domain is assigned by the pipeline, not by the model.
 
 The model judges the fact's lifetime by its nature through `ttl_days`, the way a person would: namings and
 stable communication agreements are open-ended (`ttl_days = null`); fleeting moods and one-off appraisals are
@@ -299,19 +301,26 @@ When `config.historyCompression.enabled` is set, a separate call compresses the 
 history. The prompt requires retaining only what is needed to continue the conversation, leaving the most recent
 messages untouched (they are not passed in and will be appended separately), not duplicating facts already in
 `active_memory`, describing the near context in more detail than the distant context, moving stable facts about
-the user (from the user's own messages, in the flat `{type, fact_text, confidence}` form) to `facts_to_memory`,
-not storing secrets in plain text, and not inventing facts. Facts from `facts_to_memory` then pass through the
-regular `saveFacts` flow with its confidence threshold and semantic deduplication.
+the user (from the user's own messages, in the flat `{type, fact_text, confidence, ttl_days}` form — `ttl_days`
+is an integer number of days or `null` for an indefinite fact, 30 by default for `open_loop`) to
+`facts_to_memory`, not storing secrets in plain text, not inventing facts, and using `state_json.notes` rarely —
+only for important things that do not fit the seven state fields. Facts from `facts_to_memory` then pass through
+the regular `saveFacts` flow with its confidence threshold and semantic deduplication.
 
 ```text
 Ты сжимаешь старую часть истории диалога для чат-бота с долговременной памятью.
 Сохрани только то, что нужно для продолжения текущего диалога. Не дублируй факты из active_memory.
 Ближний к текущему моменту контекст описывай подробнее, дальний — сжимай сильнее. Не сохраняй секреты и мусор.
-Устойчивые факты для долговременной памяти вынеси в facts_to_memory. Верни только JSON по схеме.
+Устойчивые факты для долговременной памяти вынеси в facts_to_memory ({"type", "fact_text", "confidence",
+"ttl_days"}). В state_json.notes выноси только существенное, что не помещается в остальные поля состояния.
+Верни только JSON по схеме.
 ```
 
 The `history_summary` schema has required fields: `summary_text`, `state_json`, `facts_to_memory`,
-`dropped_because_in_memory`, `sensitive_mentions_redacted`. Token sizes are **intentionally excluded** from the
+`dropped_because_in_memory`, `sensitive_mentions_redacted`. The schema is fully strict: `state_json` fixes its
+eight keys (`additionalProperties: false`), and `facts_to_memory` items reuse the shared `FACT_ITEM_SCHEMA`
+exported by `src/pipeline/facts.js`, so `prepareJsonSchema` keeps `strict: true` and the provider guarantees
+the response structure at the decoder level. Token sizes are **intentionally excluded** from the
 schema — they are calculated by code using the `token_count` of messages, because models measure their own tokens
 unreliably. The full schema and its breakdown are in [13-history-compression.md](13-history-compression.md).
 

@@ -115,6 +115,20 @@ export async function summarizeAnswer(answer, { model = config.llm.auxModel } = 
 // Извлечение фактов
 // ---------------------------------------------------------------------------
 
+// Строгая форма одного факта-кандидата — единая точка истины для всех схем, где модель возвращает
+// факты для долговременной памяти (извлечение фактов здесь и facts_to_memory суммаризатора истории).
+export const FACT_ITEM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'fact_text', 'confidence', 'ttl_days'],
+  properties: {
+    type: { type: 'string', enum: FACT_TYPES },
+    fact_text: { type: 'string' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    ttl_days: { type: ['integer', 'null'] },
+  },
+};
+
 const EXTRACT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -122,17 +136,7 @@ const EXTRACT_SCHEMA = {
   properties: {
     facts: {
       type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['type', 'fact_text', 'confidence', 'ttl_days'],
-        properties: {
-          type: { type: 'string', enum: FACT_TYPES },
-          fact_text: { type: 'string' },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-          ttl_days: { type: ['integer', 'null'] },
-        },
-      },
+      items: FACT_ITEM_SCHEMA,
     },
   },
 };

@@ -13,7 +13,7 @@ import {
   getColdPendingMessages,
   saveConversationSummary,
 } from '../repo.js';
-import { saveFacts } from './facts.js';
+import { saveFacts, FACT_ITEM_SCHEMA } from './facts.js';
 import { estimateTokens, sumMessageTokens, estimateSummaryTokens } from './token-counter.js';
 
 // Zone headers in the final digest. The order is fixed: near, middle, far.
@@ -24,6 +24,11 @@ const ZONE_HEADERS = {
 };
 
 // Summarizer response schema. Token sizes are deliberately left out of the schema — our code counts them.
+// The schema is fully strict (no free-form objects anywhere), so prepareJsonSchema keeps strict: true and
+// the provider guarantees the response structure at the decoder level. "No value" is expressed with null
+// and empty arrays; notes is the strict replacement for arbitrary extra keys (important things that do not
+// fit the seven state fields). Old conversation_summaries rows with arbitrary jsonb keys stay readable —
+// the consumer just prints the object.
 const SUMMARY_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -38,7 +43,17 @@ const SUMMARY_SCHEMA = {
     summary_text: { type: 'string' },
     state_json: {
       type: 'object',
-      additionalProperties: true,
+      additionalProperties: false,
+      required: [
+        'current_goal',
+        'current_task',
+        'decisions',
+        'rejected_options',
+        'open_questions',
+        'constraints',
+        'next_steps',
+        'notes',
+      ],
       properties: {
         current_goal: { type: ['string', 'null'] },
         current_task: { type: ['string', 'null'] },
@@ -47,9 +62,10 @@ const SUMMARY_SCHEMA = {
         open_questions: { type: 'array', items: { type: 'string' } },
         constraints: { type: 'array', items: { type: 'string' } },
         next_steps: { type: 'array', items: { type: 'string' } },
+        notes: { type: 'array', items: { type: 'string' } },
       },
     },
-    facts_to_memory: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    facts_to_memory: { type: 'array', items: FACT_ITEM_SCHEMA },
     dropped_because_in_memory: { type: 'array', items: { type: 'string' } },
     sensitive_mentions_redacted: { type: 'array', items: { type: 'string' } },
   },
@@ -66,11 +82,15 @@ const SUMMARY_SYSTEM = `Ты сжимаешь старую часть истор
 6. Устойчивые факты О ПОЛЬЗОВАТЕЛЕ (из его реплик), которые стоит сохранить в долговременную память,
    вынести в facts_to_memory: объекты вида {"type": "profile|preference|habit|goal|emotional_pattern|
    activity_rhythm|communication_style|open_loop|topic_energy|discovery_seed", "fact_text": "короткая
-   фраза от третьего лица", "confidence": 0..1}. Факты из реплик ассистента не выносить.
+   фраза от третьего лица", "confidence": 0..1, "ttl_days": целое число дней или null}. ttl_days — срок
+   жизни факта: null, если факт бессрочный; для open_loop по умолчанию 30. Факты из реплик ассистента
+   не выносить.
 7. Не сохранять секретные данные в открытом виде (паспорта, телефоны, адреса, платёжные и медицинские данные).
 8. Не сохранять мусор: приветствия, повторы, эмоции без последствий, одноразовые фразы.
 9. Не выдумывать факты, которых не было в сообщениях.
-10. Вернуть только JSON по схеме.
+10. В state_json.notes выноси только существенное, что не помещается в остальные поля состояния;
+    используй это поле редко, обычно оставляй пустым массивом.
+11. Вернуть только JSON по схеме.
 
 Формат поля summary_text — строго три раздела с этими заголовками, каждый пункт с новой строки через «- »:
 ${ZONE_HEADERS.near}
@@ -248,7 +268,9 @@ function assembleSummary(summaryText, { memTexts, targetTokens, zoneWeights }) {
 }
 
 // Convert summarizer facts into the flat fact shape and run them through the normal saveFacts flow
-// (confidence threshold, semantic deduplication, update instead of duplicates).
+// (confidence threshold, semantic deduplication, update instead of duplicates). In json_schema mode the
+// strict FACT_ITEM_SCHEMA already guarantees the shape; the defaults here are a safeguard for the
+// json_object mode (config.historyCompression.responseFormat), where the provider does not enforce it.
 function factsToCandidates(facts = []) {
   return facts
     .map((f) => ({
@@ -406,4 +428,4 @@ export async function maybeCompressHistory({ userId, conversationId, domainKey, 
   return { compressed: true, coldSize, summaryTokens: result.summaryTokenCount };
 }
 
-export { factsToCandidates, splitZones, assembleSummary };
+export { factsToCandidates, splitZones, assembleSummary, SUMMARY_SCHEMA };
