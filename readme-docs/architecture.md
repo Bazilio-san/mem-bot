@@ -2,7 +2,7 @@
 
 A data-processing view of the system: how a message travels through the pipeline, how the prompt is
 assembled, where each memory layer lives, and which background loops maintain the storage. The full
-specification is in [docs/ai-bot-with-memory/](../docs/ai-bot-with-memory/README.md); this page is the map.
+specification is in [docs/proj/core/](../docs/proj/core/README.md); this page is the map.
 
 ## Big picture
 

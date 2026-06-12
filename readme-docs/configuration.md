@@ -209,7 +209,7 @@ the full agent pipeline, and the notes widget. Build the frontend once with `npm
 Operators sign in through the official **Telegram Login Widget** — admins are the bot's own users with
 `mem.users.is_admin = true`, so there is no separate password store. The sign-in mechanics (signature check, HMAC
 session cookie, route protection, the notes MCP endpoint guard) are described in
-[docs/telegram/telegram-bot.md](../docs/telegram/telegram-bot.md).
+[docs/proj/telegram/telegram-bot.md](../docs/proj/telegram/telegram-bot.md).
 
 To put the panel on a public domain you need:
 

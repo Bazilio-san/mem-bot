@@ -1,7 +1,7 @@
 // Long-term facts about the user: extraction from the dialog, assistant answer summary,
 // saving with semantic deduplication, and a background duplicate sweep.
 //
-// Principles (see docs/ai-bot-with-memory/06-memory.md):
+// Principles (see docs/proj/core/06-memory.md):
 // - The source of facts is ONLY the user's messages. The assistant's answer is fed into the extraction
 //   context as a short HTML-free summary inside the <assistant> tag and is explicitly excluded from
 //   extraction, otherwise the model treats facts the bot listed back as new information and memory

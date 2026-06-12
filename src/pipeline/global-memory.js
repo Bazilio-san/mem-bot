@@ -2,7 +2,7 @@
 // Unlike personal memory (bound to a user), these records are visible to everyone. Only an administrator can
 // populate and clean them — the permission check is done in the calling layer (agent tools, CLI commands).
 // Global facts are mixed into every request; knowledge base fragments — only those relevant to the current query.
-// Details are in docs/ai-bot-with-memory/14-global-memory.md.
+// Details are in docs/proj/core/14-global-memory.md.
 import { query, vectorToSql } from '../db.js';
 import { embed } from '../llm.js';
 import { getDomainId } from '../repo.js';

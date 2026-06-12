@@ -47,10 +47,10 @@ cascaded data without an interactive prompt.
 When I say "скорректируй документацию", "актуализируй доку", "отрази в документации" (or any equivalent request to
 update the docs), reflect the changes in BOTH documentation sets:
 
-- `docs/ai-bot-with-memory/` — following the principles in `docs/ai-bot-with-memory/00-documentation-principles.md`.
-- `docs/telegram/telegram-bot.md` — following the principles in `docs/telegram/00-documentation-principles.md`.
+- `docs/proj/core/` — following the principles in `docs/proj/documentation-principles.md`.
+- `docs/proj/telegram/telegram-bot.md` — following the principles in `docs/proj/documentation-principles.md`.
 
-Read the relevant `00-documentation-principles.md` first and apply its rules to whatever you write.
+Read `docs/proj/documentation-principles.md` first and apply its rules to whatever you write.
 
 ## Testing the Telegram bot via Playwright
 

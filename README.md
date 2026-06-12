@@ -141,7 +141,7 @@ The `npm run chat` command opens an interactive dialog. The following service co
 The `npm run telegram` command starts the bot. It supports streaming the draft reply as it is generated, shows the
 status of the tools being called, accepts voice messages, and — when voice output is enabled — replies with a spoken
 message. The full procedure for launching, testing, and debugging is described in
-[docs/telegram/telegram-bot.md](docs/telegram/telegram-bot.md). You can stop a running bot with the command
+[docs/proj/telegram/telegram-bot.md](docs/proj/telegram/telegram-bot.md). You can stop a running bot with the command
 `npm run telegram:stop`.
 
 ### Admin web panel
@@ -151,7 +151,7 @@ the full agent pipeline, and the notes widget (build the frontend once with `npm
 through the official Telegram Login Widget as the bot's own admin users. The setup checklist for a public domain
 (`/setdomain` in BotFather, `config.telegram.botUsername`, `config.admin.auth.enabled`, `config.notes.mcpSecret`) is in
 [readme-docs/configuration.md](./readme-docs/configuration.md#admin-web-panel); the sign-in mechanics are in
-[docs/telegram/telegram-bot.md](docs/telegram/telegram-bot.md).
+[docs/proj/telegram/telegram-bot.md](docs/proj/telegram/telegram-bot.md).
 
 ## Configuration
 
@@ -180,21 +180,21 @@ a complete domain with its own memory slice, prompts, data schema, and tools. Th
 (`skills:list`, `skills:validate`, `skills:sync`) are collected in
 [readme-docs/development.md](./readme-docs/development.md), and a full description of how skills and domain schemas are
 organized is in
-[docs/ai-bot-with-memory/11-per-domain-schema.md](docs/ai-bot-with-memory/11-per-domain-schema.md).
+[docs/proj/core/11-per-domain-schema.md](docs/proj/core/11-per-domain-schema.md).
 
 ## Memory and proactivity
 
 The memory principle and its five types are described in the section [“What the bot can do”](#what-the-bot-can-do). A
 detailed breakdown of selection, writing, and deduplication is in
-[docs/ai-bot-with-memory/06-memory.md](docs/ai-bot-with-memory/06-memory.md), and the structure of protected memory is in
-[docs/ai-bot-with-memory/07-secure-privacy.md](docs/ai-bot-with-memory/07-secure-privacy.md). How large the memory can
+[docs/proj/core/06-memory.md](docs/proj/core/06-memory.md), and the structure of protected memory is in
+[docs/proj/core/07-secure-privacy.md](docs/proj/core/07-secure-privacy.md). How large the memory can
 grow and which mechanisms contain it (prompt caps, TTL archiving, deduplication, journal retention) is summarized in
 [readme-docs/memory-growth.md](./readme-docs/memory-growth.md).
 
 The proactive extension lets the bot start a conversation itself on a suitable occasion: a prolonged silence, a morning
 greeting, progress toward a goal, the interlocutor's return, or an external event. All thresholds and daily limits are
 configurable, and by default the mode is disabled (`config.companion.enabled` is `false`). Details are in
-[docs/ai-bot-with-memory/09-proactivity.md](docs/ai-bot-with-memory/09-proactivity.md).
+[docs/proj/core/09-proactivity.md](docs/proj/core/09-proactivity.md).
 
 ## MCP tools
 
@@ -220,18 +220,18 @@ For the full list of checks by subsystem, service scripts, and the source code l
 A one-page data-flow map — pipeline stages, prompt assembly, memory layers, and background loops — is in
 [readme-docs/architecture.md](./readme-docs/architecture.md).
 
-The full technical documentation is collected in the [docs/ai-bot-with-memory/](docs/ai-bot-with-memory/README.md)
+The full technical documentation is collected in the [docs/proj/core/](docs/proj/core/README.md)
 directory and is organized on the principle of progressive disclosure: from overview to the deep technical part. The
 directory is portable and not tied to a specific project — it describes how the system should be organized. Key
 documents:
 
-- [04-architecture.md](docs/ai-bot-with-memory/04-architecture.md) — a step-by-step breakdown of the message processing
+- [04-architecture.md](docs/proj/core/04-architecture.md) — a step-by-step breakdown of the message processing
   pipeline;
-- [05-data-schema.md](docs/ai-bot-with-memory/05-data-schema.md) — the full DDL of all tables of the memory schema;
-- [08-prompts-and-models.md](docs/ai-bot-with-memory/08-prompts-and-models.md) — the prompts of all stages, model
+- [05-data-schema.md](docs/proj/core/05-data-schema.md) — a map to the schema owner and storage concepts;
+- [08-prompts-and-models.md](docs/proj/core/08-prompts-and-models.md) — prompt ownership and model-provider layers;
   selection, and working through an LLM proxy;
-- [13-history-compression.md](docs/ai-bot-with-memory/13-history-compression.md) — compression of the dialog history;
-- [14-global-memory.md](docs/ai-bot-with-memory/14-global-memory.md) — global memory and the knowledge base.
+- [13-history-compression.md](docs/proj/core/13-history-compression.md) — compression of the dialog history;
+- [14-global-memory.md](docs/proj/core/14-global-memory.md) — global memory and the knowledge base.
 
 The source code layout in brief: `src/agent.js` — the main response pipeline, `src/pipeline/` — the processing stages
 (classification, selection, extraction, merging, protected memory, scheduler, proactivity), `src/telegram/` — the
