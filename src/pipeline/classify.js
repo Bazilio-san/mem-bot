@@ -109,8 +109,7 @@ never classify an earlier message instead of the last one.
 
 Skills (pick one; 'general' is the default fallback):
 ${list}
-
-Return only JSON matching the schema.`;
+`;
 }
 
 // Caps for the classifier context: enough to resolve a reference to an earlier turn, cheap on tokens.
@@ -149,7 +148,8 @@ export function formatDialogState(stateJson) {
 }
 
 // recentMessages — previous dialog turns ({role, content}, oldest first) WITHOUT the current message
-// (it is saved to the DB only after the answer, so getRecentMessages rows are clean).
+// (it is saved to the DB only after the answer, so getRecentMessages rows are clean). Assistant entries
+// carry the stored answer summary instead of the full reply when one exists (see the caller in agent.js).
 // dialogState — state_json of the active conversation summary; '' / null when there is no summary yet.
 export async function classifyIntent({
   userMessage,

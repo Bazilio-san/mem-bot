@@ -265,7 +265,7 @@ export async function chatJSON({
   if (mode === 'json_schema') {
     const { schema: prepared, strict } = prepareJsonSchema(schema);
     format = { type: 'json_schema', json_schema: { name: schemaName, strict, schema: prepared } };
-    sys = `${sys}\nReturn only JSON conforming to the schema.`;
+    sys = `${sys}\nReturn only JSON matching the schema.`;
   } else {
     // json_object: the provider only guarantees syntactically valid JSON, so the schema goes into the
     // prompt as text and conformance is requested verbally. The schema is ALWAYS wrapped in a

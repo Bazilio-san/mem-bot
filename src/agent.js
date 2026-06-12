@@ -483,12 +483,18 @@ export async function handleMessage({
       getRecentMessages(conversation.id, config.historyCompression.hotWindow),
       getActiveConversationSummary(conversation.id).catch(() => null),
     ]);
+    // The classifier does not need full assistant replies: the stored answer summary (metadata.summary,
+    // written by summarizeAnswer after each reply) is enough to resolve a follow-up and is cheaper.
+    // Replies without a summary yet fall back to their full text with HTML stripped.
+    const classifierHistory = history.map((m) =>
+      m.role === 'assistant' ? { ...m, content: m.metadata?.summary || stripHtml(m.content) } : m,
+    );
     let intent;
     try {
       intent = await classifyIntent({
         userMessage,
         currentDomainKey: domainKey,
-        recentMessages: history,
+        recentMessages: classifierHistory,
         dialogState: activeSummary?.state_json || null,
       });
     } catch {
