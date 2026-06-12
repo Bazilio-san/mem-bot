@@ -7,7 +7,8 @@ import { config } from '../config.js';
 import { listSkillRoutes } from './skills/registry.js';
 
 // Schema of the classification result. The source of truth is skill_name, restricted to the available skills.
-function buildSchema(routeNames) {
+// Exported for unit tests (strictness of the schema in json_schema mode).
+export function buildSchema(routeNames) {
   return {
     type: 'object',
     additionalProperties: false,
@@ -26,9 +27,20 @@ function buildSchema(routeNames) {
         maximum: 1,
       },
       reason: { type: 'string' },
+      // Strict array of type/value pairs (instead of a free-form object): keeps the whole schema
+      // expressible in strict json_schema mode and feeds the entity boost in retrieveMemory.
       entities: {
-        type: 'object',
-        additionalProperties: true,
+        type: 'array',
+        maxItems: 8,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'value'],
+          properties: {
+            type: { type: 'string' },
+            value: { type: 'string' },
+          },
+        },
       },
       needs_memory: {
         type: 'boolean',
@@ -73,6 +85,9 @@ function buildSystemPrompt(routes) {
     .join('\n');
   return `Ты классификатор входящего сообщения для агентского приложения с памятью.
 Определи намерение, важные сущности, какие виды памяти нужны и нужны ли инструменты.
+Сущности возвращай массивом пар type/value (type: person, place, vehicle, topic, product и т. п.).
+Value — в начальной форме (именительный падеж), без лишних слов. Не более 8 сущностей.
+Не включай местоимения и общие слова.
 Выбери ОДИН наиболее подходящий skill по смыслу запроса и верни его имя в поле skill_name точно как в списке.
 В поле domain_key продублируй доменный ключ выбранного skill.
 Положительные и отрицательные сигналы — подсказки, а не строгий список: выбирай по смыслу.

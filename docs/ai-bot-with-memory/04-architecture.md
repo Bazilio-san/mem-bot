@@ -68,17 +68,22 @@ export async function handleMessage({
   let intent;
   try { intent = await classifyIntent(userMessage, domainKey); }
   catch { intent = { domain_key: domainKey, needs_memory: true,
-                     needed_memory_scopes: ['profile', 'dialog'], entities: {} }; }
+                     needed_memory_scopes: ['profile', 'dialog'], entities: [] }; }
   const effectiveDomain = intent.domain_key || domainKey;
   ctx.domainKey = effectiveDomain;
 
   // Stage 2: memory retrieval (only if needed).
   let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
   if (intent.needs_memory !== false) {
+    // Entity values from the classifier (array of {type, value} pairs) feed the entity boost in
+    // retrieveMemory. Values shorter than three characters are dropped: pronoun-like leftovers
+    // would match half of the memory.
     memory = await retrieveMemory({
       userId: user.id, domainKey: effectiveDomain, query: userMessage,
       scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'],
-      entityKeys: Object.values(intent.entities || {}).filter((v) => typeof v === 'string'),
+      entityKeys: (Array.isArray(intent.entities) ? intent.entities : [])
+        .map((e) => (typeof e?.value === 'string' ? e.value.trim() : ''))
+        .filter((v) => v.length >= 3),
     });
   }
   const memoryContext = buildMemoryContext(memory, effectiveDomain);
@@ -192,13 +197,14 @@ Place the full response-loop assembly with companion branches in the `src/agent.
 ## [ARCH-3] Five Stages by Purpose
 
 1. **Classification.** A cheap model selects the appropriate skill (source of truth — `skill_name`)
-   and also determines the intent, entities, and which memory scopes and tools are needed. The
-   domain key is derived from the selected skill. If the classifier is unavailable — fall back to
-   safe defaults. Prompt and schema are in
+   and also determines the intent, entities (an array of `{type, value}` pairs, values in their base
+   form), and which memory scopes and tools are needed. The domain key is derived from the selected
+   skill. If the classifier is unavailable — fall back to safe defaults. Prompt and schema are in
    [08-prompts-and-models.md](08-prompts-and-models.md); the skill registry is in
    [11-per-domain-schema.md](11-per-domain-schema.md).
-2. **Memory retrieval.** Only the necessary minimum is fetched: structural filter, embeddings and
-   full-text search, weighted ranking, hard limits. Details are in [06-memory.md](06-memory.md).
+2. **Memory retrieval.** Only the necessary minimum is fetched: structural filter, recall of facts
+   mentioning the extracted entities, embeddings and full-text search, weighted ranking with a
+   relevance floor for entity matches, hard limits. Details are in [06-memory.md](06-memory.md).
 3. **Response with tools.** A loop of up to five steps: the model either calls tools (their results
    are returned to it) or produces the final answer. Tools are described in
    [10-operations.md](10-operations.md).

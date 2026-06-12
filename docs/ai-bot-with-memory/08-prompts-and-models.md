@@ -2,17 +2,39 @@
 
 ## [PROMPT-1] Client and Strict JSON
 
-```js
-export async function chatJSON({ model = config.llm.auxModel, system, user, schema, schemaName = 'result' }) {
-  const sys = `${system || ''}
+Structured stages go through the `chatJSON` function with two `response_format` modes. The default is the
+provider-enforced `json_schema` (structured outputs): the schema is normalized by `prepareJsonSchema` —
+`additionalProperties: false` and a complete `required` list are filled in recursively on every object node —
+and sent with `strict: true`, so conformance is guaranteed at the decoder level. Free-form objects
+(`additionalProperties: true` or an object type without declared properties) cannot be expressed in strict
+mode: for such schemas `strict` is turned off — the schema still guides the model, but the API does not
+enforce it. The legacy `json_object` mode (the schema described as text in the system prompt inside a
+`<json-schema>` tag) is kept for providers and models without `json_schema` support; it is selected per call
+via the `responseFormat` argument or globally via `config.llm.responseFormat`.
 
-Ответь СТРОГО одним JSON-объектом, который соответствует следующей JSON Schema (${schemaName}):
+```js
+export async function chatJSON({ model = config.llm.auxModel, system, user, schema,
+                                 schemaName = 'result', kind, responseFormat }) {
+  const mode = [responseFormat, config.llm.responseFormat].find((v) => RESPONSE_FORMATS.includes(v)) || 'json_schema';
+  let sys = system || '';
+  let format;
+  if (mode === 'json_schema') {
+    const { schema: prepared, strict } = prepareJsonSchema(schema);
+    format = { type: 'json_schema', json_schema: { name: schemaName, strict, schema: prepared } };
+  } else {
+    sys = `${sys}
+
+Ответь СТРОГО одним JSON-объектом, который соответствует JSON Schema (${schemaName}), приведённой в теге <json-schema>:
+<json-schema>
 ${JSON.stringify(schema)}
+</json-schema>
 Без markdown, без пояснений, без текста до или после JSON. Только сам объект.`;
+    format = { type: 'json_object' };
+  }
   const res = await client.chat.completions.create({
     model,
     messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-    response_format: { type: 'json_object' },
+    response_format: format,
   });
   const content = res.choices[0].message.content;
   try { return JSON.parse(content); }
@@ -81,6 +103,9 @@ function buildSystemPrompt(routes) {
   }).join('\n');
   return `Ты классификатор входящего сообщения для агентского приложения с памятью.
 Определи намерение, важные сущности, какие виды памяти нужны и нужны ли инструменты.
+Сущности возвращай массивом пар type/value (type: person, place, vehicle, topic, product и т. п.).
+Value — в начальной форме (именительный падеж), без лишних слов. Не более 8 сущностей.
+Не включай местоимения и общие слова.
 Выбери ОДИН наиболее подходящий skill по смыслу запроса и верни его имя в поле skill_name точно как в списке.
 В поле domain_key продублируй доменный ключ выбранного skill.
 Положительные и отрицательные сигналы — подсказки, а не строгий список: выбирай по смыслу.
@@ -97,7 +122,12 @@ The source of truth is `skill_name`: the domain key used for memory addressing i
 code, not from the model's response. If the model returns an inconsistent pair, the code trusts the skill registry.
 The `skill_classification` schema has required fields: `intent`, `skill_name` (constrained to the list of available
 skills), `domain_key`, `confidence`, `entities`, `needs_memory`, `needed_memory_scopes`, `needs_tools`,
-`candidate_tools`; the memory scope is one of `dialog | profile | domain | secure | reminder`.
+`candidate_tools`; the memory scope is one of `dialog | profile | domain | secure | reminder`. The `entities`
+field is a strict array of up to 8 `{type, value}` pairs (`additionalProperties: false`, both fields required):
+the value in its base form feeds the entity boost in memory retrieval (see MEM-2 in 06-memory.md), and the base
+form matters because the full-text index uses the `'simple'` configuration without Russian stemming. With no
+free-form fields anywhere in the schema, `prepareJsonSchema` keeps it `strict: true`, and the provider
+guarantees that the classifier's response conforms to the schema at the decoder level.
 
 ### [PROMPT-2a] Delivery Intent Selection
 

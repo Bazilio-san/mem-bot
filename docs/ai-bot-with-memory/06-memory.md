@@ -50,16 +50,27 @@ Examples of facts for different domains:
 
 ---
 
-## [MEM-2] Memory Retrieval and Three Relevance Signals
+## [MEM-2] Memory Retrieval and Relevance Signals
 
 Retrieval (`src/pipeline/retrieve.js`) fetches only what the model needs right now. First, a cheap structural
 database filter is applied (only active, non-expired facts of the `general` domain and the current domain, up
-to 100 candidates). Relevance is then boosted by semantic similarity via embeddings (when available) and
-full-text matching. The final score is computed using a weighted formula, after which hard limits are
-enforced. Core types that are needed in almost every reply (`profile`, `communication_style`) receive a
-relevance floor so that a semantically unrelated query does not push the user's name and style out of the
-prompt. Open loops are ranked by freshness rather than query relevance: a recent "I'll tell you how it went"
-deserves a follow-up regardless of the current topic.
+to 100 candidates ordered by confidence and freshness). The entities extracted by the classifier (the
+`entityKeys` parameter — entity values in their base form) then extend the candidate pool: a single recall
+query over the same full-text GIN index (`websearch_to_tsquery` with quoted phrases joined by `OR`, up to 20
+rows) pulls in facts that mention at least one entity, even when they did not make the confidence top-100.
+Relevance is then boosted by semantic similarity via embeddings (when available) and full-text matching. The
+final score is computed using a weighted formula, after which hard limits are enforced. Core types that are
+needed in almost every reply (`profile`, `communication_style`) receive a relevance floor so that a
+semantically unrelated query does not push the user's name and style out of the prompt. Facts matching a
+mentioned entity receive their own relevance floor of 0.7 — above mid-range semantic matches but below an
+exact vector hit (0.85–0.95), so the meaning of the whole phrase still dominates: the fact is literally about
+the object the user just mentioned, and it must surface even when neither vector nor full-text search of the
+whole phrase ranks it highly. Because the full-text index uses the `'simple'` configuration (no Russian
+stemming, so «Берлин» does not match «Берлине» via tsquery), entity matches are additionally marked by a
+case-insensitive substring check over the loaded candidates — the base form is usually a prefix of the
+inflected form, and this costs zero extra queries. Entity values shorter than three characters are ignored:
+pronoun-like values would match half of the memory. Open loops are ranked by freshness rather than query
+relevance: a recent "I'll tell you how it went" deserves a follow-up regardless of the current topic.
 
 ```js
 // Hard minimization limits. Values come from config (config.memoryLimits),
@@ -97,7 +108,10 @@ LIMIT 100;
 
 The retrieval result is grouped for the prompt: `profile` (facts of the `general` domain), `dialog` (open
 loops), and `domain` (facts of the current domain), plus reminders and secure summaries when the classifier
-requested those scopes.
+requested those scopes. The result also carries `entityStats` — observability of the entity boost: the entity
+keys that took part, how many facts the recall query added past the top-100, and how many facts received the
+entity relevance floor. The response loop logs these stats in the `memory.retrieved` journal event; without
+them it is impossible to tell whether the boost works or the cheap classifier produces noise.
 
 An important resilience detail: if the embedding service is unavailable, the `embed` function returns `null` and
 the system continues on full-text and structural search without crashing. The vector layer is optional.

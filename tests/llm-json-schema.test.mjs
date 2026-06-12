@@ -72,4 +72,15 @@ import { prepareJsonSchema } from '../src/llm.js';
   assert.equal(prepareJsonSchema(bare).strict, false, 'объект без properties невыразим в strict-режиме');
 }
 
+// 5. Реальная схема классификатора строгая: после перевода entities на массив пар type/value
+// в ней не осталось свободных объектов, и провайдер гарантирует соответствие ответа схеме.
+{
+  const { buildSchema } = await import('../src/pipeline/classify.js');
+  const { schema, strict } = prepareJsonSchema(buildSchema(['general']));
+  assert.equal(strict, true, 'схема классификатора должна быть strict');
+  assert.equal(schema.properties.entities.type, 'array');
+  assert.equal(schema.properties.entities.items.additionalProperties, false);
+  assert.deepEqual(schema.properties.entities.items.required, ['type', 'value']);
+}
+
 console.log('llm-json-schema: все проверки прошли');

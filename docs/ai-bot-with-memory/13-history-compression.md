@@ -175,7 +175,8 @@ pass it to the model together with the hot window and the new message.
 
 ```js
 const memory = await retrieveMemory({ userId: user.id, domainKey: effectiveDomain, query: userMessage,
-  scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'] });
+  scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'],
+  entityKeys }); // entity values from the classifier — see MEM-2 in 06-memory.md
 const memoryContext = buildMemoryContext(memory, effectiveDomain);
 
 const historyContext = await buildHistoryContext({

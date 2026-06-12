@@ -54,10 +54,23 @@ function byScore(a, b) {
   return b.score - a.score || Number(b.persistent === true) - Number(a.persistent === true);
 }
 
+// Минимальная длина сущности для буста: более короткие значения («я», «он») совпали бы
+// с половиной памяти. Дублирует фильтр вызывающей стороны как защита самой функции.
+const MIN_ENTITY_LENGTH = 3;
+
+// Пол релевантности для фактов, совпавших с упомянутой сущностью: выше «среднесемантических»
+// совпадений, но ниже точного попадания вектора (0.85–0.95) — смысл всей фразы остаётся главнее.
+const ENTITY_RELEVANCE_FLOOR = 0.7;
+
 // Основной retrieval. Возвращает структуру по группам + активные напоминания + безопасные резюме.
-export async function retrieveMemory({ userId, domainKey, query: userQuery, scopes }) {
+// entityKeys — значения сущностей из классификатора (начальная форма): факты, в тексте которых
+// встречается сущность, добираются в пул кандидатов и получают гарантированный минимум релевантности.
+export async function retrieveMemory({ userId, domainKey, query: userQuery, scopes, entityKeys = [] }) {
   const wantSecure = scopes?.includes('secure');
   const wantReminder = scopes?.includes('reminder');
+  const entities = (Array.isArray(entityKeys) ? entityKeys : [])
+    .map((v) => (typeof v === 'string' ? v.replace(/"/g, '').trim() : ''))
+    .filter((v) => v.length >= MIN_ENTITY_LENGTH);
 
   // Шаг 1. Дешёвый структурный фильтр кандидатов: активные, не истёкшие факты домена general
   // и текущего домена.
@@ -72,6 +85,44 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
       LIMIT 100`,
     [userId, domainKey],
   );
+
+  // Шаг 1б. Добор по сущностям: факты, в которых встречается хотя бы одна упомянутая сущность,
+  // попадают в пул кандидатов, даже если не прошли в топ-100 по уверенности. Один запрос на все
+  // сущности: websearch_to_tsquery понимает оператор OR и кавычки для фраз, идёт по тому же
+  // GIN-индексу, что и полнотекстовый шаг 3.
+  const entityIds = new Set();
+  let entityRecallAdded = 0;
+  if (entities.length) {
+    const orQuery = entities.map((v) => `"${v}"`).join(' OR ');
+    const { rows } = await query(
+      `SELECT id, domain_key, fact_type, fact_text AS memory_text, fact_text, confidence,
+              evidence_count, last_confirmed_at, updated_at, source, persistent
+         FROM mem.user_facts
+        WHERE user_id = $1 AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > now())
+          AND domain_key IN ('general', $2)
+          AND search_tsv @@ websearch_to_tsquery('simple', $3)
+        LIMIT 20`,
+      [userId, domainKey, orQuery],
+    );
+    const known = new Set(candidates.map((c) => c.id));
+    for (const r of rows) {
+      entityIds.add(r.id);
+      if (!known.has(r.id)) {
+        candidates.push(r); // факт вне топ-100 всё равно попадает в ранжирование
+        entityRecallAdded++;
+      }
+    }
+    // Подстрочная пометка по уже загруженным кандидатам — страховка от отсутствия русского
+    // стемминга в конфигурации 'simple' полнотекстового индекса: «Берлин» не совпадёт с «Берлине»
+    // через tsquery, но начальная форма обычно является префиксом словоформы и ловится подстрокой.
+    const lowered = entities.map((v) => v.toLowerCase());
+    for (const c of candidates) {
+      if (!entityIds.has(c.id) && lowered.some((v) => c.fact_text.toLowerCase().includes(v))) {
+        entityIds.add(c.id);
+      }
+    }
+  }
 
   // Шаг 2. Семантическая релевантность через эмбеддинги (если сервис доступен).
   const queryVec = userQuery ? await embed(userQuery) : null;
@@ -101,10 +152,13 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
     textScores = new Map(rows.map((r) => [r.id, Math.min(Number(r.rank) * 4, 1)]));
   }
 
-  // Шаг 4. Совокупный вес и разбиение по группам.
+  // Шаг 4. Совокупный вес и разбиение по группам. Совпадение по сущности даёт гарантированный
+  // минимум релевантности (тот же приём, что CORE_TYPES в scoreFact): факт буквально о предмете,
+  // который пользователь только что упомянул.
   const byGroup = { profile: [], dialog: [], domain: [] };
   for (const it of candidates) {
-    const relevance = Math.max(vecScores.get(it.id) ?? 0, textScores.get(it.id) ?? 0, 0.15);
+    const entityFloor = entityIds.has(it.id) ? ENTITY_RELEVANCE_FLOOR : 0;
+    const relevance = Math.max(vecScores.get(it.id) ?? 0, textScores.get(it.id) ?? 0, entityFloor, 0.15);
     it.score = scoreFact(it, relevance);
     if (it.fact_type === 'open_loop') {
       byGroup.dialog.push(it);
@@ -141,7 +195,16 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
   // Безопасные резюме защищённых данных — только если запрошены и только как резюме.
   const secure = wantSecure ? await listSecureSummaries(userId, LIMITS.secure) : [];
 
-  return { profile, dialog, domain, reminders, secure };
+  // entityStats — наблюдаемость сущностного буста: какие ключи участвовали, сколько фактов добрано
+  // в пул мимо топ-100 (recallAdded) и сколько всего получили пол релевантности (matched).
+  return {
+    profile,
+    dialog,
+    domain,
+    reminders,
+    secure,
+    entityStats: { keys: entities, recallAdded: entityRecallAdded, matched: entityIds.size },
+  };
 }
 
 // Сборка компактного MEMORY_CONTEXT. Блок памяти всегда представлен как справочные данные,

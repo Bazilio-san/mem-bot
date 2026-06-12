@@ -326,6 +326,19 @@ export function buildCycleRows(records, events, { userMessage = null } = {}) {
           body: contentBody(e.data, EVENT_DISPLAY[e.event_type]),
         });
         break;
+      case 'memory.retrieved':
+        // Итог поиска памяти (сущности классификатора, статистика сущностного буста) — внутри
+        // группы текущей стадии, сразу под заголовком «Стадия: поиск релевантной памяти».
+        rows.push({
+          ...base,
+          rowType: 'memory',
+          kind: 'memory',
+          title: e.title || 'Память найдена',
+          indent: 1,
+          groupId: currentGroup,
+          body: contentBody(e.data, EVENT_DISPLAY[e.event_type]),
+        });
+        break;
       case 'memory.written':
       case 'memory.sweep':
         // Без groupId: итог записи памяти идёт после ответа и попадает в группу «Пост-обработка»

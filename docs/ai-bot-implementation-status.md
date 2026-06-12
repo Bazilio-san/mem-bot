@@ -117,7 +117,7 @@ with references to real code and to numbered specification requirements.
 | Requirement ID | Short description | Status | Code reference / note |
 |----------------|-------------------|--------|------------------------|
 | `MEM-1` | Five memory kinds | done | `src/pipeline/retrieve.js`, `migrations/001_init.sql` |
-| `MEM-2` | Retrieval and three relevance signals | done | `src/pipeline/retrieve.js` (`scoreItem`, structural filter) |
+| `MEM-2` | Retrieval and relevance signals (vector, full-text, entity boost) | done | `src/pipeline/retrieve.js` (`scoreFact`, structural filter, entity recall) |
 | `MEM-3` | Building `MEMORY_CONTEXT` | done | `buildMemoryContext` in `src/pipeline/retrieve.js` |
 | `MEM-4` | Write loop (extraction, filter, deduplication) | done | `extractFacts`/`saveFacts` in `src/pipeline/facts.js` |
 | `MEM-5` | Auto-save threshold, fact sources, and privacy | done | `facts.minConfidence`, `SOURCE_RANK` in `src/pipeline/facts.js` |

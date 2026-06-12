@@ -21,6 +21,10 @@ export const AGENT_EVENTS = Object.freeze({
   ASSISTANT_COMPLETED: 'assistant.completed',
   AGENT_COMPLETED: 'agent.completed',
   AGENT_FAILED: 'agent.failed',
+  // Итог стадии поиска памяти: извлечённые классификатором сущности, статистика сущностного буста
+  // и размеры групп выдачи retrieveMemory. Отдельное событие, потому что строка stage.started
+  // отображается в просмотрщике без тела (body: null) и данные в ней были бы не видны.
+  MEMORY_RETRIEVED: 'memory.retrieved',
   // Итог записи фактов в долговременную память (writeJob основного хода и путь реакций).
   MEMORY_WRITTEN: 'memory.written',
   // Итог фоновой чистки дубликатов памяти (dedupeFactsSweep): задача планировщика и ручной скрипт.
@@ -34,6 +38,7 @@ export const AGENT_EVENTS = Object.freeze({
 export const EVENT_DISPLAY = Object.freeze({
   'tool.started': 'JSON',
   'tool.completed': 'JSON',
+  'memory.retrieved': 'JSON',
   'memory.written': 'JSON',
   'memory.sweep': 'JSON',
   'mcp.connected': 'JSON',

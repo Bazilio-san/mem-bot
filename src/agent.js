@@ -479,7 +479,7 @@ export async function handleMessage({
     try {
       intent = await classifyIntent(userMessage, domainKey);
     } catch {
-      intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: {} };
+      intent = { domain_key: domainKey, needs_memory: true, needed_memory_scopes: ['profile', 'dialog'], entities: [] };
     }
     // Resolving the active skill. The source of truth is the classifier's skill_name; if it is not recognized,
     // we pick a skill by domain key, otherwise we take the fallback general. The domain key for addressing memory
@@ -497,6 +497,11 @@ export async function handleMessage({
     // Stage 2: memory retrieval (only if needed).
     let memory = { profile: [], dialog: [], domain: [], reminders: [], secure: [] };
     if (intent.needs_memory !== false) {
+      // Entity values from the classifier feed the entity boost in retrieveMemory. Values shorter than
+      // three characters are dropped: pronoun-like leftovers («я», «он») would match half of the memory.
+      const entityKeys = (Array.isArray(intent.entities) ? intent.entities : [])
+        .map((e) => (typeof e?.value === 'string' ? e.value.trim() : ''))
+        .filter((v) => v.length >= 3);
       await emit({ type: 'stage.started', stage: 'memory', title: 'Ищу релевантную память' });
       logAgentEvent({
         eventType: AGENT_EVENTS.STAGE_STARTED,
@@ -508,7 +513,29 @@ export async function handleMessage({
         domainKey: effectiveDomain,
         query: userMessage,
         scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'],
-        entityKeys: Object.values(intent.entities || {}).filter((v) => typeof v === 'string'),
+        entityKeys,
+      });
+      // Retrieval observability: which entities the classifier extracted and how many facts the entity
+      // boost touched. Without this it is impossible to tell whether the boost works or the cheap
+      // classifier produces noise. The stage.started row is rendered without a body in the log viewer,
+      // so the stats go into a separate memory.retrieved event (rendered generically, no viewer changes).
+      logAgentEvent({
+        eventType: AGENT_EVENTS.MEMORY_RETRIEVED,
+        title: 'Память найдена',
+        data: {
+          stage: 'memory',
+          entities: intent.entities ?? null,
+          entityKeys,
+          entityRecallAdded: memory.entityStats?.recallAdded ?? 0,
+          entityMatched: memory.entityStats?.matched ?? 0,
+          counts: {
+            profile: memory.profile.length,
+            dialog: memory.dialog.length,
+            domain: memory.domain.length,
+            reminders: memory.reminders.length,
+            secure: memory.secure.length,
+          },
+        },
       });
     }
     const memoryContext = buildMemoryContext(memory, effectiveDomain);

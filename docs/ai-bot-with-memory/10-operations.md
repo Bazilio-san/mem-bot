@@ -252,9 +252,10 @@ the general debug-category mechanism is described in section [OPS-5].
   write nothing.
 - **Agent event journal.** Alongside the model calls, the agent journals the events of every conversation turn
   into `log.agent_event` (see [DATA-12]): the turn start, pipeline stages, tool calls with full arguments and
-  results and their durations, connections to external MCP tool servers, the final answer, the memory-write
-  outcome (`memory.written` — saveFacts action counters and a compact fact list, journaled even when extraction
-  found nothing), and failures. The duplicate sweep journals its outcome as the service event `memory.sweep`
+  results and their durations, connections to external MCP tool servers, the final answer, the retrieval-stage
+  outcome (`memory.retrieved` — the entities extracted by the classifier, the entity-boost statistics, and the
+  sizes of the retrieved memory groups), the memory-write outcome (`memory.written` — saveFacts action counters
+  and a compact fact list, journaled even when extraction found nothing), and failures. The duplicate sweep journals its outcome as the service event `memory.sweep`
   (no request correlation — it runs from the scheduler or a manual script). The writer
   (`src/pipeline/agent-event-log.js`) is a separate emitter built on the same buffered batch machinery
   (`src/pipeline/log-writer.js`) and the same correlation context as the model-call log, so all events of a turn

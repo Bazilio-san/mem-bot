@@ -638,10 +638,12 @@ viewer (`JSON` for strictly structured chatJSON responses and service metadata, 
 
 The `event_type` taxonomy of `log.agent_event` mirrors the turn's event contract: `agent.started`,
 `stage.started`, `tool.started`, `tool.completed`, `mcp.connected`, `mcp.failed`, `assistant.completed`,
-`agent.completed`, `agent.failed`, plus the memory-write outcomes `memory.written` (the result of saving
-extracted facts — action counters and a compact fact list, written even when extraction found nothing) and
-`memory.sweep` (the result of the duplicate sweep; runs outside a request context, so its correlation fields
-are NULL and the viewer shows it as a service event). The `EVENT_DISPLAY` dictionary next to the taxonomy
+`agent.completed`, `agent.failed`, plus the memory events `memory.retrieved` (the outcome of the retrieval
+stage: the entities extracted by the classifier, the entity-boost statistics, and the sizes of the result
+groups; a separate event because the `stage.started` row is rendered without a body in the viewer),
+`memory.written` (the result of saving extracted facts — action counters and a compact fact list, written
+even when extraction found nothing) and `memory.sweep` (the result of the duplicate sweep; runs outside a
+request context, so its correlation fields are NULL and the viewer shows it as a service event). The `EVENT_DISPLAY` dictionary next to the taxonomy
 defines the default display format of event data (`tool.*`, `memory.*`, `mcp.*` — JSON;
 `assistant.completed` — auto-detection of the channel-formatted text). Unlike the display-channel events
 delivered through `onEvent`, which deliberately omit tool arguments, the journal does store the full arguments
