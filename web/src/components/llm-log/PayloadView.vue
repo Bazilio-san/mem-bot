@@ -3,8 +3,9 @@
 // 1) чипы скалярных параметров (model, temperature, …) — всегда видны;
 // 2) messages — по строке на сообщение (роль + превью), клик раскрывает содержимое инлайном; у длинных
 //    сообщений после бэджа роли есть кнопка, открывающая то же содержимое в модальном окне на весь экран;
-// 3) tools — по строке на инструмент (имя + первые слова описания), первый клик раскрывает описание,
-//    отдельная кнопка показывает JSON Schema параметров.
+// 3) tools — по строке на инструмент (имя + первые слова описания), клик раскрывает полную информацию
+//    об инструменте (описание + JSON Schema параметров); кнопка в строке открывает полный JSON
+//    инструмента в модальном окне.
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -193,7 +194,6 @@ function roleFormat(role) {
 
 const openedMessages = ref(new Set());
 const openedTools = ref(new Set());
-const openedParams = ref(new Set());
 const bigContent = ref(null); // содержимое для модального окна
 
 function toggleSet(setRef, idx) {
@@ -210,12 +210,29 @@ function clickMessage(idx) {
   toggleSet(openedMessages, idx);
 }
 
+// Обёртка нужна именно в скрипте: в шаблоне ref автоматически разворачивается, и toggleSet получил бы
+// сам Set вместо ref — присваивание .value прошло бы мимо реактивности (клик «не работал бы»).
+function clickTool(idx) {
+  toggleSet(openedTools, idx);
+}
+
 // Открыть содержимое сообщения в модальном окне (кнопка у длинных сообщений). Вместе с текстом
 // передаётся embedOf: сообщение со схемой ответа и в окне показывается тем же блоком
 // «текст + селект формата + JSON» (режим селекта общий с инлайн-видом — по индексу сообщения).
 function openBig(idx) {
   const m = messages.value[idx];
   bigContent.value = { text: messageContent(m), embed: embedOf(m, idx), idx };
+}
+
+// Открыть полный JSON инструмента (описание + схема параметров) в том же модальном окне, что и
+// сообщения. format: 'JSON' включает pretty-печать без автодетекции, title заменяет заголовок окна.
+function openToolBig(idx) {
+  const t = tools.value[idx];
+  bigContent.value = {
+    text: JSON.stringify(t),
+    format: 'JSON',
+    title: `Схема инструмента: ${toolInfo(t).name}`,
+  };
 }
 
 function isLong(m) {
@@ -461,18 +478,16 @@ onBeforeUnmount(() => {
     <div v-if="tools.length" class="pv-sect">
       <div class="pv-sect-h">tools — {{ tools.length }}</div>
       <div v-for="(t, idx) in tools" :key="idx" class="pv-tool" :class="{ open: openedTools.has(idx) }">
-        <div class="pv-tool-h" @click="toggleSet(openedTools, idx)">
+        <div class="pv-tool-h" @click="clickTool(idx)">
           <span class="pv-tool-name">{{ toolInfo(t).name }}</span>
+          <button type="button" class="pv-pop" title="Схема инструмента в окне" @click.stop="openToolBig(idx)">
+            ⤢
+          </button>
           <span class="pv-tool-desc">{{ toolInfo(t).description.split(' ').slice(0, 10).join(' ') }}…</span>
         </div>
         <div v-if="openedTools.has(idx)" class="pv-tool-b">
-          {{ toolInfo(t).description }}
-          <div>
-            <button type="button" class="pv-mini" @click="toggleSet(openedParams, idx)">
-              JSON инструмента (описание + схема параметров)
-            </button>
-          </div>
-          <ContentViewer v-if="openedParams.has(idx)" :content="JSON.stringify(t)" compact default-format="JSON" />
+          <div class="pv-tool-full">{{ toolInfo(t).description }}</div>
+          <ContentViewer :content="JSON.stringify(t)" compact default-format="JSON" />
         </div>
       </div>
     </div>
@@ -489,7 +504,7 @@ onBeforeUnmount(() => {
           :style="{ width: `${dlg.w}px`, height: `${dlg.h}px`, left: `${dlg.x}px`, top: `${dlg.y}px` }"
         >
           <div class="pv-dlg-h">
-            <span class="pv-dlg-title">Содержимое сообщения</span>
+            <span class="pv-dlg-title">{{ bigContent.title || 'Содержимое сообщения' }}</span>
             <button type="button" class="pv-dlg-x" title="Закрыть" @click="bigContent = null">✕</button>
           </div>
           <div class="pv-dlg-b">
@@ -540,7 +555,7 @@ onBeforeUnmount(() => {
                 <pre v-if="bigContent.embed.after" class="pv-embed-txt">{{ bigContent.embed.after }}</pre>
               </div>
             </div>
-            <ContentViewer v-else :content="bigContent.text" />
+            <ContentViewer v-else :content="bigContent.text" :default-format="bigContent.format || null" />
             <div class="pv-dlg-f">
               <button type="button" class="pv-mini" @click="bigContent = null">Закрыть</button>
             </div>
@@ -859,6 +874,11 @@ onBeforeUnmount(() => {
 .pv-tool-b {
   border-top: 1px dashed rgba(0, 0, 0, 0.1);
   padding: 6px 8px;
+}
+/* Полное описание инструмента над JSON-схемой в раскрытом блоке. */
+.pv-tool-full {
+  margin-bottom: 6px;
+  white-space: pre-wrap;
 }
 .pv-empty {
   color: #999;
