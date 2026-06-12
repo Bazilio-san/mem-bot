@@ -65,9 +65,22 @@ const ENTITY_RELEVANCE_FLOOR = 0.7;
 // Main retrieval. Returns a per-group structure + active reminders + safe summaries.
 // entityKeys — entity values from the classifier (base form): facts whose text contains
 // an entity are pulled into the candidate pool and get a guaranteed relevance minimum.
+//
+// Scope contract: secure and reminder are strictly opt-in (each enables an extra query).
+// The core groups profile/dialog/domain follow the requested scopes too, but an empty or
+// missing scope list means "all core groups" — a degraded classifier output can never
+// silently strip the bot of its basic memory.
 export async function retrieveMemory({ userId, domainKey, query: userQuery, scopes, entityKeys = [] }) {
-  const wantSecure = scopes?.includes('secure');
-  const wantReminder = scopes?.includes('reminder');
+  const requested = Array.isArray(scopes) && scopes.length ? new Set(scopes) : null;
+  const wantSecure = requested?.has('secure') ?? false;
+  const wantReminder = requested?.has('reminder') ?? false;
+  const wantProfile = !requested || requested.has('profile');
+  const wantDialog = !requested || requested.has('dialog');
+  const wantDomain = !requested || requested.has('domain');
+  // When domain memory is not requested, candidate queries are narrowed to the general domain:
+  // domain facts would be dropped at the grouping step anyway, and this frees candidate slots
+  // for profile and dialog facts.
+  const factDomain = wantDomain ? domainKey : 'general';
   const entities = (Array.isArray(entityKeys) ? entityKeys : [])
     .map((v) => (typeof v === 'string' ? v.replace(/"/g, '').trim() : ''))
     .filter((v) => v.length >= MIN_ENTITY_LENGTH);
@@ -83,7 +96,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
         AND domain_key IN ('general', $2)
       ORDER BY confidence DESC, last_confirmed_at DESC
       LIMIT 100`,
-    [userId, domainKey],
+    [userId, factDomain],
   );
 
   // Step 1b. Entity-based recall: facts containing at least one mentioned entity enter the
@@ -103,7 +116,7 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
           AND domain_key IN ('general', $2)
           AND search_tsv @@ websearch_to_tsquery('simple', $3)
         LIMIT 20`,
-      [userId, domainKey, orQuery],
+      [userId, factDomain, orQuery],
     );
     const known = new Set(candidates.map((c) => c.id));
     for (const r of rows) {
@@ -154,17 +167,19 @@ export async function retrieveMemory({ userId, domainKey, query: userQuery, scop
 
   // Step 4. Composite weight and split into groups. An entity match gives a guaranteed
   // relevance minimum (the same trick as CORE_TYPES in scoreFact): the fact is literally about
-  // the thing the user just mentioned.
+  // the thing the user just mentioned. Groups not requested by the scopes are skipped here.
   const byGroup = { profile: [], dialog: [], domain: [] };
   for (const it of candidates) {
     const entityFloor = entityIds.has(it.id) ? ENTITY_RELEVANCE_FLOOR : 0;
     const relevance = Math.max(vecScores.get(it.id) ?? 0, textScores.get(it.id) ?? 0, entityFloor, 0.15);
     it.score = scoreFact(it, relevance);
     if (it.fact_type === 'open_loop') {
-      byGroup.dialog.push(it);
+      if (wantDialog) {
+        byGroup.dialog.push(it);
+      }
     } else if (it.domain_key !== 'general') {
-      byGroup.domain.push(it);
-    } else {
+      byGroup.domain.push(it); // present only when wantDomain: the queries are narrowed otherwise
+    } else if (wantProfile) {
       byGroup.profile.push(it);
     }
   }

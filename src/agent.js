@@ -501,17 +501,22 @@ export async function handleMessage({
       const entityKeys = (Array.isArray(intent.entities) ? intent.entities : [])
         .map((e) => (typeof e?.value === 'string' ? e.value.trim() : ''))
         .filter((v) => v.length >= 3);
+      // The classifier's scopes drive which memory groups are retrieved (see the scope contract in
+      // retrieveMemory). An empty or missing list falls back to all core groups.
+      const memoryScopes = intent.needed_memory_scopes?.length
+        ? intent.needed_memory_scopes
+        : ['profile', 'dialog', 'domain'];
       await emit({ type: 'stage.started', stage: 'memory', title: 'Ищу релевантную память' });
       logAgentEvent({
         eventType: AGENT_EVENTS.STAGE_STARTED,
         title: 'Стадия: поиск релевантной памяти',
-        data: { stage: 'memory', scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'] },
+        data: { stage: 'memory', scopes: memoryScopes },
       });
       memory = await retrieveMemory({
         userId: user.id,
         domainKey: effectiveDomain,
         query: userMessage,
-        scopes: intent.needed_memory_scopes || ['profile', 'dialog', 'domain'],
+        scopes: memoryScopes,
         entityKeys,
       });
       // Retrieval observability: which entities the classifier extracted and how many facts the entity

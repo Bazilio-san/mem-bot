@@ -10,7 +10,7 @@ import { listSkillRoutes } from './skills/registry.js';
 // The schema is self-sufficient: every field carries a description for the model, so the system prompt holds
 // only what the schema cannot express (the skill list and how to read its signals).
 // Exported for unit tests (strictness of the schema in json_schema mode).
-export function buildSchema(routeNames) {
+export function buildSchema(routeNames, withReason = false) {
   return {
     type: 'object',
     additionalProperties: false,
@@ -32,10 +32,12 @@ Use the user's language and keep only the core meaning`,
         maximum: 1,
         description: 'Confidence in the skill choice: from 0 (a guess) to 1 (unambiguous).',
       },
-      reason: {
-        type: 'string',
-        description: 'Brief justification of the skill choice, one phrase.',
-      },
+      ...(withReason && {
+        reason: {
+          type: 'string',
+          description: 'Brief justification of the skill choice, one phrase.',
+        },
+      }),
       // Strict array of type/value pairs (instead of a free-form object): keeps the whole schema
       // expressible in strict json_schema mode and feeds the entity boost in retrieveMemory.
       entities: {
@@ -53,32 +55,49 @@ Use the user's language and keep only the core meaning`,
             },
             value: {
               type: 'string',
-              description: `Entity value in its base form (nominative case), without extra words. Keep the language of the original message: for a Russian message return «Берлин», «мама», not "Berlin", "mom".`,
+              description: `Entity value in its base form (nominative/citation form when applicable), without extra words. 
+Keep the language and script of the original message; do not translate or transliterate.`,
             },
           },
         },
       },
       needs_memory: {
         type: 'boolean',
-        description: 'Whether long-term memory about the user is needed for the reply.',
+        description: `Whether the reply may depend on stored knowledge about the user. Default true.
+Set false ONLY when the answer is fully self-contained and cannot change depending on who is asking:
+a greeting, a translation, arithmetic, a general-knowledge question with all needed data in the message itself.
+When unsure, set true.`,
       },
       needed_memory_scopes: {
         type: 'array',
-        description: `Which memory scopes are needed for the reply: dialog — open conversation threads; profile — user profile and communication style; domain — subject-matter memory of the current domain; secure — protected data (only on the user's explicit request); reminder — reminders and scheduled tasks.`,
+        description: `Memory scopes to load for the reply. Pick every scope that could improve the answer;
+when unsure about a scope, include it — missing memory hurts the reply more than extra context.
+- profile: who the user is and how to talk to them (name, communication style, habits, preferences).
+Include in any personal conversation; omit only when the user's identity cannot change the answer
+(pure utility command).
+- dialog: unfinished threads from earlier conversations. Include in free-form chat, when the user refers to
+something discussed before («как я говорил», «та самая поездка») or resumes contact after a pause.
+Omit for narrow one-shot requests.
+- domain: subject-matter facts of the current skill domain (the "Current agent domain" line in the input).
+Include when the message is about that subject area or continues work in it; omit for unrelated small talk.
+- secure: protected personal data (documents, card numbers, credentials). Include ONLY when the user
+explicitly asks for their protected data.
+- reminder: reminders and scheduled tasks. Include when the user asks about plans, deadlines or tasks,
+or wants to create, change or cancel a reminder («напомни…», «что у меня запланировано?»).`,
         items: {
           type: 'string',
           enum: ['dialog', 'profile', 'domain', 'secure', 'reminder'],
         },
       },
-      needs_tools: {
-        type: 'boolean',
-        description: 'Whether tools (external actions: search, scheduler, etc.) are needed to fulfil the request.',
-      },
-      candidate_tools: {
-        type: 'array',
-        description: 'Probable names of the needed tools; an empty array if no tools are needed.',
-        items: { type: 'string' },
-      },
+      // needs_tools: {
+      //   type: 'boolean',
+      //   description: 'Whether tools (external actions: search, scheduler, etc.) are needed to fulfil the request.',
+      // },
+      // candidate_tools: {
+      //   type: 'array',
+      //   description: 'Probable names of the needed tools; an empty array if no tools are needed.',
+      //   items: { type: 'string' },
+      // },
     },
     required: [
       'intent',
@@ -87,8 +106,6 @@ Use the user's language and keep only the core meaning`,
       'entities',
       'needs_memory',
       'needed_memory_scopes',
-      'needs_tools',
-      'candidate_tools',
     ],
   };
 }
