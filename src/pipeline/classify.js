@@ -112,8 +112,9 @@ ${list}
 `;
 }
 
-// Caps for the classifier context: enough to resolve a reference to an earlier turn, cheap on tokens.
-const RECENT_MESSAGES_MAX = 6;
+// Caps for the classifier context: intent detection only needs the last few turns to resolve a reference,
+// not the whole dialog — anything older adds tokens and distracts a small model from the last message.
+const RECENT_MESSAGES_MAX = 4;
 const RECENT_MESSAGE_CHARS = 300;
 
 function truncateLine(text, limit) {
