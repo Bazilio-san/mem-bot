@@ -1,5 +1,5 @@
 // Layered export of the LLM request log (log.llm_request) for the tuning workflow
-// (claudedocs/self-tuning-infrastructure.md §3.1). Designed around context economy (§2a):
+// (claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §3.1). Designed around context economy (§2a):
 // the default output is a compact metadata table; full payload/response content is printed
 // only for explicitly addressed records (--id) or with an explicit --limit.
 //

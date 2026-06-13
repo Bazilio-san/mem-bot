@@ -1,6 +1,6 @@
 // Non-interactive scenario runner: replays a scripted sequence of user turns through the FULL pipeline
 // (handleMessage — the same path Telegram uses) without any messenger. Shared by scripts/run-scenario.js
-// (manual runs) and scripts/eval.js (the dialog suite). See claudedocs/self-tuning-infrastructure.md §4.
+// (manual runs) and scripts/eval.js (the dialog suite). See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §4.
 //
 // Scenario file format (tests/scenarios/*.json):
 //   {

@@ -1,5 +1,5 @@
 // Eval runner of the tuning loop: runs the reference suites against the CURRENT code and prompts and
-// stores layered results under claudedocs/experiments/. See claudedocs/self-tuning-infrastructure.md §5.
+// stores layered results under claudedocs/experiments/. See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §5.
 //
 // Run:
 //   node scripts/eval.js --suite classify                 # one suite
@@ -91,6 +91,15 @@ async function main() {
   const { extractFacts } = await import('../src/pipeline/facts.js');
   const { loadCriteria, judgeDialog } = await import('./eval/judge.js');
   const { runScenario, loadScenario, checkExpectations } = await import('./lib/scenario-runner.js');
+  // Isolated aspect suites — each exercises ONE pipeline stage on its own. Imported dynamically (like the
+  // src modules above) so NODE_ENV=test and EVAL_TEMPERATURE are already in effect. Adding a new aspect =
+  // a new module here plus its block in tests/eval/criteria.yaml; see scripts/eval/suites/_lib.js.
+  const aspectSuites = {
+    topics: await import('./eval/suites/topics.js'),
+    compress: await import('./eval/suites/compress.js'),
+    dedupe: await import('./eval/suites/dedupe.js'),
+    tools: await import('./eval/suites/tools.js'),
+  };
 
   const criteria = loadCriteria(rootDir);
   const runStartIso = new Date().toISOString();
@@ -295,6 +304,29 @@ async function main() {
           deterministicPassed === scenarioCount &&
           axisNames.every((a) => axesAvg[a] == null || axesAvg[a] >= cfg.axes[a].min_avg),
       };
+    }
+
+    // ---- Isolated aspect suites: topics, compress, dedupe, tools -------------------------------------
+    // Each runs ONE pipeline stage on its own and returns the standard deterministic shape, so summary.json
+    // and eval-compare.js treat them exactly like classify/facts. Selected by --suite <name> or --suite all.
+    for (const [name, mod] of Object.entries(aspectSuites)) {
+      if (!wantSuite(name)) {
+        continue;
+      }
+      if (!criteria.suites[name]) {
+        console.error(`No criteria for suite "${name}" in tests/eval/criteria.yaml — skipped.`);
+        continue;
+      }
+      const { summary: suiteSummary, rows } = await mod.run({
+        rootDir,
+        criteria,
+        repeat: args.repeat,
+        deterministic: args.deterministic,
+        saveCase,
+        checkBudget,
+      });
+      suites[name] = suiteSummary;
+      caseRows.push(...rows);
     }
   } catch (err) {
     if (!stoppedByBudget) {

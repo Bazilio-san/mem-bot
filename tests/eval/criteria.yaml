@@ -21,6 +21,31 @@ suites:
     type: deterministic
     cases_file: tests/memory_cases.json
     pass_threshold: 0.8
+  # Извлечение тем и вовлечённости в изоляции (src/pipeline/topics.js, extractTopics). Кейсы — диалог
+  # на входе и ожидаемые темы/минимальная вовлечённость на выходе (tests/eval/topic_cases.json).
+  topics:
+    type: deterministic
+    cases_file: tests/eval/topic_cases.json
+    pass_threshold: 0.8
+  # Компрессия истории в изоляции (src/pipeline/history-compress.js, summarizeColdHistory). Кейсы —
+  # холодная зона диалога и снимок памяти на входе; проверяются обязательные упоминания в дайджесте,
+  # запрещённые строки (редактирование секретов), вынесенные факты (tests/eval/compress_cases.json).
+  compress:
+    type: deterministic
+    cases_file: tests/eval/compress_cases.json
+    pass_threshold: 0.8
+  # Дедупликация фактов в изоляции (src/pipeline/facts.js, saveFact и dedupeFactsSweep). Кейсы — список
+  # фактов на запись и ожидаемое число активных фактов после дедупликации (tests/eval/dedupe_cases.json).
+  dedupe:
+    type: deterministic
+    cases_file: tests/eval/dedupe_cases.json
+    pass_threshold: 0.8
+  # Выбор инструментов в изоляции: один ход модели с реальными определениями базовых инструментов,
+  # без их выполнения; проверяется, какой инструмент выбрала модель (tests/eval/tool_select_cases.json).
+  tools:
+    type: deterministic
+    cases_file: tests/eval/tool_select_cases.json
+    pass_threshold: 0.8
   # Диалоговые сценарии (tests/scenarios/*.json): детерминированные проверки упоминаний
   # плюс LLM-судья по рубрике. Оси: шкала, минимально допустимый средний балл, вес в сводном балле.
   dialog:

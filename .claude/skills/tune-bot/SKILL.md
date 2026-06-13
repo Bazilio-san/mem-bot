@@ -10,9 +10,10 @@ description: >-
 
 # Bot tuning loop
 
-The whole methodology in one place. Design rationale: `claudedocs/self-tuning-infrastructure.md` (do NOT load
-it whole into context — this skill is the operational extract). Every run below is forced to `NODE_ENV=test`
-by the scripts themselves: test users and `is_test` log records only, production data is never touched.
+The whole methodology in one place. Design rationale: `claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md`
+(do NOT load it whole into context — this skill is the operational extract; isolated per-stage suites are §5.4).
+Every run below is forced to `NODE_ENV=test` by the scripts themselves: test users and `is_test` log records
+only, production data is never touched.
 
 ## 0. Resume protocol — ALWAYS first
 
@@ -85,9 +86,13 @@ longer needed in context. Template:
 
 ## 5. Typical iterations
 
-- **Improve one request_kind prompt.** Observe via export (step 2) → edit the prompt at the coordinate from
-  `docs/prompt-inventory.md` → relevant suite (`--suite classify` for `intent_classify`, `--suite facts` for
-  `fact_extract`, `--suite dialog` otherwise) → full `--suite all` before the report.
+- **Improve one request_kind prompt (isolated).** Observe via export (step 2) → edit the prompt at the
+  coordinate from `docs/prompt-inventory.md` → run ONLY that stage's suite so the rest of the pipeline does not
+  run and does not muddy the signal: `--suite classify` (`intent_classify`), `--suite facts` (`fact_extract`),
+  `--suite topics` (`topic_extract`), `--suite compress` (`history_compress`), `--suite dedupe` (fact
+  deduplication), `--suite tools` (tool selection), `--suite dialog` (end-to-end answer). Add `--deterministic`
+  for chatJSON stages and `--repeat N` for the `tools` probe. Run the full `--suite all` only before the report.
+  The aspect→suite matrix is §5.4 of the design doc.
 - **Reduce cycle cost.** Baseline → check per-kind cost: overview export per kind, `price_usd` totals →
   change model/prompt size → compare watches `dialog.avg_turn_price_usd` and quality axes.
 - **Investigate a regression from a user complaint.** Find the cycle:
@@ -97,8 +102,12 @@ longer needed in context. Template:
 ## 6. Map
 
 - Criteria and thresholds: `tests/eval/criteria.yaml`; judge rubrics: `tests/eval/rubrics/<axis>.md`.
-- Reference sets: `tests/eval/classify_cases.json`, `tests/memory_cases.json` (facts), `tests/scenarios/*.json`.
+- Reference sets: `tests/eval/classify_cases.json`, `tests/memory_cases.json` (facts),
+  `tests/eval/topic_cases.json`, `tests/eval/compress_cases.json`, `tests/eval/dedupe_cases.json`,
+  `tests/eval/tool_select_cases.json`, `tests/scenarios/*.json`.
 - Run artifacts: `claudedocs/experiments/<date>-<label>/` (`summary.json`, `cases/<id>.json`, `state.md`,
-  `compare.md`, `diffs.md`).
+  `compare.md`, `diffs.md`). The dir is gitignored — artifacts are ephemeral.
 - Harness code: `scripts/eval.js`, `scripts/eval/judge.js`, `scripts/eval-compare.js`,
-  `scripts/run-scenario.js`, `scripts/lib/scenario-runner.js`, `scripts/llm-log-export.js`.
+  `scripts/run-scenario.js`, `scripts/lib/scenario-runner.js`, `scripts/llm-log-export.js`. Isolated aspect
+  suites: `scripts/eval/suites/{topics,compress,dedupe,tools}.js` (+ `_lib.js`); add a new aspect as one more
+  module here plus a block in `tests/eval/criteria.yaml`.

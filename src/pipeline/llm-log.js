@@ -39,6 +39,9 @@ export const REQUEST_KINDS = Object.freeze({
   // LLM judge of the eval harness (scripts/eval.js). A separate kind so judge calls never mix with
   // production requests and their cost is visible on its own.
   EVAL_JUDGE: 'eval_judge',
+  // Isolated tool-selection probe of the eval harness (scripts/eval/suites/tools.js): one model turn with
+  // the real tool definitions and no tool execution. A separate kind keeps its cost off production stats.
+  EVAL_TOOL_SELECT: 'eval_tool_select',
   // Fallback marker: the request kind wasn't passed. This signals a bug in the calling code — every
   // chat.completions call must specify kind. Records with this kind in the log expose "illegal" calls.
   UNTYPED: 'untyped',
@@ -71,6 +74,8 @@ export const REQUEST_KIND_DISPLAY = Object.freeze({
   main_agent_answer: null,
   proactive_message: null,
   skill_authoring: null,
+  // Tool-selection probe response is an assistant message (possibly with tool_calls) — variable content.
+  eval_tool_select: null,
   untyped: null,
 });
 

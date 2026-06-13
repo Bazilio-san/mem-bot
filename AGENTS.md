@@ -61,15 +61,18 @@ to observe a streaming draft, and the streaming gating rules.
 
 ## Bot tuning loop (observability, scenarios, evals)
 
-Full methodology: `claudedocs/self-tuning-infrastructure.md`; the working procedure lives in the `/tune-bot` skill —
-invoke it for any "improve prompt X / reduce cost / investigate regression" task instead of improvising. Cheat sheet:
+Full methodology: `claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md` (isolated per-stage suites are in
+§5.4); the working procedure lives in the `/tune-bot` skill — invoke it for any "improve prompt X / reduce cost /
+investigate regression" task instead of improvising. Cheat sheet:
 
 - `node scripts/llm-log-export.js --last 20 --kind <request_kind>` — LLM log overview (metadata only); details
   strictly by id: `--id <llm_request_id> --fields payload.messages,response`; content search: `--grep <str>`.
 - `node scripts/run-scenario.js tests/scenarios/<name>.json` — replay a scripted dialog through the full pipeline
   (no Telegram); artifacts land in `claudedocs/experiments/`.
-- `node scripts/eval.js --suite all --label <label>` — run reference suites (classify, facts, dialog+judge);
-  thresholds and the cost stop-limit come from `tests/eval/criteria.yaml`.
+- `node scripts/eval.js --suite <name> --label <label>` — run one stage in ISOLATION (rest of the pipeline does not
+  run): `classify` (intent), `facts` (extraction), `topics`, `compress` (summarization), `dedupe`, `tools`
+  (tool selection), `dialog` (end-to-end + judge), or `all`. Thresholds and the cost stop-limit come from
+  `tests/eval/criteria.yaml`; add `--deterministic` for chatJSON stages and `--repeat N` for the `tools` probe.
 - `node scripts/eval-compare.js <baselineDir> <candidateDir>` — was/became report with acceptance verdict.
 - `node scripts/delete-user.js --test-users --yes` — cleanup after runs.
 

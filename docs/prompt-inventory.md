@@ -90,6 +90,7 @@ side and has no coordinate in the local tool-definition registry. The model sees
 | Block | Coordinate | How it is used |
 |-------|------------|----------------|
 | Dialog judge system prompt | `scripts/eval/judge.js:judgeDialog` | LLM judge of the eval harness (`request_kind: eval_judge`). Axis wordings are NOT inline: they are assembled from `tests/eval/rubrics/<axis>.md`; axes, scales and weights come from `tests/eval/criteria.yaml`. |
+| Tool-selection probe system prompt | `scripts/eval/suites/tools.js:PROBE_SYSTEM` | Isolated tool-selection suite (`request_kind: eval_tool_select`). A thin framing that offers the model the real base tool definitions (`buildToolDefs`) for one turn without executing tools, to measure how discriminable the tool descriptions are. Intentionally NOT the production system prompt. |
 
 ## Test Prompts
 

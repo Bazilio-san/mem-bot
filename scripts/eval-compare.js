@@ -1,5 +1,5 @@
 // Comparison report between two eval runs ("was/became"), built compact-first so the reader stops at
-// the depth they need. See claudedocs/self-tuning-infrastructure.md §6.
+// the depth they need. See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §6.
 //
 // Run:
 //   node scripts/eval-compare.js claudedocs/experiments/<runA> claudedocs/experiments/<runB>
