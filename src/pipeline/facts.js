@@ -291,8 +291,7 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   // Extra metadata for the inserted row (e.g. a reaction backlink so the fact can be revoked when the user
   // removes that reaction). Applied only on insert paths (created/replaced), never on confirmation of an
   // existing row — otherwise an independently-sourced fact would inherit the backlink and be revoked by mistake.
-  const extraMetadataJson =
-    opts.metadata && typeof opts.metadata === 'object' ? JSON.stringify(opts.metadata) : null;
+  const extraMetadataJson = opts.metadata && typeof opts.metadata === 'object' ? JSON.stringify(opts.metadata) : null;
   if (!factType || !factText) {
     return { action: 'skipped', reason: 'unknown type or empty text', fact };
   }
