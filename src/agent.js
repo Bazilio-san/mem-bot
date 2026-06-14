@@ -50,6 +50,23 @@ function buildImageMarker(images) {
   return parts.length ? `[${parts.join('; ')}]` : '';
 }
 
+// Compact, URL-free trace of the tools used in a turn: [{ name, ok }]. Stored in the assistant message
+// metadata (admin timeline) and folded into the history text the intent classifier and the main model see,
+// so a follow-up turn knows a tool ran in the previous turn and whether it succeeded.
+function summarizeToolTrace(toolsUsed) {
+  return (toolsUsed || []).map((t) => ({ name: t.name, ok: !t.result?.error }));
+}
+
+// Render a tool trace as a short prefix for a history line, e.g. "[инструменты: web_search ✓, generate_image ✗] ".
+// It is prepended (not appended) so the classifier's per-line truncation, which keeps the head, never drops it.
+function formatToolTracePrefix(tools) {
+  if (!Array.isArray(tools) || !tools.length) {
+    return '';
+  }
+  const parts = tools.map((t) => `${t.name} ${t.ok ? '✓' : '✗'}`);
+  return `[инструменты: ${parts.join(', ')}] `;
+}
+
 // Outcome of writing facts to long-term memory — the memory.written event. Logged even for an empty list
 // (created=0 … — shows the extraction ran and found nothing). durationMs is the duration of the whole
 // writeJob; counters follow the saveFacts actions; the fact list is compact (text truncated).
@@ -500,9 +517,15 @@ export async function handleMessage({
     // The classifier does not need full assistant replies: the stored answer summary (metadata.summary,
     // written by summarizeAnswer after each reply) is enough to resolve a follow-up and is cheaper.
     // Replies without a summary yet fall back to their full text with HTML stripped.
-    const classifierHistory = history.map((m) =>
-      m.role === 'assistant' ? { ...m, content: m.metadata?.summary || stripHtml(m.content) } : m,
-    );
+    const classifierHistory = history.map((m) => {
+      if (m.role !== 'assistant') {
+        return m;
+      }
+      // Prepend the tool trace so the classifier sees that the previous turn called a tool and how it ended —
+      // essential for follow-ups ("do the same for…", "one more, but…") after a search or image generation.
+      const base = m.metadata?.summary || stripHtml(m.content);
+      return { ...m, content: `${formatToolTracePrefix(m.metadata?.tools)}${base}` };
+    });
     let intent;
     try {
       intent = await classifyIntent({
@@ -700,7 +723,11 @@ ${activeSkill.skillPrompt}`,
       ...(historyContext ? [{ role: 'system', content: historyContext }] : []),
       ...extraSystem,
       dateTimeSystem,
-      ...history.map((m) => ({ role: m.role === 'tool' ? 'assistant' : m.role, content: m.content })),
+      ...history.map((m) => ({
+        role: m.role === 'tool' ? 'assistant' : m.role,
+        // Carry the same tool trace into the main model's view of its own past turns, for dialog continuity.
+        content: m.role === 'assistant' ? `${formatToolTracePrefix(m.metadata?.tools)}${m.content}` : m.content,
+      })),
       { role: 'user', content: userMessage },
     ];
 
@@ -811,6 +838,7 @@ ${activeSkill.skillPrompt}`,
         ...turnMetadata,
         ...(widgets.length ? { widgets } : {}),
         ...(imageMeta.length ? { images: imageMeta } : {}),
+        ...(toolsUsed.length ? { tools: summarizeToolTrace(toolsUsed) } : {}),
       },
     });
 
