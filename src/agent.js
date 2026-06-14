@@ -36,6 +36,20 @@ function newRequestId() {
   return `llm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Human-readable history marker for a turn whose whole answer is a generated picture (the model returns empty
+// text). Stored as the assistant message content so the timeline row and any reaction quoting it stay
+// meaningful. The raw image URL is a delivery-channel artifact and never goes into the content.
+function buildImageMarker(images) {
+  const parts = (images || []).map((img) => {
+    const desc = String(img?.prompt || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
+    return desc ? `Сгенерировано изображение: ${desc}` : 'Сгенерировано изображение';
+  });
+  return parts.length ? `[${parts.join('; ')}]` : '';
+}
+
 // Outcome of writing facts to long-term memory — the memory.written event. Logged even for an empty list
 // (created=0 … — shows the extraction ran and found nothing). durationMs is the duration of the whole
 // writeJob; counters follow the saveFacts actions; the fact list is compact (text truncated).
@@ -785,8 +799,19 @@ ${activeSkill.skillPrompt}`,
     // Widget descriptors from tool results (MCP Apps: structuredContent.widget) go into the assistant
     // message metadata — the admin chat timeline renders the widget inline from there.
     const widgets = toolsUsed.map((t) => t.result?.structuredContent?.widget).filter(Boolean);
-    const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', answer, {
-      metadata: { ...turnMetadata, ...(widgets.length ? { widgets } : {}) },
+    // Generated images: keep a compact, URL-free descriptor in the metadata for the timeline, and — when the
+    // whole answer is the picture (empty text) — store a human-readable marker as the message content so the
+    // history row, and any reaction quoting it, are not empty. The returned `answer` stays unchanged: channels
+    // still rely on an empty answer + image to deliver the photo without a text stub.
+    const images = toolsUsed.map((t) => t.result?.structuredContent?.image).filter(Boolean);
+    const imageMeta = images.map((img) => ({ prompt: img.prompt, model: img.model, seed: img.seed }));
+    const assistantContent = answer.trim() || (images.length ? buildImageMarker(images) : answer);
+    const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', assistantContent, {
+      metadata: {
+        ...turnMetadata,
+        ...(widgets.length ? { widgets } : {}),
+        ...(imageMeta.length ? { images: imageMeta } : {}),
+      },
     });
 
     // Stage 5: extracting and writing facts. Asynchronous by default (does not slow down the response).
