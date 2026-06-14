@@ -288,6 +288,11 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   const confidence = Math.min(Math.max(Number(fact.confidence) || 0, 0), 0.99);
   const source = normalizeSource(opts.source);
   const persistent = fact.persistent === true;
+  // Extra metadata for the inserted row (e.g. a reaction backlink so the fact can be revoked when the user
+  // removes that reaction). Applied only on insert paths (created/replaced), never on confirmation of an
+  // existing row — otherwise an independently-sourced fact would inherit the backlink and be revoked by mistake.
+  const extraMetadataJson =
+    opts.metadata && typeof opts.metadata === 'object' ? JSON.stringify(opts.metadata) : null;
   if (!factType || !factText) {
     return { action: 'skipped', reason: 'unknown type or empty text', fact };
   }
@@ -349,7 +354,8 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
       `INSERT INTO mem.user_facts
          (user_id, domain_key, fact_type, fact_text, confidence, source_conversation_id, embedding,
           expires_at, source, persistent, metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, jsonb_build_object('replaces', $11::text))
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+               jsonb_build_object('replaces', $11::text) || COALESCE($12::jsonb, '{}'::jsonb))
        RETURNING id`,
       [
         userId,
@@ -363,6 +369,7 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
         source,
         insertPersistent,
         nearest.id,
+        extraMetadataJson,
       ],
     );
     await query(
@@ -378,8 +385,8 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
   const { rows } = await query(
     `INSERT INTO mem.user_facts
        (user_id, domain_key, fact_type, fact_text, confidence, source_conversation_id, embedding,
-        expires_at, source, persistent)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        expires_at, source, persistent, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, COALESCE($11::jsonb, '{}'::jsonb))
      RETURNING id`,
     [
       userId,
@@ -392,6 +399,7 @@ export async function saveFact(userId, domainKey, fact, sourceConversationId = n
       expiresAt,
       source,
       persistent,
+      extraMetadataJson,
     ],
   );
   return { action: 'created', id: rows[0].id, source };
@@ -410,6 +418,27 @@ export async function saveFacts(userId, domainKey, facts, sourceConversationId =
     }
   }
   return results;
+}
+
+// Soft-revoke facts that were created from a user reaction the user has now removed. Only facts that this
+// reaction actually created carry the (reaction_target_message_id, reaction_key) backlink in their metadata,
+// so independently-sourced facts and facts of other reactions are left untouched. Revoked rows are archived
+// (not deleted) with an audit marker, so retrieval stops surfacing them while the history stays auditable.
+export async function revokeReactionFacts({ userId, targetMessageId = null, reactionKey } = {}) {
+  if (!userId || !reactionKey) {
+    return { revoked: 0 };
+  }
+  const { rows } = await query(
+    `UPDATE mem.user_facts
+        SET status = 'archived', updated_at = now(),
+            metadata = metadata || jsonb_build_object('revoked_by', 'reaction_removed')
+      WHERE user_id = $1 AND status = 'active' AND source = 'user_reaction'
+        AND metadata->>'reaction_key' = $2
+        AND metadata->>'reaction_target_message_id' IS NOT DISTINCT FROM $3::text
+      RETURNING id`,
+    [userId, reactionKey, targetMessageId ?? null],
+  );
+  return { revoked: rows.length };
 }
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import {
 } from './repo.js';
 import { classifyIntent } from './pipeline/classify.js';
 import { retrieveMemory, buildMemoryContext } from './pipeline/retrieve.js';
-import { extractFacts, saveFacts, summarizeAnswer, stripHtml } from './pipeline/facts.js';
+import { extractFacts, saveFacts, summarizeAnswer, stripHtml, revokeReactionFacts } from './pipeline/facts.js';
 import { buildToolDefs, executeTool, toolTitle, initTools } from './pipeline/tools.js';
 import { getChannelProfile } from './pipeline/channels.js';
 import { buildTemporalContext, formatTemporalContext, formatDateTime } from './utils/temporal.js';
@@ -979,7 +979,19 @@ export async function recordUserReaction({
     const reactionMessage = await saveMessage(conversation.id, user.id, 'user', content, { metadata });
 
     let memoryWrites = null;
-    if (reactionKey && targetMessage?.role === 'assistant') {
+    if (removed) {
+      // The user took their reaction back: revoke the facts that this exact reaction had created, so a
+      // retracted "like" does not leave a fact behind in long-term memory. No extraction runs on removal.
+      try {
+        memoryWrites = await revokeReactionFacts({
+          userId: user.id,
+          targetMessageId: targetMessage?.id || null,
+          reactionKey: oldReactionKey,
+        });
+      } catch (err) {
+        memoryWrites = { error: String(err.message || err) };
+      }
+    } else if (reactionKey && targetMessage?.role === 'assistant') {
       // The reaction target is an assistant message: it is fed as context in the <assistant> tag (without HTML),
       // while extraction works only on the user's utterance describing the reaction.
       const writeJob = (async () => {
@@ -992,7 +1004,11 @@ export async function recordUserReaction({
             assistantSummary: stripHtml(targetText).slice(0, config.facts.summaryMaxChars),
           });
           extracted = facts;
-          const result = await saveFacts(user.id, domainKey, facts, conversation.id, { source: 'user_reaction' });
+          // Backlink to the reaction so the fact can be revoked if the user later removes this exact reaction.
+          const result = await saveFacts(user.id, domainKey, facts, conversation.id, {
+            source: 'user_reaction',
+            metadata: { reaction_target_message_id: targetMessage?.id || null, reaction_key: reactionKey },
+          });
           logMemoryWritten({ facts: extracted, results: result, startedAt: writeStartedAt });
           return result;
         } catch (err) {
