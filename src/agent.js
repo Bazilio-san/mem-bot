@@ -1001,15 +1001,19 @@ export async function recordUserReaction({
     const token = formatReactionToken(reactionKey);
     const oldToken = formatReactionToken(oldReactionKey);
     const removed = !reactionKey && Boolean(oldReactionKey);
+    // When the target message could not be resolved (no external ref), do not write a misleading empty quote
+    // «»: state plainly that the message text is unavailable and flag it in the metadata.
+    const targetClause = targetMessage ? `: «${targetText}»` : ' (текст сообщения недоступен)';
     const content = removed
-      ? `Пользователь убрал реакцию ${oldToken} с сообщения ассистента: «${targetText}»`
-      : `Пользователь отреагировал ${token} на сообщение ассистента: «${targetText}»`;
+      ? `Пользователь убрал реакцию ${oldToken} с сообщения бота${targetClause}`
+      : `Пользователь отреагировал ${token} на сообщение бота${targetClause}`;
     const metadata = {
       event_type: 'user_reaction',
       reaction_key: reactionKey || null,
       old_reaction_key: oldReactionKey || null,
       target_role: targetMessage?.role || null,
       target_message_id: targetMessage?.id || null,
+      ...(targetMessage ? {} : { target_unknown: true }),
       raw_reaction: rawReaction,
       request_id: llmMeta.requestId,
     };
