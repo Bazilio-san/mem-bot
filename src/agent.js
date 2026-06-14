@@ -955,8 +955,17 @@ export async function recordReactionTurn({ externalId, userMessage, domainKey = 
   const userMessageRow = await saveMessage(conversation.id, user.id, 'user', userMessage, {
     metadata: { request_id: requestId },
   });
-  const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', delivery?.fallbackText || '', {
-    metadata: { event_type: 'bot_reaction', reaction_key: delivery?.reactionKey || null, request_id: requestId },
+  // Store a self-describing content line (symmetric with how user reactions are recorded) instead of the bare
+  // fallback text, so the history reads as an explicit reaction. The abstract token keeps the core
+  // channel-agnostic — the concrete emoji is a Telegram detail; the fallback text is kept in the metadata.
+  const reactionContent = `Бот отреагировал ${formatReactionToken(delivery?.reactionKey)} на сообщение пользователя: «${userMessage}»`;
+  const assistantMessageRow = await saveMessage(conversation.id, user.id, 'assistant', reactionContent, {
+    metadata: {
+      event_type: 'bot_reaction',
+      reaction_key: delivery?.reactionKey || null,
+      fallback_text: delivery?.fallbackText || '',
+      request_id: requestId,
+    },
   });
   return {
     answer: delivery?.fallbackText || '',
