@@ -1,5 +1,5 @@
 // CLI wrapper around the scenario runner (scripts/lib/scenario-runner.js): replays a scripted dialog
-// through the full pipeline without Telegram. See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §4.
+// through the full pipeline without Telegram.
 //
 // Run:
 //   node scripts/run-scenario.js tests/scenarios/facts-and-recall.json

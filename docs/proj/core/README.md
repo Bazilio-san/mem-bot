@@ -1,7 +1,7 @@
 # Core Agent Documentation
 
 This directory describes the channel-independent part of the memory chatbot: the agent loop, memory layers, history
-compression, proactivity, skills, notes, and shared knowledge.
+compression, proactivity, skills, notes, shared knowledge, and the self-tuning evaluation loop.
 
 The documentation is intentionally not a copy of the implementation. For exact signatures, defaults, SQL, prompts, tool
 schemas, and tests, follow the code references in each document.
@@ -14,5 +14,6 @@ schemas, and tests, follow the code references in each document.
    [14-global-memory.md](14-global-memory.md) explain the context layers.
 4. [10-operations.md](10-operations.md) maps scheduler, tools, logging, and tests.
 5. [15-notes.md](15-notes.md) covers the user notes subsystem.
+6. [16-self-tuning.md](16-self-tuning.md) explains how prompts and pipeline stages are measured and tuned.
 
 Project-wide documentation rules are in [../documentation-principles.md](../documentation-principles.md).

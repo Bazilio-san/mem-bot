@@ -1,5 +1,5 @@
 // Eval runner of the tuning loop: runs the reference suites against the CURRENT code and prompts and
-// stores layered results under claudedocs/experiments/. See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §5.
+// stores layered results under claudedocs/experiments/. The /tune-bot skill holds the methodology.
 //
 // Run:
 //   node scripts/eval.js --suite classify                 # one suite
@@ -16,12 +16,12 @@
 //                      Opt-in: some providers/models reject a non-default temperature.
 //   --judge-model <m>  override the judge model (default config.llm.mainModel)
 //
-// Output layers (§2a):
+// Output layers:
 //   stdout            — aggregates + the list of FAILED cases only (this is what lands in the caller's context)
 //   summary.json      — aggregates and one row per case, WITHOUT content
 //   cases/<id>.json   — full details of one case (input, actual outputs, judge reasoning, request ids)
 //
-// Thresholds, axes, weights and the cost stop-limit come ONLY from tests/eval/criteria.yaml (§8).
+// Thresholds, axes, weights and the cost stop-limit come ONLY from tests/eval/criteria.yaml.
 // The run stops once its LLM cost exceeds budget.eval_run_max_usd.
 
 process.env.NODE_ENV = 'test';
@@ -126,7 +126,7 @@ async function main() {
     return Number(rows[0].usd);
   }
 
-  // Budget guard (§7.2): throws once the run cost exceeds the stop-limit from the criteria file.
+  // Budget guard: throws once the run cost exceeds the stop-limit from the criteria file.
   async function checkBudget() {
     const spent = await runCostUsd();
     if (spent > Number(criteria.budget?.eval_run_max_usd ?? Infinity)) {

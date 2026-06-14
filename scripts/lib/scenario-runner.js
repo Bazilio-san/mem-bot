@@ -1,6 +1,6 @@
 // Non-interactive scenario runner: replays a scripted sequence of user turns through the FULL pipeline
 // (handleMessage — the same path Telegram uses) without any messenger. Shared by scripts/run-scenario.js
-// (manual runs) and scripts/eval.js (the dialog suite). See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §4.
+// (manual runs) and scripts/eval.js (the dialog suite).
 //
 // Scenario file format (tests/scenarios/*.json):
 //   {
@@ -20,7 +20,7 @@
 //   }
 //
 // The runner REQUIRES NODE_ENV=test: every created user and every log record gets is_test = true, so a run
-// never touches real users' data (guardrail §7.2) and can be cleaned with delete-user.js --test-users.
+// never touches real users' data (guardrail) and can be cleaned with delete-user.js --test-users.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -154,7 +154,7 @@ const clip = (s, n) => {
   return one.length > n ? `${one.slice(0, n)}…` : one;
 };
 
-// Two-layer artifacts (§2a): transcript.summary.md — the only file meant to be read into the caller's
+// Two-layer artifacts: transcript.summary.md — the only file meant to be read into the caller's
 // context; transcript.full.json — full answers and per-call details, opened addressably per turn.
 export function writeScenarioArtifacts(outDir, transcript) {
   fs.mkdirSync(outDir, { recursive: true });

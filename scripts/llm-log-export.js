@@ -1,6 +1,5 @@
-// Layered export of the LLM request log (log.llm_request) for the tuning workflow
-// (claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §3.1). Designed around context economy (§2a):
-// the default output is a compact metadata table; full payload/response content is printed
+// Layered export of the LLM request log (log.llm_request) for the tuning workflow. Designed around context
+// economy: the default output is a compact metadata table; full payload/response content is printed
 // only for explicitly addressed records (--id) or with an explicit --limit.
 //
 // Layer 1 — overview (metadata only, no payload):
@@ -257,7 +256,7 @@ async function runDetails(args) {
       [args.ids],
     ));
   } else {
-    // --full over a broad filter requires an explicit small --limit (§2a guard).
+    // --full over a broad filter requires an explicit small --limit (context-economy guard).
     const { where, params } = buildFilters(args);
     ({ rows } = await queryLog(
       `SELECT * FROM log.llm_request ${where} ORDER BY created_at DESC LIMIT ${args.limit}`,
@@ -292,7 +291,7 @@ async function runDetails(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.full && !args.ids.length && !args.limit) {
-    console.error('--full without --id requires an explicit --limit N (context-economy guard, §2a).');
+    console.error('--full without --id requires an explicit --limit N (context-economy guard).');
     process.exit(2);
   }
   if (args.grep) {

@@ -61,22 +61,16 @@ to observe a streaming draft, and the streaming gating rules.
 
 ## Bot tuning loop (observability, scenarios, evals)
 
-Full methodology: `claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md` (isolated per-stage suites are in
-§5.4); the working procedure lives in the `/tune-bot` skill — invoke it for any "improve prompt X / reduce cost /
-investigate regression" task instead of improvising. Cheat sheet:
+Measured loop to improve prompts/pipeline on evidence. The whole methodology — cycle, isolation, context and
+cost economy, checkpoints, guardrails — lives in the `/tune-bot` skill; invoke it instead of improvising.
+Cheat sheet:
 
-- `node scripts/llm-log-export.js --last 20 --kind <request_kind>` — LLM log overview (metadata only); details
-  strictly by id: `--id <llm_request_id> --fields payload.messages,response`; content search: `--grep <str>`.
-- `node scripts/run-scenario.js tests/scenarios/<name>.json` — replay a scripted dialog through the full pipeline
-  (no Telegram); artifacts land in `claudedocs/experiments/`.
-- `node scripts/eval.js --suite <name> --label <label>` — run one stage in ISOLATION (rest of the pipeline does not
-  run): `classify` (intent), `facts` (extraction), `topics`, `compress` (summarization), `dedupe`, `tools`
-  (tool selection), `dialog` (end-to-end + judge), or `all`. Thresholds and the cost stop-limit come from
-  `tests/eval/criteria.yaml`; add `--deterministic` for chatJSON stages and `--repeat N` for the `tools` probe.
-- `node scripts/eval-compare.js <baselineDir> <candidateDir>` — was/became report with acceptance verdict.
+- `node scripts/llm-log-export.js --last 20 --kind <kind>` — LLM log overview; drill in by `--id` / `--grep`.
+- `node scripts/eval.js --suite <name> --label <label>` — run ONE stage in isolation
+  (`classify|facts|topics|compress|dedupe|tools|dialog`) or `all`; thresholds in `tests/eval/criteria.yaml`.
+- `node scripts/run-scenario.js tests/scenarios/<name>.json` — replay a dialog through the full pipeline.
+- `node scripts/eval-compare.js <baselineDir> <candidateDir>` — was/became report.
 - `node scripts/delete-user.js --test-users --yes` — cleanup after runs.
 
-Hard rules: runs only with `NODE_ENV=test` (scripts force it); one experiment = one change; never edit
-`tests/eval/criteria.yaml` or the reference cases in the same branch as a prompt/code change; merging an
-experiment branch is always a human decision. Context economy: read `summary.json` / `transcript.summary.md`
-first, open `cases/<id>.json` only for failures, delegate bulk log reading to a subagent.
+Non-negotiable: runs only with `NODE_ENV=test`; one experiment = one change; criteria and reference cases change
+in their own commit; merging is a human decision.

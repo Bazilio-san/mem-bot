@@ -1,7 +1,6 @@
 // Shared helpers for the isolated aspect suites (scripts/eval/suites/*.js). Each aspect suite exercises
 // ONE pipeline stage in isolation (intent is in eval.js, the rest live here) and reports the same
 // deterministic shape so eval.js, summary.json and eval-compare.js treat them uniformly.
-// See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §5.
 
 import fs from 'node:fs';
 import path from 'node:path';

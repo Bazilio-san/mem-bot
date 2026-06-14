@@ -2,7 +2,7 @@
 // tests/eval/criteria.yaml (suite "dialog"). The axes, scales and weights are NOT hardcoded here —
 // they come from the criteria file; the wording of every axis comes from tests/eval/rubrics/<axis>.md.
 // Judge calls are logged with request_kind 'eval_judge', so they never mix with production requests
-// and their cost is visible separately. See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §5.2 and §8.
+// and their cost is visible separately.
 
 import fs from 'node:fs';
 import path from 'node:path';

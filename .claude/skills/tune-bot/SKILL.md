@@ -10,10 +10,10 @@ description: >-
 
 # Bot tuning loop
 
-The whole methodology in one place. Design rationale: `claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md`
-(do NOT load it whole into context — this skill is the operational extract; isolated per-stage suites are §5.4).
-Every run below is forced to `NODE_ENV=test` by the scripts themselves: test users and `is_test` log records
-only, production data is never touched.
+This skill is the complete, self-contained methodology for one tuning iteration: everything needed lives here
+and in the files it points to (`tests/eval/criteria.yaml`, the suites, the LLM log) — no external design note is
+required. Every run below is forced to `NODE_ENV=test` by the scripts themselves: test users and `is_test` log
+records only, production data is never touched.
 
 ## 0. Resume protocol — ALWAYS first
 
@@ -66,14 +66,24 @@ longer needed in context. Template:
 - Следующий шаг: <ровно один следующий шаг цикла>
 ```
 
-## 3. Context economy — mandatory rules
+## 3. Context and cost economy — mandatory rules
 
-- Summary first, details addressably: read `summary.json` / `transcript.summary.md` / `compare.md`; open
-  `cases/<id>.json` and `diffs.md` only for failed or changed cases, 1–3 at a time.
-- Never dump full payloads by a broad filter; `--full` only with `--id` (the script enforces a guard).
-- Need more than ~5 full log records or transcripts? Delegate to a subagent (Explore/Task) that returns a
-  short conclusion; raw data must not enter the main context.
-- "Where does X occur" questions → `--grep` of the export script or SQL, never bulk reading.
+Two scarce resources: the context window (tokens) and money (LLM spend). Both are protected the same way —
+work on the smallest slice that answers the question.
+
+- **Isolate the stage (saves money AND sharpens the signal).** To tune one stage, run only its suite
+  (`--suite classify|facts|topics|compress|dedupe|tools`), never `--suite all`. It runs only that stage's LLM
+  calls — a fraction of the cost — and its regression is not muddied by other stages. Use
+  `--suite dialog --scenario <name>` to iterate on one end-to-end scenario cheaply. Run the full `--suite all`
+  only to take a baseline or before the final report.
+- **Cost ceiling.** Every run is capped by `budget.eval_run_max_usd` in `tests/eval/criteria.yaml`; the runner
+  stops on overrun. Watch `price_usd` per stage/turn — the compare report flags cost regressions next to quality.
+- **Tokens — summary first.** Read `summary.json` / `transcript.summary.md` / `compare.md`; open
+  `cases/<id>.json` and `diffs.md` only for failed or changed cases, 1–3 at a time. Never dump full payloads by
+  a broad filter; `--full` only with `--id` (the script enforces a guard).
+- **Delegate bulk reading.** More than ~5 full log records or transcripts → a subagent (Explore/Task) that
+  returns a short conclusion; raw data must not enter the main context. "Where does X occur" → `--grep`, never
+  bulk reading.
 
 ## 4. Guardrails
 
@@ -92,7 +102,9 @@ longer needed in context. Template:
   `--suite topics` (`topic_extract`), `--suite compress` (`history_compress`), `--suite dedupe` (fact
   deduplication), `--suite tools` (tool selection), `--suite dialog` (end-to-end answer). Add `--deterministic`
   for chatJSON stages and `--repeat N` for the `tools` probe. Run the full `--suite all` only before the report.
-  The aspect→suite matrix is §5.4 of the design doc.
+  Two stages have no isolated suite by design: memory cleanup is structural (a fact's time-to-live is set at
+  write time in `src/pipeline/facts.js` and filtered at read time — exercised by `--suite dedupe`), and there is
+  no tool-search stage (the model selects tools natively over the full set, covered by `--suite tools`).
 - **Reduce cycle cost.** Baseline → check per-kind cost: overview export per kind, `price_usd` totals →
   change model/prompt size → compare watches `dialog.avg_turn_price_usd` and quality axes.
 - **Investigate a regression from a user complaint.** Find the cycle:

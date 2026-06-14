@@ -1,5 +1,5 @@
 // Comparison report between two eval runs ("was/became"), built compact-first so the reader stops at
-// the depth they need. See claudedocs/2026-06-13_00-44-self-tuning-infrastructure.md §6.
+// the depth they need.
 //
 // Run:
 //   node scripts/eval-compare.js claudedocs/experiments/<runA> claudedocs/experiments/<runB>
@@ -155,7 +155,7 @@ function main() {
   fs.writeFileSync(path.join(B.dir, 'compare.md'), report);
   console.log(report);
 
-  // ---- diffs.md: actual outputs of changed cases, in a separate file (§2a) -------------------------
+  // ---- diffs.md: actual outputs of changed cases, in a separate file ------------------------------
   const diffLines = [`# Диффы изменившихся кейсов: «${sA.label}» → «${sB.label}»`, ''];
   for (const c of changed) {
     const da = loadCaseDetail(A.dir, c.id);
