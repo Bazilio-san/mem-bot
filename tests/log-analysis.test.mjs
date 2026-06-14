@@ -131,7 +131,10 @@ const fixture = (name) => new URL(`./fixtures/${name}`, import.meta.url).pathnam
   };
   const res = fakeRes();
   await runCli(cfg, 'chatty', 'x', res);
-  assert.ok(framesText(res.frames).includes('output truncated at maxOutputChars'), 'превышение лимита помечено в потоке');
+  assert.ok(
+    framesText(res.frames).includes('output truncated at maxOutputChars'),
+    'превышение лимита помечено в потоке',
+  );
 }
 
 config.admin.host = savedHost;
